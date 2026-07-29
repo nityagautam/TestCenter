@@ -92,8 +92,10 @@ export default async function RunPage({
           Runs
         </Link>
         <span>/</span>
+        {/* The project-scoped path, not `?project=` on the org list: the crumb should put
+            you inside the project, with the header dropdown and project nav agreeing. */}
         <Link
-          href={`/o/${orgSlug}/runs?project=${run.projectKey}`}
+          href={`/o/${orgSlug}/p/${run.projectKey}/runs`}
           className="hover:text-[var(--color-ink)] hover:underline"
         >
           {run.projectKey}

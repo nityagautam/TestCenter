@@ -31,6 +31,8 @@ export function ScopeSwitcher({
   emptyLabel,
   createHref,
   createLabel,
+  clearHref,
+  clearLabel,
 }: {
   label: string;
   current: ScopeOption | null;
@@ -39,6 +41,13 @@ export function ScopeSwitcher({
   emptyLabel: string;
   createHref?: string;
   createLabel?: string;
+  /**
+   * Where "no selection" leads, when that is a real destination rather than an absence.
+   * The project switcher needs it: having narrowed to a project there must be a way back
+   * to the whole organisation, and it belongs in the same menu that got you here.
+   */
+  clearHref?: string;
+  clearLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -56,6 +65,44 @@ export function ScopeSwitcher({
       )
     : options;
 
+  /*
+   * One flat row list, so keyboard navigation needs no special cases.
+   *
+   * The clear entry could have been rendered above the <ul> as its own element, but then
+   * arrow keys, Home/End and the active-descendant index would all have had to know it was
+   * there. Making it row zero means every existing key handler already handles it.
+   */
+  interface Row {
+    id: string;
+    href: string;
+    name: string;
+    detail: string | null;
+    badge: string | undefined;
+    selected: boolean;
+  }
+  const rows: Row[] = [
+    ...(clearHref && !filter.trim()
+      ? [
+          {
+            id: "__clear__",
+            href: clearHref,
+            name: clearLabel ?? emptyLabel,
+            detail: null,
+            badge: undefined,
+            selected: current === null,
+          },
+        ]
+      : []),
+    ...visible.map((option) => ({
+      id: option.slug,
+      href: hrefFor(option.slug),
+      name: option.name,
+      detail: option.slug,
+      badge: option.badge,
+      selected: option.slug === current?.slug,
+    })),
+  ];
+
   function close(returnFocus = true): void {
     setOpen(false);
     setFilter("");
@@ -65,11 +112,12 @@ export function ScopeSwitcher({
   // Opening lands on the current selection rather than the first row, so the highlight
   // starts where the reader's attention already is.
   function openMenu(): void {
-    const index = Math.max(
-      options.findIndex((option) => option.slug === current?.slug),
-      0,
+    setActiveIndex(
+      Math.max(
+        rows.findIndex((row) => row.selected),
+        0,
+      ),
     );
-    setActiveIndex(index);
     setOpen(true);
   }
 
@@ -95,7 +143,7 @@ export function ScopeSwitcher({
         break;
       case "ArrowDown":
         event.preventDefault();
-        setActiveIndex((index) => Math.min(index + 1, visible.length - 1));
+        setActiveIndex((index) => Math.min(index + 1, rows.length - 1));
         break;
       case "ArrowUp":
         event.preventDefault();
@@ -107,7 +155,7 @@ export function ScopeSwitcher({
         break;
       case "End":
         event.preventDefault();
-        setActiveIndex(Math.max(visible.length - 1, 0));
+        setActiveIndex(Math.max(rows.length - 1, 0));
         break;
       case "Tab":
         // Tabbing out of a menu should dismiss it, not leave it hanging open behind
@@ -178,43 +226,42 @@ export function ScopeSwitcher({
           ) : null}
 
           <ul className="max-h-72 overflow-y-auto p-1">
-            {visible.length === 0 ? (
+            {rows.length === 0 ? (
               <li className="px-2 py-3 text-center text-xs text-[var(--color-ink-muted)]">
                 Nothing matches
               </li>
             ) : null}
-            {visible.map((option, index) => {
-              const selected = option.slug === current?.slug;
-              return (
-                <li key={option.slug}>
-                  <Link
-                    ref={(node) => {
-                      itemRefs.current[index] = node;
-                    }}
-                    href={hrefFor(option.slug)}
-                    role="menuitemradio"
-                    aria-checked={selected}
-                    tabIndex={index === activeIndex ? 0 : -1}
-                    onClick={() => close(false)}
-                    className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs outline-none hover:bg-[var(--color-surface)] focus-visible:bg-[var(--color-surface)] ${
-                      selected ? "bg-[var(--color-surface)] font-semibold" : ""
-                    }`}
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate">{option.name}</span>
+            {rows.map((row, index) => (
+              <li key={row.id}>
+                <Link
+                  ref={(node) => {
+                    itemRefs.current[index] = node;
+                  }}
+                  href={row.href}
+                  role="menuitemradio"
+                  aria-checked={row.selected}
+                  tabIndex={index === activeIndex ? 0 : -1}
+                  onClick={() => close(false)}
+                  className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs outline-none hover:bg-[var(--color-surface)] focus-visible:bg-[var(--color-surface)] ${
+                    row.selected ? "bg-[var(--color-surface)] font-semibold" : ""
+                  }`}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate">{row.name}</span>
+                    {row.detail ? (
                       <span className="block truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
-                        {option.slug}
-                      </span>
-                    </span>
-                    {option.badge ? (
-                      <span className="shrink-0 rounded bg-[var(--color-border-subtle)] px-1.5 py-0.5 text-[10px]">
-                        {option.badge}
+                        {row.detail}
                       </span>
                     ) : null}
-                  </Link>
-                </li>
-              );
-            })}
+                  </span>
+                  {row.badge ? (
+                    <span className="shrink-0 rounded bg-[var(--color-border-subtle)] px-1.5 py-0.5 text-[10px]">
+                      {row.badge}
+                    </span>
+                  ) : null}
+                </Link>
+              </li>
+            ))}
           </ul>
 
           {createHref ? (

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { orgScopeHref, projectKeyFromPath, projectScopeHref } from "@/lib/scope";
 import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import { signOutAction } from "@/app/actions/auth";
 import { setSidebarState } from "@/app/actions/ui";
@@ -55,13 +56,6 @@ export interface AppShellProps {
   initialSidebar: SidebarState;
   /** Same reason: the theme is correct in the first painted frame. */
   initialTheme: ThemePreference;
-}
-
-/** `/o/acme/p/checkout-web/runs` → `checkout-web` */
-function projectKeyFromPath(pathname: string, orgSlug: string): string | null {
-  const prefix = `/o/${orgSlug}/p/`;
-  if (!pathname.startsWith(prefix)) return null;
-  return pathname.slice(prefix.length).split("/")[0] || null;
 }
 
 export function AppShell({
@@ -144,6 +138,17 @@ export function AppShell({
   const currentProjectKey = projectKeyFromPath(pathname, orgSlug);
   const currentProject = projects.find((project) => project.key === currentProjectKey) ?? null;
   const projectBase = currentProjectKey ? `/o/${orgSlug}/p/${currentProjectKey}` : null;
+
+  /*
+   * Scope changes keep you in the same section wherever the section exists at both levels.
+   *
+   * Reading a project's test list and switching to another project lands on that project's
+   * test list; doing it from the org-wide list narrows the same list. Selecting "all
+   * projects" widens it back. Only when the section is project-only (upload, settings) does
+   * the switcher fall back to the project overview, because there is nowhere else to go.
+   */
+  const projectHref = (key: string): string => projectScopeHref(pathname, orgSlug, key);
+  const allProjectsHref = orgScopeHref(pathname, orgSlug);
 
   const orgOptions: ScopeOption[] = orgs.map((org) => ({
     slug: org.slug,
@@ -406,7 +411,9 @@ export function AppShell({
               currentProject ? { slug: currentProject.key, name: currentProject.name } : null
             }
             options={projectOptions}
-            hrefFor={(key) => `/o/${orgSlug}/p/${key}`}
+            hrefFor={projectHref}
+            clearHref={allProjectsHref}
+            clearLabel="All projects"
             emptyLabel="All projects"
             {...(capabilities.canCreateProject
               ? { createHref: `/o/${orgSlug}/projects/new`, createLabel: "New project" }

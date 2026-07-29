@@ -272,6 +272,39 @@ organisation present.
 average run duration of **3h 18m**. Both seeders now state the duration and the finish
 time explicitly, and existing rows were realigned. The average is now 27s.
 
+### A19. Selecting a project, then opening Runs or Tests, silently discarded the project
+
+`/o/:org/p/:key/runs` and `/o/:org/p/:key/tests` were `redirect()` shims to the org-wide
+route carrying `?project=`. The reasoning was sound — one implementation of filtering,
+pagination and facets, rather than two copies that drift — but the redirect moved the URL
+out of the `/p/:key/` path, and the shell derives the selected project *from the path*.
+
+So the results were filtered correctly while everything around them said otherwise: the
+header dropdown reset to "All projects", the project section vanished from the left nav,
+and the address bar no longer mentioned the project. Choosing a project and clicking Tests
+looked exactly like being ignored, which defeated the purpose of the switcher.
+
+Fixed by keeping one implementation and rendering it at both scopes:
+
+- `features/test-search.tsx` and `features/run-list.tsx` hold the implementations; the four
+  routes are thin wrappers passing `basePath` and `scopedProjectKey`.
+- A path-scoped project overrides `?project=`, so one value never has two sources, and an
+  unknown project key is a 404 instead of a silently org-wide list.
+- Every filter, facet, sort, tag, search form and pagination link is built from `basePath`,
+  so nothing inside a project view escapes it. Verified in the browser: 45 filter links on
+  the run list and 25 on the test list, none leaving scope.
+- Scope switching now *preserves the section*. Moving between projects on the test list
+  keeps you on the test list; narrowing from the org list stays on the list; "All projects"
+  — a new row in the project dropdown — widens it back. Sections that exist at only one
+  scope (`upload`, `settings`) fall back to the project overview.
+- The scope-path helpers moved out of the client component into `lib/scope.ts` with 11 unit
+  tests, because a URL parser that quietly returns the wrong answer is precisely how this
+  class of bug reappears.
+- The run detail breadcrumb also linked to `?project=`; it now points at the project path.
+
+Redundant columns were dropped while scoped: repeating the project key on every row of a
+single-project list is noise.
+
 ---
 
 ## Part B — outstanding
