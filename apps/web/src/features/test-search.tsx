@@ -3,7 +3,13 @@ import { notFound } from "next/navigation";
 import { listProjects, listSuites, searchTests } from "@testcenter/db";
 import { Card, EmptyState, StatusBadge } from "@/components/ui";
 import { SearchBox } from "@/components/search-box";
-import { formatDuration, formatPercent, formatRelativeTime, truncateStart } from "@/lib/format";
+import {
+  formatDuration,
+  formatPercent,
+  formatRelativeTime,
+  truncateStart,
+  formatInteger,
+} from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { requirePageContext } from "@/lib/viewer";
 
@@ -123,7 +129,7 @@ export async function TestSearch({
       <div className="mb-4">
         <h1 className="text-lg font-semibold tracking-tight">Tests</h1>
         <p className="mt-0.5 text-xs text-[var(--color-ink-muted)]">
-          {results.total.toLocaleString()} test{results.total === 1 ? "" : "s"}
+          {formatInteger(results.total)} test{results.total === 1 ? "" : "s"}
           {project ? ` in ${project.name}` : " across all projects"}
         </p>
       </div>
@@ -211,7 +217,7 @@ export async function TestSearch({
         ) : null}
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_220px]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
         <Card className="overflow-hidden">
           {results.tests.length === 0 ? (
             <EmptyState

@@ -26,6 +26,50 @@ export function formatPercent(value: string | number | null | undefined): string
   return Number.isInteger(numeric) ? `${numeric}%` : `${numeric.toFixed(1)}%`;
 }
 
+/*
+ * Dates and numbers are formatted with an explicit locale and time zone, never with the
+ * runtime's own.
+ *
+ * `toLocaleString()` with no arguments asks whichever runtime is executing. Node here is
+ * en-US and the browser was en-GB, so the server rendered `6/12/2026, 8:13:00 PM` and the
+ * client rendered `12/06/2026, 20:13:00` for the same instant — a hydration mismatch on
+ * every timestamp, which made React throw away the server HTML for that subtree and
+ * re-render it. It surfaced as the "1 issue" badge on the test history page, where a
+ * 60-cell strip meant 120 mismatched attributes.
+ *
+ * Pinning both is also the right answer independent of hydration. `6/12` and `12/06` are
+ * the same string to a machine and different dates to a reader, and a test dashboard is
+ * read by people in different places looking at the same run. UTC matches what CI logs and
+ * what the database stores, and is labelled so it is never guessed at.
+ */
+const DATE_LOCALE = "en-GB";
+const DISPLAY_TIME_ZONE = "UTC";
+
+const dayFormat = new Intl.DateTimeFormat(DATE_LOCALE, {
+  timeZone: DISPLAY_TIME_ZONE,
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
+const dayTimeFormat = new Intl.DateTimeFormat(DATE_LOCALE, {
+  timeZone: DISPLAY_TIME_ZONE,
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/** Thousands separators without asking the runtime which ones it prefers. */
+const integerFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+
+export function formatInteger(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return integerFormat.format(value);
+}
+
 /**
  * Relative time, because "3 minutes ago" answers the question people actually have
  * about a test run. Falls back to an absolute date once relative stops being useful.
@@ -44,20 +88,23 @@ export function formatRelativeTime(value: Date | string | null | undefined): str
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return dayFormat.format(date);
 }
 
+/** Absolute, unambiguous, and identical on the server and in the browser. */
 export function formatAbsoluteTime(value: Date | string | null | undefined): string {
   if (!value) return "—";
   const date = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return `${dayTimeFormat.format(date)} ${DISPLAY_TIME_ZONE}`;
+}
+
+/** Day only, for chart axis labels. */
+export function formatDay(value: Date | string | null | undefined): string {
+  if (!value) return "—";
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "—";
+  return dayFormat.format(date);
 }
 
 export function formatCount(value: number): string {

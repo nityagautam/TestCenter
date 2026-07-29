@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { formatAbsoluteTime } from "@/lib/format";
 
 /**
  * One test's outcome across its recent executions, oldest to newest.
@@ -70,6 +71,19 @@ export function HistoryStrip({
   const ordered = [...cells].reverse();
   const hovered = hover !== null ? ordered[hover] : null;
 
+  /*
+   * The detail panel is always rendered, falling back to the newest execution.
+   *
+   * It used to appear only while a cell was hovered, which made hovering *change the
+   * layout*: the panel's own width fed back into the page's `1fr` grid column and shoved
+   * the duration chart sideways, and its height pushed everything below it down. Reading a
+   * chart should not require holding the mouse still.
+   *
+   * Defaulting to the newest run is better than reserving blank space, because "how did
+   * this test do last time" is the question the panel would be answering anyway.
+   */
+  const active = hovered ?? ordered[ordered.length - 1] ?? null;
+
   return (
     <figure className="min-w-0">
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
@@ -92,10 +106,10 @@ export function HistoryStrip({
                 // Hit target is larger than the visual mark, which a 10px cell needs.
                 className="flex size-5 items-center justify-center rounded-sm text-[9px] leading-none font-bold text-white transition-transform hover:scale-110"
                 style={{ background: colorFor(cell) }}
-                title={`${labelFor(cell)} · ${new Date(cell.startedAt).toLocaleString()}`}
-                aria-label={`Execution ${index + 1} of ${ordered.length}: ${labelFor(cell)} on ${new Date(
-                  cell.startedAt,
-                ).toLocaleString()}`}
+                title={`${labelFor(cell)} · ${formatAbsoluteTime(cell.startedAt)}`}
+                aria-label={`Execution ${index + 1} of ${ordered.length}: ${labelFor(
+                  cell,
+                )} on ${formatAbsoluteTime(cell.startedAt)}`}
               >
                 <span aria-hidden>{GLYPH[cell.status] ?? "?"}</span>
               </Link>
@@ -103,29 +117,47 @@ export function HistoryStrip({
           ))}
         </ol>
 
-        {hovered ? (
-          <div className="mt-2 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-3 py-2">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-              <span className="text-[11px] font-semibold" style={{ color: colorFor(hovered) }}>
-                {labelFor(hovered)}
+        {active ? (
+          /*
+           * `min-w-0` is what actually stops the shove. A failure message is one long
+           * unbroken string, so this panel's min-content width is the whole message, and a
+           * `1fr` grid track is `minmax(auto, 1fr)` — its minimum is min-content. The track
+           * grew to fit the message and the neighbouring chart moved. `min-w-0` lets the
+           * panel shrink so `truncate` has something to truncate against; the page's grid
+           * uses `minmax(0, 1fr)` for the same reason, since either alone leaves the bug
+           * reachable from the other direction.
+           *
+           * The fixed min-height keeps the panel the same size whether or not the active
+           * execution has a failure message, so moving between a passed and a failed cell
+           * does not resize it either.
+           */
+          <div className="mt-2 min-h-[3.25rem] min-w-0 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-3 py-2">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              <span className="text-[11px] font-semibold" style={{ color: colorFor(active) }}>
+                {labelFor(active)}
               </span>
               <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                {new Date(hovered.startedAt).toLocaleString()}
+                {formatAbsoluteTime(active.startedAt)}
               </span>
-              {hovered.branch ? (
+              {active.branch ? (
                 <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                  {hovered.branch}
+                  {active.branch}
                 </span>
               ) : null}
-              {hovered.durationMs != null ? (
+              {active.durationMs != null ? (
                 <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                  {hovered.durationMs}ms
+                  {active.durationMs}ms
+                </span>
+              ) : null}
+              {hovered === null ? (
+                <span className="rounded bg-[var(--color-border-subtle)] px-1 text-[9px] tracking-wide uppercase">
+                  latest
                 </span>
               ) : null}
             </div>
-            {hovered.failureMessage ? (
-              <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-status-failed)]">
-                {hovered.failureMessage}
+            {active.failureMessage ? (
+              <div className="mt-1 min-w-0 truncate font-mono text-[10px] text-[var(--color-status-failed)]">
+                {active.failureMessage}
               </div>
             ) : null}
           </div>

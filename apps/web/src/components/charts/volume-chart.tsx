@@ -1,5 +1,7 @@
 "use client";
 
+import { formatInteger } from "@/lib/format";
+
 import { useState } from "react";
 
 /**
@@ -70,7 +72,7 @@ export function VolumeChart({
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <figcaption className="text-xs font-medium">{title}</figcaption>
         <span className="font-mono text-xs text-[var(--color-ink-muted)] tabular-nums">
-          {totals.reduce((sum, value) => sum + value, 0).toLocaleString()} tests
+          {formatInteger(totals.reduce((sum, value) => sum + value, 0))} tests
         </span>
       </div>
 
@@ -172,7 +174,7 @@ export function VolumeChart({
             />
             <span className="text-[10px] text-[var(--color-ink-muted)]">{segment.label}</span>
             <span className="font-mono text-[10px] tabular-nums">
-              {segment.total.toLocaleString()}
+              {formatInteger(segment.total)}
             </span>
           </li>
         ))}

@@ -19,7 +19,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { passRateTone } from "@/lib/health";
-import { formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
+import { formatPercent, formatRelativeTime, shortSha, formatInteger } from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext } from "@/lib/viewer";
 
@@ -121,7 +121,7 @@ export default async function OrgDashboard({
             hint="last 30 days"
           />
           <StatTile label="Runs" value={summary.runs30d} hint={`${summary.runsToday} today`} />
-          <StatTile label="Tests" value={summary.tests30d.toLocaleString()} />
+          <StatTile label="Tests" value={formatInteger(summary.tests30d)} />
           <StatTile
             label="Failing"
             value={summary.failing30d}

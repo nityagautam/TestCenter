@@ -305,6 +305,58 @@ Fixed by keeping one implementation and rendering it at both scopes:
 Redundant columns were dropped while scoped: repeating the project key on every row of a
 single-project list is noise.
 
+### A20. Hovering the execution history moved the chart beside it
+
+Hovering any *failed* cell in a test's execution history widened the left column and shoved
+the "Duration over time" chart sideways; the panel also appeared and disappeared, pushing
+everything below it up and down.
+
+Two causes, both needed fixing:
+
+- The page used `lg:grid-cols-[1fr_320px]`. `1fr` is shorthand for `minmax(auto, 1fr)`, and
+  `auto` bottoms out at **min-content** — so the hover panel's longest unbroken string set
+  the column's minimum width. A Hamcrest failure message is one long unbroken string, which
+  is exactly why only failed cells did it: passed cells have no message. All four
+  `[1fr_…]` grids in the app now use `minmax(0, 1fr)`, since each holds unbounded content
+  (failure messages, test names, suite paths).
+- The panel was rendered only while hovering. It is now always rendered and falls back to
+  the newest execution, with `min-w-0` so `truncate` has a basis and a fixed `min-height` so
+  moving between a passed and a failed cell does not resize it. Defaulting to the latest run
+  beats reserving blank space — it is the question the panel answers anyway.
+
+Verified by measurement rather than by eye: the chart's x and width are byte-identical
+across hovering a failed cell, a passed cell, and nothing, and the section below it does not
+move vertically.
+
+### A21. `toLocaleString()` mismatched between server and browser on every timestamp
+
+The Next.js dev overlay showed **1 issue** on the test history page. It was a real
+hydration failure in our code, not the browser extension that had caused an earlier one.
+
+`new Date(x).toLocaleString()` with no arguments formats using whatever locale the
+*runtime* has. Node was en-US and the browser en-GB, so the same instant rendered as
+`6/12/2026, 8:13:00 PM` on the server and `12/06/2026, 20:13:00` on the client. React
+discarded the server HTML for that subtree and re-rendered it. On a 60-cell history strip
+that was 120 mismatched attributes plus the detail panel.
+
+Every date helper in `lib/format.ts` passed `undefined` as the locale, so this was a class
+of bug rather than one instance — and the number `toLocaleString()` calls were latent
+members of it (they agree between en-US and en-GB, but not de-DE).
+
+Fixed by pinning both locale and time zone in one place: `Intl.DateTimeFormat("en-GB", {
+timeZone: "UTC" })` for dates, a pinned `Intl.NumberFormat` for counts, and `formatDay` /
+`formatAbsoluteTime` / `formatInteger` used everywhere instead of raw calls. Timestamps now
+read `29 Jul 2026, 17:31 UTC`.
+
+Pinning is the right answer beyond hydration: `6/12` and `12/06` are the same string to a
+machine and different dates to a reader, and a test dashboard is read by people in
+different places looking at the same run. UTC matches what CI logs and what the database
+stores, and it is labelled rather than left to be guessed.
+
+Verified: zero console errors across the dashboard, run list, test search, flaky list and
+project overview, and the overlay badge is gone. One latent member of the class is left
+open deliberately — see the relative-time entry in the backlog.
+
 ---
 
 ## Part B — outstanding

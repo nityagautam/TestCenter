@@ -255,7 +255,7 @@ export async function RunList({
         </div>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_240px]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_240px]">
         <Card className="overflow-hidden">
           {page.runs.length === 0 ? (
             <EmptyState

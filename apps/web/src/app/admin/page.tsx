@@ -115,7 +115,7 @@ export default async function AdminPage({
         </p>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card className="overflow-hidden">
           <CardHeader title="All organisations" />
           {orgs.length === 0 ? (

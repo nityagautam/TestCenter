@@ -13,6 +13,7 @@ import { QuarantineToggle } from "@/components/quarantine-toggle";
 import { Card, CardHeader, StatTile, StatusBadge } from "@/components/ui";
 import {
   formatAbsoluteTime,
+  formatDay,
   formatDuration,
   formatPercent,
   formatRelativeTime,
@@ -151,7 +152,12 @@ export default async function TestDetailPage({
         </div>
       </Card>
 
-      <div className="mb-5 grid gap-5 lg:grid-cols-[1fr_320px]">
+      {/* minmax(0,1fr), not 1fr. `1fr` is shorthand for minmax(auto, 1fr) and `auto`
+          bottoms out at min-content, so a single long unbroken string anywhere in this
+          column — a Hamcrest failure message in the history panel, as it turned out —
+          widens the track and shoves the duration chart sideways. Capping the minimum at 0
+          makes the column obey the space available instead of its longest word. */}
+      <div className="mb-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card className="p-4">
           <HistoryStrip
             cells={executions.map((execution) => ({
@@ -177,10 +183,7 @@ export default async function TestDetailPage({
           <TrendChart
             title="Duration over time"
             points={durations.map((entry) => ({
-              label: new Date(entry.startedAt).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-              }),
+              label: formatDay(entry.startedAt),
               value: entry.durationMs,
               detail: entry.status,
             }))}

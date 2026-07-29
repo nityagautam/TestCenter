@@ -19,7 +19,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { passRateTone } from "@/lib/health";
-import { formatPercent, formatRelativeTime } from "@/lib/format";
+import { formatPercent, formatRelativeTime, formatInteger } from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext, requirePageProject } from "@/lib/viewer";
 
@@ -113,7 +113,7 @@ export default async function ProjectOverview({
                 hint="last 30 days"
               />
               <StatTile label="Runs" value={summary.runs30d} hint={`${summary.runsToday} today`} />
-              <StatTile label="Tests" value={summary.tests30d.toLocaleString()} />
+              <StatTile label="Tests" value={formatInteger(summary.tests30d)} />
               <StatTile
                 label="Failing"
                 value={summary.failing30d}
