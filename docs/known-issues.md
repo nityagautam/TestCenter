@@ -167,6 +167,28 @@ computed. A mislabelled metric is worse than a missing one.
 
 ---
 
+### A13. Shell and accessibility defects found by looking at the running app
+
+Found by driving the browser rather than reading code — every one of these passed
+`tsc` and `eslint`.
+
+- **A `"use server"` file exported a constant.** Server-action files may only export
+  async functions, so the app failed to build at request time while both the typechecker
+  and the linter reported success. The cookie name and type now live in a plain module.
+- **Four controls had no accessible name.** Both scope-switcher triggers, the "N failing"
+  header pill, and every tag chip. Their names came from nested spans, and in the
+  switcher's case one of those spans is `hidden` below the `sm` breakpoint — a hidden
+  element is excluded from the accessible name, so the label degraded on exactly the
+  screens where context matters most. All four now state their name explicitly.
+- **No Escape on the mobile drawer.** The open drawer covers the button that opened it,
+  so a keyboard user had no route out other than a pointer-only dismiss overlay.
+- **The `[` shortcut matched only `event.key`.** On layouts where `[` requires a modifier
+  it would never fire; it now also matches `event.code === "BracketLeft"`.
+- **Platform admins landed in the wrong organisation.** Because they can see *every*
+  org, the landing path picked whichever sorted first alphabetically — an empty one —
+  which reads as "the product lost my data". Preference now favours an org the viewer is
+  genuinely a member of.
+
 ### A12. Test-suite mistakes worth noting
 
 Three of my own test expectations were wrong rather than the code:
@@ -203,10 +225,12 @@ window.
 Server-paginated at 200 rows (≈580KB at 1000 results). A 10k–50k test nightly needs
 windowing, plus sortable columns, a sticky header and keyboard navigation.
 
-### B5. Accessibility pass
-Colourblind mitigations are in place and validated, but: no screen-reader testing, the
-scope-switcher dropdown does not trap focus or support arrow-key navigation, and dark mode
-has not had a contrast run against real screenshots.
+### B5. Accessibility — remaining work
+Substantially advanced (see A13). What is still open: no testing with a real screen
+reader, the scope-switcher does not *trap* focus (it closes on Tab instead, which is
+acceptable for a menu but not for a modal), the mobile drawer does not trap focus either,
+and dark mode has not had a contrast run against real screenshots rather than computed
+values.
 
 ### B6. Run comparison against a baseline
 "3 new failures, 2 known flakes" turns a red run from 40 problems into 2. The failure

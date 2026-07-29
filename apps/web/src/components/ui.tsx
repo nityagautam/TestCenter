@@ -204,7 +204,14 @@ export function TagChip({
 
   if (href) {
     return (
-      <Link href={href} className={`${className} hover:border-[var(--color-ink-muted)]`}>
+      <Link
+        href={href}
+        // The visible chip is "key : value" across three spans, which a screen reader
+        // reads as disconnected fragments and gives no clue that it filters. Naming the
+        // action explicitly is both clearer and shorter to hear.
+        aria-label={`Filter by tag ${tagKey}: ${value}`}
+        className={`${className} hover:border-[var(--color-ink-muted)]`}
+      >
         {body}
       </Link>
     );

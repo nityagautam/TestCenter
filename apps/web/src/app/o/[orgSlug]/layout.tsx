@@ -1,13 +1,15 @@
-import { listProjects } from "@testcenter/db";
+import { cookies } from "next/headers";
+import { listProjects, orgSummary } from "@testcenter/db";
+import { readSidebarState, SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { AppShell } from "@/components/app-shell";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext } from "@/lib/viewer";
 
 /**
- * Every org-scoped page renders inside this layout, which means every one of them
- * passes through `requirePageContext` — the authorisation gate — before anything is
- * rendered. Putting the check here rather than in each page makes it impossible to
- * add a new page that forgets it.
+ * Every org-scoped page renders inside this layout, which means every one of them passes
+ * through `requirePageContext` — the authorisation gate — before anything is rendered.
+ * Putting the check here rather than in each page makes it impossible to add a new page
+ * that forgets it.
  */
 export default async function OrgLayout({
   children,
@@ -20,7 +22,16 @@ export default async function OrgLayout({
   const context = await requirePageContext(orgSlug);
 
   const { sql } = getServices();
-  const projects = await listProjects(sql, context.org.id);
+  const store = await cookies();
+
+  // The nav counts come from the same rollups the dashboard reads, so the rail agrees
+  // with the page rather than telling a slightly different story.
+  const [projects, summary] = await Promise.all([
+    listProjects(sql, context.org.id),
+    orgSummary(sql, { orgId: context.org.id }),
+  ]);
+
+  const sidebar = readSidebarState(store.get(SIDEBAR_COOKIE)?.value);
 
   return (
     <AppShell
@@ -43,6 +54,8 @@ export default async function OrgLayout({
         canUpload: can(context, "run:upload"),
         canManageMembers: can(context, "member:manage"),
       }}
+      signals={{ failing: summary.failing30d, flaky: summary.flakyTests }}
+      initialSidebar={sidebar}
     >
       {children}
     </AppShell>

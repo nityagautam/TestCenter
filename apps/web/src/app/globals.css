@@ -111,3 +111,65 @@ body {
     border: 1px solid CanvasText;
   }
 }
+
+/*
+ * Screen-reader-only text that becomes visible on focus — the mechanism behind the
+ * skip link. Tailwind ships `sr-only`, but the focus-visible variant of it needs the
+ * un-hiding half spelled out.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.focus\:not-sr-only:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: revert;
+  margin: revert;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/*
+ * Vestibular disorders make sliding panels genuinely unpleasant, and this app slides a
+ * sidebar on every toggle. Honour the system preference rather than assuming everyone
+ * enjoys the motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * The content column is the scroll container, and it receives focus from the skip link.
+ * Suppress the outline there specifically: a ring around the entire page reads as a
+ * rendering fault rather than a focus indicator, and the destination is obvious.
+ */
+main:focus {
+  outline: none;
+}
+
+/* Sticky table headers. Long result and test tables lose their column meanings the
+   moment you scroll, and re-deriving "is this column p95 or average?" is pure friction. */
+thead.tc-sticky th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface-raised);
+}

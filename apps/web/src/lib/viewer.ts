@@ -90,11 +90,10 @@ export async function requirePageContext(orgSlug: string): Promise<PageContext> 
     return { ...context, orgs };
   } catch (error) {
     if (error instanceof AccessDeniedError) {
-      const orgs = await currentOrgs();
       // Signed in with access elsewhere: send them somewhere they can actually use
-      // rather than showing a dead end.
-      if (orgs.length > 0 && orgs[0]) redirect(`/o/${orgs[0].slug}`);
-      redirect("/no-access");
+      // rather than showing a dead end. Same preference order as the landing path.
+      const fallback = await resolveLandingPath();
+      redirect(fallback);
     }
     throw error;
   }
@@ -131,10 +130,21 @@ export async function resolveLandingPath(): Promise<string> {
   // Access decides the destination, not the onboarding flag — a granted member should
   // land in their organisation rather than being asked to create one.
   if (orgs.length === 0) return viewer.onboarded ? "/no-access" : "/onboarding";
-  // Prefer a shared org over the personal one: if someone has been granted access to
-  // a team, that is almost certainly what they came to look at.
-  const shared = orgs.find((org) => !org.isPersonal);
-  return `/o/${(shared ?? orgs[0])?.slug}`;
+
+  /*
+   * Preference order matters most for platform admins, who can see *every*
+   * organisation. Picking the first alphabetically landed them in whichever empty
+   * org sorted earliest rather than the one they actually work in, which reads as
+   * "the product lost my data".
+   *
+   * So: an organisation they are really a member of wins; a shared one beats their
+   * personal space; and orgs visible only through platform admin come last.
+   */
+  const byPreference =
+    orgs.find((org) => !org.viaPlatformAdmin && !org.isPersonal) ??
+    orgs.find((org) => !org.viaPlatformAdmin) ??
+    orgs[0];
+  return `/o/${byPreference?.slug}`;
 }
 
 /**

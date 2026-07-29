@@ -188,7 +188,7 @@ export default async function TestsPage({
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-[var(--color-border-subtle)] text-[10px] tracking-wide text-[var(--color-ink-muted)] uppercase">
+                <thead className="tc-sticky border-b border-[var(--color-border-subtle)] text-[10px] tracking-wide text-[var(--color-ink-muted)] uppercase">
                   <tr>
                     <th className="px-4 py-2 font-medium">Test</th>
                     <th className="px-3 py-2 font-medium">Last</th>
