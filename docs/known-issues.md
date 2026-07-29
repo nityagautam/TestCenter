@@ -1,0 +1,251 @@
+# Bug register and improvement backlog
+
+Two lists. **Part A** records defects that were found and fixed, with the root cause, so
+they are recognisable if they recur — most of them failed *silently*, which is why they
+are written down rather than just closed. **Part B** is outstanding work.
+
+Last updated 2026-07-29.
+
+---
+
+## Part A — found and fixed
+
+Each entry: what broke, why it was dangerous, and what the fix was.
+
+### A1. drizzle mutates the postgres.js instance, breaking `Date` binding
+
+**Symptom** Every bulk insert failed with `Buffer.byteLength received an instance of Date`.
+
+**Cause** `drizzle(sql)` installs its own type handling on the postgres.js client it is
+given. Afterwards the raw template path on that *same* client can no longer serialize a
+`Date`. The architecture deliberately exposes both `db` (drizzle, for typed queries) and
+`sql` (raw, for bulk inserts) from one pool, so this disabled the entire ingest write path.
+
+**Fix** `createClient` opens one pool per access style. Cost is a few extra connections.
+
+**Guard** `packages/db/src/schema.test.ts` binds a `Date` through raw SQL *after* drizzle
+has been constructed, including via the multi-row helper that actually failed.
+
+---
+
+### A2. jsonb values bound pre-stringified were stored as JSON *string* scalars
+
+**Symptom** Tag filtering silently returned nothing; the run list 500'd with
+`cannot get array length of a scalar`.
+
+**Cause** postgres.js JSON-encodes any value bound to a `jsonb` column or an explicit
+`::jsonb` cast. Passing `JSON.stringify(value)` encoded it twice, storing `"{}"` as a
+scalar string rather than an object. **Nothing errored on insert** — the data looked
+present and `tags @> …` simply never matched.
+
+**Fix** `sql.json()` at every jsonb binding. Migration `0003` repairs affected rows via
+`value #>> '{}'` and then *fails* if any non-container value remains, rather than
+reporting success on a partial repair.
+
+**Guard** A test asserts `jsonb_typeof` is `object`/`array` and that containment actually
+matches after a write.
+
+---
+
+### A3. Draining the DEFAULT partition was ordered backwards
+
+**Symptom** `updated partition constraint for default partition would be violated by some
+row` — and only when there was work to do.
+
+**Cause** The code created the target monthly partition *before* removing rows from
+DEFAULT. Attaching a partition makes Postgres verify DEFAULT holds nothing in the new
+range, so it failed precisely in the case it existed to handle. The system could not
+recover without manual SQL.
+
+**Fix** Rows leave DEFAULT first, inside a transaction with an `ON COMMIT DROP` temp
+table, so a failure in the create-or-reinsert rolls the delete back and no result is lost.
+Verified by relocating 198,500 real rows.
+
+**Guard** A test inserts a backdated row, confirms it lands in DEFAULT, drains, and
+asserts it moved to the correct monthly partition.
+
+---
+
+### A4. `BLOB_LOCAL_DIR` resolved against each process's own cwd
+
+**Symptom** Ingest failed with ENOENT on a file that had definitely been uploaded.
+
+**Cause** The web app runs from `apps/web` and the worker from the repo root, so a
+relative path meant two different directories. The API wrote artifacts the worker could
+not find.
+
+**Fix** Relative paths are anchored at the workspace root. `/api/health?deep=1` now prints
+the resolved path so a divergence is visible instead of mysterious.
+
+**Guard** A test asserts the same relative value resolves identically from both cwds.
+
+---
+
+### A5. Flake score was miscalibrated and mis-ordered
+
+**Symptom** Dashboard said "0 flaky tests" while 19 tests were demonstrably flaky.
+
+**Cause** A linear weighting scored a test needing retries in **30% of its runs at 15.8** —
+below the threshold the dashboard used to call anything flaky. Worse, it ranked that test
+*below* one that merely failed sometimes with no retries at all, inverting the signal:
+retry-flakiness is the highest-confidence evidence of nondeterminism.
+
+**Fix** A saturating curve, `100 × (1 − e^(−8·rate))`, over retry-flake rate plus status
+instability, counting instability only at ≥2 flips so a consistently failing test scores 0.
+Genuinely flaky tests now score 84–95; the four consistently-broken seeded tests score 0.
+
+**Note** Found only because the seeded data had *believable shapes*. Random noise would
+have hidden it. This is the main argument for keeping `seed-test-org` faithful.
+
+---
+
+### A6. Runs stranded in "parsing" forever
+
+**Cause** A worker killed mid-ingest left no job to finish the run, so the UI showed a
+spinner indefinitely — which reads as a broken product rather than a failed import.
+
+**Fix** A reaper fails runs idle beyond 30 minutes and records why, running on the same
+schedule as partition maintenance.
+
+---
+
+### A7. Function props passed from server components to client components
+
+**Symptom** Two 500s: the dashboard and the test history page.
+
+**Cause** `TrendChart` took `formatValue` and `HistoryStrip` took `hrefFor`. React cannot
+serialize a function across the server→client boundary. Made twice, which is why an audit
+was added rather than just a fix.
+
+**Fix** Serializable descriptors — `format="percent" | "duration"`, `runHrefBase="/o/…/runs"`.
+
+**Guard** A script enumerates client components and checks no server component passes a
+function-valued prop to one. Currently clean.
+
+---
+
+### A8. Onboarding bounced granted members away from their organisation
+
+**Cause** The gate keyed on an `onboarded_at` flag. A user granted access by an admin has
+never been through onboarding and never needs to, so they were redirected out of the
+organisation they had just been added to.
+
+**Fix** The gate keys on *actual access*: onboarding is only shown when a viewer has no
+accessible organisations.
+
+---
+
+### A9. Two nav links pointed at pages that did not exist
+
+**Cause** The app shell linked to `/admin` and `/o/:org/p/:key/settings` before either was
+built. Both 404'd from the product's own navigation.
+
+**Fix** Both built. `/admin` is also a stated requirement — it is how a platform admin
+grants access to an organisation they are not in.
+
+---
+
+### A10. A declared filter that silently did nothing
+
+**Cause** `TestSearchFilter` declared a `tags` field the query never applied. A caller
+passing tags received *unfiltered* results and would reasonably believe the filter had
+worked — strictly worse than the feature being absent.
+
+**Fix** The field is removed, with a comment explaining what implementing it requires
+(tags live on `test_results`, so filtering `test_cases` needs an EXISTS subquery). Tracked
+as B3.
+
+---
+
+### A11. "Average test duration" was average *run* duration
+
+**Cause** `project_daily_stats.avg_duration_ms` is `AVG(runs.duration_ms)`. The tile
+labelled it as a per-test figure, making a ~19s value look absurd for a unit test.
+
+**Fix** Relabelled to "Average run duration", and the meaning documented where it is
+computed. A mislabelled metric is worse than a missing one.
+
+---
+
+### A12. Test-suite mistakes worth noting
+
+Three of my own test expectations were wrong rather than the code:
+
+- A pass-rate assertion I had mis-calculated (1 passed / 1 failed / 1 skipped is 50%, not 66.67%).
+- A "unique" test name built from `Date.now()`, which the fingerprint scrubber correctly
+  collapsed to `<epoch>` — the scrubbing was right; the test was naive.
+- A `partattrs[1]` subscript; `int2vector` is zero-indexed.
+
+Recorded because in each case the instinct to "fix the code" would have broken correct
+behaviour.
+
+---
+
+## Part B — outstanding
+
+Ordered by my view of value. None are known to be broken; they are absent or thin.
+
+### B1. Platform admin area is minimal *(built, could go further)*
+Lists organisations and grants/revokes access. Does not yet offer: a user directory with
+last-seen and org membership, disabling an account, per-org quota editing, or an audit log
+of admin actions. The last is the most valuable — cross-tenant grants should be traceable.
+
+### B2. Expose the flake and duration thresholds in the UI
+`searchTests` supports `minFlakeScore` and `slowerThanMs`, but no control surfaces them, so
+"tests slower than 5s" cannot be asked from the UI.
+
+### B3. Implement tag filtering on test search
+See A10. Needs an EXISTS subquery against `test_results.tags` within the window, and a
+decision about semantics: a test whose *latest* run carried the tag, or any run in the
+window.
+
+### B4. Virtualize the run result table
+Server-paginated at 200 rows (≈580KB at 1000 results). A 10k–50k test nightly needs
+windowing, plus sortable columns, a sticky header and keyboard navigation.
+
+### B5. Accessibility pass
+Colourblind mitigations are in place and validated, but: no screen-reader testing, the
+scope-switcher dropdown does not trap focus or support arrow-key navigation, and dark mode
+has not had a contrast run against real screenshots.
+
+### B6. Run comparison against a baseline
+"3 new failures, 2 known flakes" turns a red run from 40 problems into 2. The failure
+signatures needed for it already exist.
+
+### B7. Per-organisation quotas are declared but unenforced
+`organizations.max_runs_per_day` exists and nothing checks it. `max_projects` *is*
+enforced. An unenforced limit is a false promise — either wire it up or drop the column.
+
+### B8. No rate limiting on ingest
+A token can upload without bound. Matters as soon as this is shared.
+
+### B9. Sharded run merging is not implemented
+`run_group_id`, `shard_index` and `shard_total` are stored and accepted by the API, but
+shards are not merged into one logical run — so a suite split across 8 CI jobs appears as
+8 runs. Phase 2 work, but worth knowing the columns are currently decorative.
+
+### B10. Re-parse path unimplemented
+Raw artifacts are stored precisely so an improved parser can be replayed over history, and
+`parser_version` is recorded per artifact — but nothing triggers a re-parse. This is the
+payoff for storing artifacts immutably and is currently unclaimed.
+
+### B11. Notifications, quality gates, ownership routing
+Phase 4 as planned. Nothing started.
+
+### B12. SSE progress polls the database
+One indexed row per second for the seconds a parse takes. Fine now; if many concurrent
+viewers ever make it measurable, the poll body is the only thing that changes.
+
+---
+
+## Deliberate non-goals
+
+Recorded so they are not mistaken for oversights.
+
+| Not doing | Why |
+| --- | --- |
+| Local passwords | Anyone reaching `localhost` can reach the database; a password would imply protection it does not provide. Production identity is Google's. See the user guide §2. |
+| ClickHouse / columnar store | At <50k tests/day this is ~18M rows/year. Postgres with monthly partitions serves it indefinitely; queries measure 2–6ms at 400k rows. |
+| Row-level security | Isolation is enforced in one access module and tested from the outside. RLS becomes worthwhile with untrusted tenants in one database. |
+| Deleting projects | Archiving instead — test results are evidence, and a project someone stopped using is usually still worth reading. |
+| Editing a project key | It is what CI sends. Changing it breaks every pipeline, and the failure looks like "results stopped arriving". |

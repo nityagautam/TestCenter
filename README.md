@@ -3,6 +3,10 @@
 Test intelligence for every framework. Ingest test results from pytest, Playwright, JUnit,
 TestNG, Cypress, Jest and others — via direct upload or API/CI — then triage and trend them.
 
+**Docs:** [user guide — login, roles, walkthrough](docs/user-guide.md) ·
+[bug register and backlog](docs/known-issues.md) ·
+[architecture and phase plan](docs/test-center-plan.md)
+
 **Status: multi-tenant product.** Sign in, land in the organisations you have access to,
 create projects, upload results from CI or the browser, then search tests and read a
 test's full history. See [`docs/test-center-plan.md`](docs/test-center-plan.md) for the

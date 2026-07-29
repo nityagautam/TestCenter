@@ -1,4 +1,3 @@
-import type { Tags } from "@testcenter/core";
 import type { Sql } from "./client.js";
 
 /**
@@ -160,7 +159,15 @@ export interface TestSearchFilter {
   query?: string | undefined;
   /** "failing" means it failed at least once in the window. */
   status?: "failing" | "passing" | "flaky" | "quarantined" | "skipped" | undefined;
-  tags?: Tags | undefined;
+  /*
+   * Note: there is deliberately no `tags` field here yet.
+   *
+   * Tags are recorded per *result* (test_results.tags), not per test identity, so
+   * filtering test_cases by tag needs an EXISTS subquery against results within the
+   * window. A field was declared here before that query existed, which meant callers
+   * could pass tags and receive unfiltered results believing the filter had applied —
+   * strictly worse than the feature being absent. It stays absent until implemented.
+   */
   minFlakeScore?: number | undefined;
   slowerThanMs?: number | undefined;
   suite?: string | undefined;
