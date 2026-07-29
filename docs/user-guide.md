@@ -254,6 +254,27 @@ to the database — including a seed script or a compromised app — could mint 
 
 ## 6. Working through the app
 
+### Keyboard
+
+| Key | Does |
+| --- | --- |
+| `⌘K` / `Ctrl-K` | Command palette — jump to a project, test or page |
+| `↑` `↓` | Move through palette results |
+| `↵` | Open the highlighted result |
+| `esc` | Close the palette, a dropdown, or the mobile nav |
+| `[` | Collapse or expand the sidebar |
+
+The palette searches tests by name fragment against the database, so `case_7` finds every
+matching test across all projects with its status. Collapsed, the sidebar keeps the
+failing and flaky counts as badges — it narrows to icons without losing the signal.
+
+### Theme
+
+The control beside Search cycles **follow system → light → dark**. "Follow system" is a
+real setting, not the absence of one: choose it and the app tracks your OS when it
+switches at sunset. The choice is stored server-side and applied during rendering, so
+there is no flash of the wrong theme on load.
+
 ### Where things live
 
 Scope is in the URL, so every link is shareable and unambiguous:

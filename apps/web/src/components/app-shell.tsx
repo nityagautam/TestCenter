@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import { signOutAction } from "@/app/actions/auth";
 import { setSidebarState } from "@/app/actions/ui";
 import type { SidebarState } from "@/lib/sidebar";
+import { CommandPalette } from "@/components/command-palette";
 import { NavLink } from "@/components/nav-link";
 import { ScopeSwitcher, type ScopeOption } from "@/components/scope-switcher";
+import { ThemeToggle } from "@/components/theme-toggle";
+import type { ThemePreference } from "@/lib/theme";
 
 /**
  * Application shell.
@@ -50,6 +53,8 @@ export interface AppShellProps {
   signals: { failing: number; flaky: number };
   /** Rendered from a cookie, so a collapsed sidebar never flashes open. */
   initialSidebar: SidebarState;
+  /** Same reason: the theme is correct in the first painted frame. */
+  initialTheme: ThemePreference;
 }
 
 /** `/o/acme/p/checkout-web/runs` → `checkout-web` */
@@ -68,17 +73,27 @@ export function AppShell({
   capabilities,
   signals,
   initialSidebar,
+  initialTheme,
 }: AppShellProps) {
   const pathname = usePathname();
   const [sidebar, setSidebar] = useState<SidebarState>(initialSidebar);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [, startTransition] = useTransition();
   const collapsed = sidebar === "collapsed";
 
   const toggle = useCallback(() => {
     const next: SidebarState = collapsed ? "expanded" : "collapsed";
     setSidebar(next);
-    // Persisted so the choice survives navigation and reloads.
-    void setSidebarState(next);
+    /*
+     * Inside a transition, not fire-and-forget.
+     *
+     * A bare `void setSidebarState(next)` appeared to work — the panel moved — but the
+     * cookie did not reliably survive, so the next server render re-read the old value
+     * and the sidebar silently snapped back. Running it as a transition ties the write
+     * to React's update, which is also what keeps the optimistic local state and the
+     * persisted state from disagreeing.
+     */
+    startTransition(() => void setSidebarState(next));
   }, [collapsed]);
 
   // `[` is the convention in editors and developer tools, which is the audience here.
@@ -390,12 +405,26 @@ export function AppShell({
                 <span>failing</span>
               </Link>
             ) : null}
-            <Link
-              href={`/o/${orgSlug}/tests`}
-              className="hidden rounded-md border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs text-[var(--color-ink-muted)] hover:border-[var(--color-ink-muted)] hover:text-[var(--color-ink)] sm:block"
+            {/* Announces the shortcut rather than hiding it: a keybinding nobody is
+                told about is a keybinding nobody uses. Clicking dispatches the same
+                event, so there is one code path for both. */}
+            <button
+              type="button"
+              onClick={() =>
+                document.dispatchEvent(
+                  new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }),
+                )
+              }
+              aria-label="Search projects, tests and pages. Keyboard shortcut: command K"
+              className="hidden items-center gap-2 rounded-md border border-[var(--color-border-subtle)] px-2.5 py-1.5 text-xs text-[var(--color-ink-muted)] hover:border-[var(--color-ink-muted)] hover:text-[var(--color-ink)] sm:flex"
             >
-              Search tests
-            </Link>
+              <span>Search</span>
+              <kbd className="rounded border border-[var(--color-border-subtle)] px-1 font-mono text-[10px]">
+                ⌘K
+              </kbd>
+            </button>
+
+            <ThemeToggle initial={initialTheme} />
             {capabilities.canUpload ? (
               <Link
                 href={projectBase ? `${projectBase}/upload` : `/o/${orgSlug}/projects`}
@@ -420,6 +449,14 @@ export function AppShell({
           {children}
         </main>
       </div>
+
+      <CommandPalette
+        orgSlug={orgSlug}
+        orgs={orgs.map((org) => ({ slug: org.slug, name: org.name }))}
+        projects={projects}
+        canUpload={capabilities.canUpload}
+        isPlatformAdmin={viewer.isPlatformAdmin}
+      />
     </div>
   );
 }

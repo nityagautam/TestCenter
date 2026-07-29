@@ -188,6 +188,12 @@ Found by driving the browser rather than reading code — every one of these pas
   org, the landing path picked whichever sorted first alphabetically — an empty one —
   which reads as "the product lost my data". Preference now favours an org the viewer is
   genuinely a member of.
+- **The sidebar's persisted state silently reverted.** Its cookie was written with a bare
+  `void setSidebarState(next)`. The panel moved, so it looked correct, but the write did
+  not reliably land and the next server render re-read the old value and snapped the
+  panel back. Wrapping it in a transition ties the write to React's update. Worth
+  knowing generally: a fire-and-forget server action is not a reliable way to persist
+  state the server is about to read back.
 
 ### A12. Test-suite mistakes worth noting
 

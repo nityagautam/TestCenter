@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { listProjects, orgSummary } from "@testcenter/db";
 import { readSidebarState, SIDEBAR_COOKIE } from "@/lib/sidebar";
+import { readThemePreference, THEME_COOKIE } from "@/lib/theme";
 import { AppShell } from "@/components/app-shell";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext } from "@/lib/viewer";
@@ -32,6 +33,7 @@ export default async function OrgLayout({
   ]);
 
   const sidebar = readSidebarState(store.get(SIDEBAR_COOKIE)?.value);
+  const theme = readThemePreference(store.get(THEME_COOKIE)?.value);
 
   return (
     <AppShell
@@ -56,6 +58,7 @@ export default async function OrgLayout({
       }}
       signals={{ failing: summary.failing30d, flaky: summary.flakyTests }}
       initialSidebar={sidebar}
+      initialTheme={theme}
     >
       {children}
     </AppShell>
