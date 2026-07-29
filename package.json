@@ -1,0 +1,35 @@
+{
+  "name": "test-center",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test Center — multi-framework test intelligence platform",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "turbo run test",
+    "db:migrate": "pnpm --filter @testcenter/db migrate",
+    "db:partitions": "pnpm --filter @testcenter/db partitions",
+    "db:reset": "pnpm --filter @testcenter/db reset",
+    "stack:up": "docker compose up -d",
+    "stack:down": "docker compose down",
+    "verify": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "turbo": "^2.10.7",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0"
+  }
+}

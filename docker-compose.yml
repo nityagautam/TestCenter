@@ -1,0 +1,75 @@
+# Local development stack.
+#
+# This file exists so the hosting decision can stay open: the same three
+# portable primitives (Postgres, Redis, S3-compatible storage) back local dev,
+# a self-hosted deployment, and a managed-cloud deployment.
+#
+# No Docker? Use the native path instead — see README "Option B".
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: testcenter-postgres
+    environment:
+      POSTGRES_USER: testcenter
+      POSTGRES_PASSWORD: testcenter
+      POSTGRES_DB: testcenter
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testcenter -d testcenter"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: testcenter-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: testcenter-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: testcenter
+      MINIO_ROOT_PASSWORD: testcenter
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # web console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: creates the artifact bucket so BLOB_DRIVER=s3 works immediately.
+  minio-init:
+    image: minio/mc:latest
+    container_name: testcenter-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 testcenter testcenter &&
+      mc mb --ignore-existing local/testcenter-artifacts &&
+      echo 'bucket ready'
+      "
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

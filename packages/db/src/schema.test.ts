@@ -1,0 +1,301 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { computeFingerprint } from "@testcenter/core";
+import { createClient, type Database, type Sql } from "./client.js";
+import { listPartitions, maintainPartitions } from "./partitions.js";
+import { bootstrap, generateApiToken, hashApiToken, resolveApiToken } from "./bootstrap.js";
+import * as schema from "./schema.js";
+
+/**
+ * Integration tests against a real Postgres.
+ *
+ * These exist because the schema deliberately uses features an ORM cannot express
+ * — range partitioning, partial and expression indexes, a generated tsvector
+ * column, a plpgsql uuidv7 shim — so the only trustworthy check is applying the
+ * migration and interrogating the result. They also guard the two decisions from
+ * docs/test-center-plan.md §1b that are cheap now and expensive later:
+ * org_id everywhere, and monthly partitioning for retention.
+ *
+ * Skipped when DATABASE_URL is unset so `pnpm test` still works offline.
+ */
+const databaseUrl = process.env.DATABASE_URL;
+const describeIfDb = databaseUrl ? describe : describe.skip;
+
+/**
+ * Letters only, deliberately.
+ *
+ * `Date.now()` and UUIDs cannot be used to make a test name unique here: the
+ * fingerprint normalizer scrubs long digit runs and UUIDs precisely so that a test
+ * whose name embeds generated data keeps one identity across runs. A digit-based
+ * suffix would collapse to the same fingerprint on every run and collide.
+ */
+function uniqueName(prefix: string): string {
+  const letters = Array.from(
+    { length: 10 },
+    () => "abcdefghijklmnopqrstuvwxyz"[Math.floor(Math.random() * 26)],
+  ).join("");
+  return `${prefix} ${letters}`;
+}
+
+/** Every table holding tenant data must carry org_id. */
+const TENANT_SCOPED_TABLES = [
+  "teams",
+  "memberships",
+  "projects",
+  "api_tokens",
+  "runs",
+  "artifacts",
+  "ingest_jobs",
+  "test_cases",
+  "test_results",
+  "attachments",
+  "project_daily_stats",
+  "idempotency_keys",
+] as const;
+
+describeIfDb("schema", () => {
+  let sql: Sql;
+  let db: Database;
+  let orgId: string;
+  let projectId: string;
+
+  beforeAll(async () => {
+    const client = createClient({ databaseUrl: databaseUrl as string, maxConnections: 3 });
+    sql = client.sql;
+    db = client.db;
+    const boot = await bootstrap(db, { projectKey: "schema-test", projectName: "Schema Test" });
+    orgId = boot.orgId;
+    projectId = boot.projectId;
+  });
+
+  afterAll(async () => {
+    if (sql) await sql.end({ timeout: 5 });
+  });
+
+  it("applied the migration and recorded a checksum", async () => {
+    const rows = await sql<{ name: string; checksum: string }[]>`
+      SELECT name, checksum FROM schema_migrations ORDER BY name
+    `;
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]?.name).toBe("0001_init.sql");
+    expect(rows[0]?.checksum).toHaveLength(64);
+  });
+
+  it("carries org_id on every tenant-scoped table", async () => {
+    // The single cheap thing that keeps multi-tenancy a config flip rather than a
+    // retrofit. A new table missing org_id fails here instead of in a year.
+    const rows = await sql<{ table_name: string }[]>`
+      SELECT table_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND column_name = 'org_id'
+    `;
+    const withOrgId = new Set(rows.map((row) => row.table_name));
+    const missing = TENANT_SCOPED_TABLES.filter((table) => !withOrgId.has(table));
+    expect(missing).toEqual([]);
+  });
+
+  it("generates version-7 UUIDs whose timestamp prefix advances", async () => {
+    const first = (await sql<{ id: string }[]>`SELECT uuidv7() AS id`)[0]?.id as string;
+    // Two ids minted in the same millisecond are ordered only by their random
+    // bits, so the ordering claim is about the 48-bit timestamp prefix, not about
+    // any two consecutive values.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = (await sql<{ id: string }[]>`SELECT uuidv7() AS id`)[0]?.id as string;
+
+    // Version nibble is the first character of the third group.
+    expect(first.split("-")[2]?.[0]).toBe("7");
+    expect(second.split("-")[2]?.[0]).toBe("7");
+
+    const timestampOf = (id: string) => parseInt(id.replace(/-/g, "").slice(0, 12), 16);
+    expect(timestampOf(second)).toBeGreaterThan(timestampOf(first));
+    // Prefix really is a millisecond epoch, not random bytes.
+    expect(Math.abs(timestampOf(first) - Date.now())).toBeLessThan(60_000);
+  });
+
+  describe("partitioning", () => {
+    it("partitions test_results by range on started_at", async () => {
+      // partattrs is an int2vector, which is zero-indexed unlike normal arrays.
+      const rows = await sql<{ partstrat: string; attname: string }[]>`
+        SELECT p.partstrat, a.attname
+        FROM pg_partitioned_table p
+        JOIN pg_class c ON c.oid = p.partrelid
+        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = p.partattrs[0]
+        WHERE c.relname = 'test_results'
+      `;
+      expect(rows[0]?.partstrat).toBe("r");
+      expect(rows[0]?.attname).toBe("started_at");
+    });
+
+    it("provisioned the current month plus lookahead", async () => {
+      const monthly = (await listPartitions(sql)).filter((name) => /_\d{4}_\d{2}$/.test(name));
+      const now = new Date();
+      const current = `test_results_${now.getUTCFullYear()}_${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+      expect(monthly).toContain(current);
+      expect(monthly.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("keeps a DEFAULT partition so an out-of-range insert never fails ingest", async () => {
+      const rows = await sql<{ count: string }[]>`
+        SELECT count(*)::text AS count FROM pg_class WHERE relname = 'test_results_default'
+      `;
+      expect(Number(rows[0]?.count)).toBe(1);
+    });
+
+    it("is idempotent — re-running maintenance changes nothing", async () => {
+      // Scheduled maintenance runs repeatedly; if it churned partitions it would
+      // be dropping and recreating live data ranges.
+      const second = await maintainPartitions(sql, { lookaheadMonths: 2, retentionMonths: 12 });
+      expect(second.created).toEqual([]);
+      expect(second.dropped).toEqual([]);
+    });
+
+    it("routes an inserted result into the partition for its month", async () => {
+      const caseName = uniqueName("routes to partition");
+      const fingerprint = computeFingerprint({
+        projectId,
+        suite: "tests/checkout/payment.spec.ts",
+        name: caseName,
+      });
+      const testCase = await db
+        .insert(schema.testCases)
+        .values({
+          orgId,
+          projectId,
+          fingerprint: fingerprint.digest,
+          suite: "tests/checkout/payment.spec.ts",
+          name: caseName,
+        })
+        .returning({ id: schema.testCases.id });
+      const testCaseId = testCase[0]?.id as number;
+
+      const run = await db
+        .insert(schema.runs)
+        .values({ orgId, projectId, framework: "junit", status: "complete" })
+        .returning({ id: schema.runs.id });
+      const runId = run[0]?.id as string;
+
+      const startedAt = new Date();
+      await db.insert(schema.testResults).values({
+        orgId,
+        projectId,
+        runId,
+        testCaseId,
+        status: "failed",
+        durationMs: 1200,
+        failureType: "AssertionError",
+        failureMessage: "expected 'Approved' to equal 'Declined'",
+        startedAt,
+      });
+
+      const expectedPartition = `test_results_${startedAt.getUTCFullYear()}_${String(
+        startedAt.getUTCMonth() + 1,
+      ).padStart(2, "0")}`;
+      const located = await sql<{ partition: string }[]>`
+        SELECT tableoid::regclass::text AS partition
+        FROM test_results WHERE run_id = ${runId}
+      `;
+      expect(located[0]?.partition).toBe(expectedPartition);
+
+      // And nothing fell through to DEFAULT.
+      const fallback = await sql<{ count: string }[]>`
+        SELECT count(*)::text AS count FROM test_results_default WHERE run_id = ${runId}
+      `;
+      expect(Number(fallback[0]?.count)).toBe(0);
+
+      // Clean up so the suite is re-runnable against the same database.
+      await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+      await db.delete(schema.testCases).where(eq(schema.testCases.id, testCaseId));
+    });
+  });
+
+  it("enforces one test_case per fingerprint per project", async () => {
+    const name = uniqueName("duplicate guard");
+    const fingerprint = computeFingerprint({ projectId, name });
+    const values = { orgId, projectId, fingerprint: fingerprint.digest, name };
+
+    const inserted = await db
+      .insert(schema.testCases)
+      .values(values)
+      .returning({ id: schema.testCases.id });
+    // A second insert of the same identity must be rejected: this constraint is
+    // what makes upsert-on-fingerprint safe during concurrent shard ingest.
+    await expect(db.insert(schema.testCases).values(values)).rejects.toThrow();
+
+    await db.delete(schema.testCases).where(eq(schema.testCases.id, inserted[0]?.id as number));
+  });
+
+  it("indexes test names for full-text search", async () => {
+    const rows = await sql<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes
+      WHERE tablename = 'test_cases' AND indexname = 'test_cases_search_idx'
+    `;
+    expect(rows).toHaveLength(1);
+  });
+
+  it("rejects invalid tag-like project keys at the database level", async () => {
+    await expect(
+      db.insert(schema.projects).values({ orgId, key: "Not A Valid Key", name: "bad" }),
+    ).rejects.toThrow();
+  });
+
+  describe("api tokens", () => {
+    it("stores only a hash and resolves a valid token", async () => {
+      const token = generateApiToken();
+      await db.insert(schema.apiTokens).values({
+        orgId,
+        projectId,
+        name: "ci",
+        tokenHash: token.hash,
+        tokenPrefix: token.prefix,
+        scopes: ["runs:write"],
+      });
+
+      const resolved = await resolveApiToken(db, token.plaintext);
+      expect(resolved?.orgId).toBe(orgId);
+      expect(resolved?.scopes).toContain("runs:write");
+
+      // The plaintext must not be recoverable from the row.
+      const stored = await sql<{ token_hash: Buffer }[]>`
+        SELECT token_hash FROM api_tokens WHERE token_prefix = ${token.prefix}
+      `;
+      expect(
+        Buffer.from(stored[0]?.token_hash as Buffer).equals(hashApiToken(token.plaintext)),
+      ).toBe(true);
+    });
+
+    it("refuses a revoked token", async () => {
+      const token = generateApiToken();
+      await db.insert(schema.apiTokens).values({
+        orgId,
+        name: "revoked",
+        tokenHash: token.hash,
+        tokenPrefix: token.prefix,
+        scopes: ["runs:write"],
+        revokedAt: new Date(),
+      });
+      expect(await resolveApiToken(db, token.plaintext)).toBeNull();
+    });
+
+    it("refuses an expired token", async () => {
+      const token = generateApiToken();
+      await db.insert(schema.apiTokens).values({
+        orgId,
+        name: "expired",
+        tokenHash: token.hash,
+        tokenPrefix: token.prefix,
+        scopes: ["runs:write"],
+        expiresAt: new Date(Date.now() - 1000),
+      });
+      expect(await resolveApiToken(db, token.plaintext)).toBeNull();
+    });
+
+    it("refuses a token that does not exist", async () => {
+      expect(await resolveApiToken(db, "tc_not-a-real-token")).toBeNull();
+    });
+  });
+
+  it("bootstraps idempotently", async () => {
+    const again = await bootstrap(db, { projectKey: "schema-test", projectName: "Schema Test" });
+    expect(again.created).toEqual({ org: false, project: false });
+    expect(again.projectId).toBe(projectId);
+  });
+});

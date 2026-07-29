@@ -1,0 +1,105 @@
+# Test Center
+
+Test intelligence for every framework. Ingest test results from pytest, Playwright, JUnit,
+TestNG, Cypress, Jest and others — via direct upload or API/CI — then triage and trend them.
+
+**Status: Phase 0 (foundations) complete.** No product UI yet; `/` renders a system status
+board. See [`docs/test-center-plan.md`](docs/test-center-plan.md) for the architecture and the
+phase plan.
+
+## Architecture in one paragraph
+
+Uploads go **direct to object storage** via presigned URLs and are stored immutably — the raw
+artifact is the source of truth, the database is a derived projection that can be recomputed
+when a parser improves. The API records metadata and enqueues; a long-running worker
+stream-parses (never buffering a 300 MB XML), normalizes to one canonical model, bulk-inserts,
+and rolls up. Dashboards read pre-aggregated rows, never `COUNT(*)` over millions.
+
+Three portable primitives only — Postgres, Redis, S3-compatible storage — reached through
+ports in `packages/core`. Infrastructure SDKs may only be imported inside
+`packages/adapters`, enforced by an ESLint rule, which is what keeps the hosting decision
+open.
+
+```
+apps/web        Next.js App Router — UI + API route handlers
+apps/worker     long-running ingest/rollup/maintenance worker (containerized)
+packages/core   canonical result model, fingerprinting, BlobStore/Queue ports, config, logging
+packages/db     SQL migrations, partition management, Drizzle schema, typed client
+packages/adapters  the ONLY place S3/Redis SDKs are imported
+```
+
+## Getting started
+
+Prerequisites: Node 22+ and pnpm (via `corepack enable pnpm`).
+
+```bash
+pnpm install
+cp .env.example .env      # then set AUTH_SECRET: openssl rand -base64 32
+```
+
+### Option A — Docker
+
+```bash
+pnpm stack:up             # Postgres + Redis + MinIO, bucket auto-created
+# in .env: BLOB_DRIVER=s3
+```
+
+### Option B — native, no Docker
+
+```bash
+brew install postgresql@17 redis
+brew services start postgresql@17
+brew services start redis
+createdb testcenter
+# in .env:
+#   DATABASE_URL=postgresql://$(whoami)@localhost:5432/testcenter
+#   BLOB_DRIVER=fs
+```
+
+`BLOB_DRIVER=fs` is a filesystem blob store that implements the same signed-URL upload
+contract as S3, so the upload path you exercise locally is the production path rather than a
+special case that hides bugs until deploy.
+
+### Then
+
+```bash
+pnpm db:migrate           # apply migrations, provision partitions, bootstrap org/project
+pnpm dev                  # web on http://localhost:3000, worker alongside
+```
+
+Visit <http://localhost:3000> for the status board, or `curl localhost:3000/api/health?deep=1`.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | web + worker in watch mode |
+| `pnpm verify` | format check, lint, typecheck, unit tests — what CI runs |
+| `pnpm db:migrate` | apply migrations, provision partitions, bootstrap org/project |
+| `pnpm db:migrate:check` | non-zero exit if anything is unapplied (CI drift guard) |
+| `pnpm db:partitions` | create lookahead partitions, drop expired; `--dry-run`, `--list`, `--drain` |
+| `pnpm db:reset` | drop and rebuild the schema (refuses non-local databases) |
+| `pnpm --filter @testcenter/worker enqueue partitions` | enqueue a real job to smoke-test the queue path |
+
+## Things worth knowing before changing code
+
+**`test_results` is partitioned monthly for retention, not performance.** At the planned
+volume (<50k tests/day, ~18M rows/year) a single Postgres handles reads trivially. Dropping a
+month is instant DDL; a `DELETE` over the same rows would rewrite the table and hold locks
+while teams are using the product. If the partition maintenance job stops, inserts keep
+succeeding into `test_results_default` — silently — so `/api/health` checks for the current
+month's partition.
+
+**The test fingerprint is the most expensive thing to change.**
+`packages/core/src/fingerprint.ts` turns uploads into *history*; flakiness, "when did this
+start failing", duration regression, ownership and quarantine all key off it. Changing the
+algorithm requires a backfill, which is why `fingerprint_version` is stored on every row. Its
+tests cover the cases that matter: the same logical test on a laptop, a GitHub runner, a
+GitLab runner and Windows must produce one identity.
+
+**`org_id` is on every tenant-scoped table** even though we ship as a single internal org.
+That is the entire cost of staying SaaS-ready and it is near-zero now versus a painful
+retrofit. Row-level security, metering and invite flows are deliberately deferred.
+
+**Failure signatures are computed at ingest from day one** even though the clustering UI is
+Phase 3, so that feature opens against real history instead of an empty table.

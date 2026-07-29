@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.next/
+out/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+.env
+.env.local
+.env.*.local
+
+# local blob store (FsBlobStore driver)
+.data/
+
+.DS_Store
+*.log

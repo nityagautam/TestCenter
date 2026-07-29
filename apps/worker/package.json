@@ -1,0 +1,27 @@
+{
+  "name": "@testcenter/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "enqueue": "tsx scripts/enqueue.ts",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@testcenter/adapters": "workspace:*",
+    "@testcenter/core": "workspace:*",
+    "@testcenter/db": "workspace:*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: oklch(99% 0.002 250);
+  --color-surface-raised: oklch(100% 0 0);
+  --color-border-subtle: oklch(91% 0.005 250);
+  --color-ink: oklch(24% 0.015 260);
+  --color-ink-muted: oklch(52% 0.012 260);
+
+  /* Status colours are shared by the run list, charts and badges so a "failed"
+     result looks identical everywhere in the product. */
+  --color-status-passed: oklch(62% 0.14 150);
+  --color-status-failed: oklch(58% 0.19 25);
+  --color-status-skipped: oklch(70% 0.03 260);
+  --color-status-flaky: oklch(74% 0.15 75);
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-surface: oklch(19% 0.012 260);
+    --color-surface-raised: oklch(23% 0.014 260);
+    --color-border-subtle: oklch(31% 0.014 260);
+    --color-ink: oklch(95% 0.005 260);
+    --color-ink-muted: oklch(70% 0.012 260);
+  }
+}
+
+html,
+body {
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+body {
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}

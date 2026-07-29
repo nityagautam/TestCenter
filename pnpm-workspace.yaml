@@ -1,0 +1,12 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Postinstall scripts are opt-in under pnpm 11. Both of these ship prebuilt
+# native binaries that their install scripts unpack; without them vitest cannot
+# start (esbuild) and BullMQ falls back to a slower pure-JS msgpack path.
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: true
+  sharp: true
+  unrs-resolver: true

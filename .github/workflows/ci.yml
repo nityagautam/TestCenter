@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same three portable primitives as local dev and production. Keeping CI on the
+  # real Postgres (not a stub) is what makes the migration check meaningful.
+  DATABASE_URL: postgresql://testcenter:testcenter@localhost:5432/testcenter
+  REDIS_URL: redis://localhost:6379
+  BLOB_DRIVER: fs
+  BLOB_LOCAL_DIR: .data/blobs
+  AUTH_SECRET: ci-secret-not-used-for-anything-real
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: testcenter
+          POSTGRES_PASSWORD: testcenter
+          POSTGRES_DB: testcenter
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U testcenter"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Format
+        run: pnpm run format:check
+
+      - name: Lint
+        # Also enforces the portability guardrail: infrastructure SDKs may only be
+        # imported inside packages/adapters, so the hosting decision stays open.
+        run: pnpm run lint
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Unit tests
+        run: pnpm run test
+
+      - name: Apply migrations
+        run: pnpm run db:migrate
+
+      - name: Migration check
+        # Fails if a migration was edited after being applied, or if the committed
+        # schema and the applied schema have drifted.
+        run: pnpm --filter @testcenter/db migrate:check
+
+      - name: Partition provisioning is idempotent
+        # Running maintenance twice must be a no-op; if it is not, scheduled
+        # maintenance would churn partitions in production.
+        run: |
+          pnpm run db:partitions
+          pnpm run db:partitions | tee /tmp/partitions-second-run.txt
+          grep -q "partitions already correct" /tmp/partitions-second-run.txt

@@ -1,0 +1,36 @@
+{
+  "name": "@testcenter/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "sql"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "migrate": "tsx scripts/migrate.ts",
+    "migrate:check": "tsx scripts/migrate.ts --check",
+    "partitions": "tsx scripts/partitions.ts",
+    "reset": "tsx scripts/reset.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@testcenter/core": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
