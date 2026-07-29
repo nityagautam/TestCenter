@@ -128,8 +128,9 @@ the database or a seed script can set. Removing an address revokes it at the nex
 and no action inside the app can grant it — otherwise "superadmin" would be escalatable
 from within the product it protects.
 
-Also configured as platform admins: `ashutoshmishra@gofynd.com`,
-`nityanarayan44@live.com`.
+Whoever else is listed in `TESTCENTER_ADMIN_EMAILS` has the same reach. Read the current
+list straight from `.env` rather than from here — a roster copied into prose is wrong the
+first time somebody edits that variable.
 
 Sign in as `admin@testcenter.dev` and you get **Platform admin** in the left nav: every
 organisation, with the ability to grant access to ones you are not a member of. That is

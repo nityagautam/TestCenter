@@ -64,7 +64,7 @@ describe("detection", () => {
 
   it("claims a bare <testsuite> root", async () => {
     const head = await readFile(join(FIXTURES, "surefire-retries.xml"));
-    expect(junitXmlParser.detect(head, "TEST-com.fynd.PaymentTest.xml")).toBeGreaterThan(0.8);
+    expect(junitXmlParser.detect(head, "TEST-com.acme.PaymentTest.xml")).toBeGreaterThan(0.8);
   });
 
   it("declines formats that have dedicated parsers coming", () => {

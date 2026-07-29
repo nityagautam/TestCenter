@@ -300,7 +300,7 @@ async function main(): Promise<void> {
         environment: "staging",
         tags: { suite: "regression", shard: String(shard + 1) },
         shard: { groupId: "gh-run-88213", index: shard, total: 4 },
-        ciJobUrl: `https://github.example.com/fynd/checkout/actions/runs/88213/job/${shard + 1}`,
+        ciJobUrl: `https://github.example.com/acme/checkout/actions/runs/88213/job/${shard + 1}`,
         results: Array.from({ length: 6 }, (_, i) => ({
           name: `shard_${shard}_case_${i}`,
           status: (i === 0 && shard === 2 ? "failed" : "passed") as "failed" | "passed",
@@ -318,7 +318,7 @@ async function main(): Promise<void> {
         branch: "feature/checkout-redesign",
         environment: "staging",
         prNumber: 4821,
-        ciJobUrl: "https://github.example.com/fynd/checkout/actions/runs/88190",
+        ciJobUrl: "https://github.example.com/acme/checkout/actions/runs/88190",
         tags: { suite: "pr", env: "staging" },
         results: [
           { name: "pr_case_ok", status: "passed", suite: "specs/pr.spec.ts", durationMs: 210 },

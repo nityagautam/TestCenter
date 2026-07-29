@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="com.fynd.checkout.PaymentTest" time="9.871" tests="3" errors="0" skipped="0" failures="1" timestamp="2026-07-29T02:10:11">
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="com.acme.checkout.PaymentTest" time="9.871" tests="3" errors="0" skipped="0" failures="1" timestamp="2026-07-29T02:10:11">
   <properties>
     <property name="java.version" value="21.0.2"/>
   </properties>
-  <testcase name="declinesExpiredCard" classname="com.fynd.checkout.PaymentTest" time="4.221">
+  <testcase name="declinesExpiredCard" classname="com.acme.checkout.PaymentTest" time="4.221">
     <flakyFailure message="expected:&lt;Approved&gt; but was:&lt;Declined&gt;" type="org.junit.ComparisonFailure">
       <stackTrace>org.junit.ComparisonFailure: expected:&lt;Approved&gt; but was:&lt;Declined&gt;
-	at com.fynd.checkout.PaymentTest.declinesExpiredCard(PaymentTest.java:58)
+	at com.acme.checkout.PaymentTest.declinesExpiredCard(PaymentTest.java:58)
 	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)</stackTrace>
     </flakyFailure>
   </testcase>
-  <testcase name="rejectsNegativeAmount" classname="com.fynd.checkout.PaymentTest" time="3.100">
+  <testcase name="rejectsNegativeAmount" classname="com.acme.checkout.PaymentTest" time="3.100">
     <rerunFailure message="Timed out waiting for gateway" type="java.util.concurrent.TimeoutException">
       <stackTrace>java.util.concurrent.TimeoutException: Timed out waiting for gateway
-	at com.fynd.checkout.PaymentTest.rejectsNegativeAmount(PaymentTest.java:91)</stackTrace>
+	at com.acme.checkout.PaymentTest.rejectsNegativeAmount(PaymentTest.java:91)</stackTrace>
     </rerunFailure>
     <failure message="Timed out waiting for gateway" type="java.util.concurrent.TimeoutException">java.util.concurrent.TimeoutException: Timed out waiting for gateway
-	at com.fynd.checkout.PaymentTest.rejectsNegativeAmount(PaymentTest.java:91)</failure>
+	at com.acme.checkout.PaymentTest.rejectsNegativeAmount(PaymentTest.java:91)</failure>
   </testcase>
-  <testcase name="acceptsVisa" classname="com.fynd.checkout.PaymentTest" time="2.550"/>
+  <testcase name="acceptsVisa" classname="com.acme.checkout.PaymentTest" time="2.550"/>
 </testsuite>

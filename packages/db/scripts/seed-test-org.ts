@@ -80,7 +80,7 @@ const PROJECTS: ProjectSpec[] = [
     key: "payments-service",
     name: "Payments Service",
     framework: "junit",
-    suites: ["com.fynd.payments.GatewayTest", "com.fynd.payments.SettlementTest"],
+    suites: ["com.acme.payments.GatewayTest", "com.acme.payments.SettlementTest"],
     testsPerSuite: 15,
     runsPerDay: 2,
   },

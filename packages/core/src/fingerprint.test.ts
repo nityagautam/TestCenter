@@ -21,7 +21,7 @@ describe("normalizeSuitePath", () => {
     const githubRunner = normalizeSuitePath(
       "/home/runner/work/checkout/checkout/tests/checkout/payment.spec.ts",
     );
-    const gitlabRunner = normalizeSuitePath("/builds/fynd/checkout/tests/checkout/payment.spec.ts");
+    const gitlabRunner = normalizeSuitePath("/builds/acme/checkout/tests/checkout/payment.spec.ts");
 
     expect(laptop).toBe("tests/checkout/payment.spec.ts");
     expect(githubRunner).toBe(laptop);
