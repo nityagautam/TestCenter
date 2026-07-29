@@ -187,24 +187,40 @@ export default async function TestsPage({
             />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              {/* Fixed layout — see the note on the run results table. */}
+              <table className="w-full table-fixed text-left text-xs">
                 <thead className="tc-sticky border-b border-[var(--color-border-subtle)] text-[10px] tracking-wide text-[var(--color-ink-muted)] uppercase">
                   <tr>
                     <th className="px-4 py-2 font-medium">Test</th>
-                    <th className="px-3 py-2 font-medium">Last</th>
-                    <th className="px-3 py-2 text-right font-medium">Fail rate</th>
-                    <th className="px-3 py-2 text-right font-medium">Flake</th>
-                    <th className="px-3 py-2 text-right font-medium">p95</th>
-                    <th className="px-3 py-2 text-right font-medium">Seen</th>
+                    <th className="w-[6.5rem] px-3 py-2 font-medium whitespace-nowrap">Last</th>
+                    <th className="w-[5.5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
+                      Fail rate
+                    </th>
+                    <th className="w-[4.5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
+                      Flake
+                    </th>
+                    <th className="w-[5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
+                      p95
+                    </th>
+                    <th className="w-[5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
+                      Seen
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border-subtle)]">
                   {results.tests.map((test) => (
                     <tr key={test.id} className="hover:bg-[var(--color-surface)]/60">
-                      <td className="max-w-md px-4 py-2">
+                      <td className="px-4 py-2">
+                        {/* max-width on the <td> is inert under auto table layout — the
+                            algorithm sizes the column to its content and ignores it. The bound
+                            has to sit on a block child for `truncate` to have a width to work
+                            against; without it a 200-character test name pushed straight
+                            through the status and fail-rate columns. The full name stays
+                            reachable via the title and on the detail page. */}
                         <Link
                           href={`/o/${orgSlug}/tests/${test.id}`}
-                          className="font-medium hover:underline"
+                          className="block truncate font-medium hover:underline"
+                          title={test.name}
                         >
                           {test.name}
                         </Link>
@@ -229,7 +245,7 @@ export default async function TestsPage({
                       <td className="px-3 py-2">
                         {test.lastStatus ? <StatusBadge status={test.lastStatus} /> : "—"}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">
+                      <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">
                         <span
                           className={
                             Number(test.failRate30d) > 0
@@ -243,7 +259,7 @@ export default async function TestsPage({
                           {test.failures30d}/{test.runs30d}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">
+                      <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">
                         {Number(test.flakeScore) > 0 ? (
                           <span className="text-[var(--color-status-flaky)]">
                             {Number(test.flakeScore).toFixed(0)}

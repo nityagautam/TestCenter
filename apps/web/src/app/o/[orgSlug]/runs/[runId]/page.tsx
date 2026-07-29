@@ -354,13 +354,20 @@ export default async function RunPage({
               />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                {/* table-fixed with proportioned columns. Auto layout sizes columns to
+                    their content, so one 200-character test name or stack-trace line decided
+                    the whole table's geometry — and a max-width on a <td> is ignored outright.
+                    Capping the children fixed the truncation but not the width: an absolute
+                    maximum cannot know how much room the sidebar left, so the last columns were
+                    pushed past the right edge. Fixed layout settles both, because every column
+                    then has a definite width for `truncate` to resolve against. */}
+                <table className="w-full table-fixed text-left text-xs">
                   <thead className="tc-sticky border-b border-[var(--color-border-subtle)] text-[11px] tracking-wide text-[var(--color-ink-muted)] uppercase">
                     <tr>
-                      <th className="px-4 py-2 font-medium">Status</th>
+                      <th className="w-[7rem] px-4 py-2 font-medium">Status</th>
                       <th className="px-4 py-2 font-medium">Test</th>
-                      <th className="px-4 py-2 font-medium">Suite</th>
-                      <th className="px-4 py-2 text-right font-medium">Time</th>
+                      <th className="w-[30%] px-4 py-2 font-medium">Suite</th>
+                      <th className="w-[5.5rem] px-4 py-2 text-right font-medium">Time</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--color-border-subtle)]">
@@ -379,22 +386,31 @@ export default async function RunPage({
                             ) : null}
                           </div>
                         </td>
-                        <td className="max-w-md px-4 py-2 align-top">
-                          <Link
-                            href={withParam({ result: String(result.id) })}
-                            className="font-medium hover:underline"
-                          >
-                            {result.name}
-                          </Link>{" "}
-                          <Link
-                            href={`/o/${orgSlug}/tests/${result.testCaseId}`}
-                            className="text-[10px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
-                            title="Full history for this test"
-                          >
-                            history
-                          </Link>
+                        <td className="px-4 py-2 align-top">
+                          {/* Bound on the child, not the cell — see the note in tests/page.tsx.
+                              The name and the history link share a row so the link stays put
+                              instead of being pushed off-screen by a long name. */}
+                          <div className="flex items-baseline gap-2">
+                            <Link
+                              href={withParam({ result: String(result.id) })}
+                              className="truncate font-medium hover:underline"
+                              title={result.name}
+                            >
+                              {result.name}
+                            </Link>
+                            <Link
+                              href={`/o/${orgSlug}/tests/${result.testCaseId}`}
+                              className="shrink-0 text-[10px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+                              title="Full history for this test"
+                            >
+                              history
+                            </Link>
+                          </div>
                           {result.failureMessage ? (
-                            <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-status-failed)]">
+                            <div
+                              className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-status-failed)]"
+                              title={result.failureMessage}
+                            >
                               {result.failureMessage}
                             </div>
                           ) : null}
@@ -404,7 +420,7 @@ export default async function RunPage({
                             </div>
                           ) : null}
                         </td>
-                        <td className="max-w-[16rem] px-4 py-2 align-top">
+                        <td className="px-4 py-2 align-top">
                           <span
                             className="block truncate font-mono text-[11px] text-[var(--color-ink-muted)]"
                             title={result.suite ?? ""}
@@ -412,7 +428,7 @@ export default async function RunPage({
                             {truncateStart(result.suite ?? "—", 34)}
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-right align-top font-mono text-[11px] text-[var(--color-ink-muted)] tabular-nums">
+                        <td className="px-4 py-2 text-right align-top font-mono text-[11px] whitespace-nowrap text-[var(--color-ink-muted)] tabular-nums">
                           {formatDuration(result.durationMs)}
                         </td>
                       </tr>

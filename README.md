@@ -140,7 +140,7 @@ special case that hides bugs until deploy.
 ### Then
 
 ```bash
-pnpm db:migrate           # apply migrations, provision partitions, bootstrap org/project
+pnpm db:migrate           # apply migrations, provision partitions
 pnpm dev                  # web on http://localhost:3000, worker alongside
 ```
 
@@ -156,14 +156,16 @@ Health JSON: `curl localhost:3000/api/health?deep=1`.
 | --- | --- |
 | `pnpm dev` | web + worker in watch mode |
 | `pnpm verify` | format check, lint, typecheck, unit tests — what CI runs |
-| `pnpm db:migrate` | apply migrations, provision partitions, bootstrap org/project |
+| `pnpm db:migrate` | apply migrations and provision partitions (creates no organisation — sign in, or use `seed-test-org`) |
 | `pnpm db:migrate:check` | non-zero exit if anything is unapplied (CI drift guard) |
 | `pnpm db:partitions` | create lookahead partitions, drop expired; `--dry-run`, `--list`, `--drain` |
 | `pnpm db:reset` | drop and rebuild the schema (refuses non-local databases) |
 | `pnpm --filter @testcenter/db mint-token <project>` | create a CI API token (shown once) |
 | `pnpm --filter @testcenter/db seed-perf [runs] [tests]` | seed history and assert read-path budgets |
 | `pnpm --filter @testcenter/db seed-test-org [days]` | seed the Test Organisation with believable history |
+| `pnpm --filter @testcenter/db seed-scenarios [org] [n]` | seed the awkward cases — every run state, layout-breaking content, an n-test run, an empty project |
 | `pnpm --filter @testcenter/db seed-users` | apply the account roster (idempotent) — see the [user guide](docs/user-guide.md) |
+| `pnpm --filter @testcenter/db remove-org <slug> [--yes]` | delete an organisation and everything under it; dry-run by default |
 | `pnpm --filter @testcenter/worker enqueue partitions` | enqueue a real job to smoke-test the queue path |
 
 ## Things worth knowing before changing code

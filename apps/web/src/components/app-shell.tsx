@@ -244,18 +244,32 @@ export function AppShell({
         }`}
         style={{ width: collapsed && !mobileOpen ? sidebarWidth : "14rem" }}
       >
+        {/* The brand strip is part of the header band, not part of the sidebar: the aside
+            sits above the header in the stack, so leaving this on the page surface cut a
+            notch out of the left end of the coloured bar. Same token rebinding as the
+            header, so the two halves cannot drift apart. */}
         <div
-          className={`flex h-12 shrink-0 items-center border-b border-[var(--color-border-subtle)] ${
+          className={`flex h-12 shrink-0 items-center border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)] ${
             collapsed && !mobileOpen ? "justify-center px-2" : "gap-2 px-4"
           }`}
+          style={{
+            ["--color-surface" as string]: "var(--color-chrome)",
+            ["--color-surface-raised" as string]: "var(--color-chrome-raised)",
+            ["--color-border-subtle" as string]: "var(--color-chrome-border)",
+            ["--color-ink" as string]: "var(--color-chrome-ink)",
+            ["--color-ink-muted" as string]: "var(--color-chrome-ink-muted)",
+          }}
         >
           <Link
             href={`/o/${orgSlug}`}
             className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight"
             aria-label="Test Center home"
           >
+            {/* Was status-passed green. A green dot beside the product name is indis-
+                tinguishable from a health indicator saying everything is passing, and
+                status tokens are reserved for actual status. */}
             <span
-              className="inline-block size-2.5 shrink-0 rounded-full bg-[var(--color-status-passed)]"
+              className="inline-block size-2.5 shrink-0 rounded-full bg-[var(--color-chrome-ink)]"
               aria-hidden
             />
             {collapsed && !mobileOpen ? null : <span className="truncate">Test Center</span>}
@@ -327,8 +341,28 @@ export function AppShell({
 
       {/* ── Fixed header ─────────────────────────────────────────────────── */}
       <header
-        className="fixed inset-x-0 top-0 z-30 h-12 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)]/92 backdrop-blur transition-[padding] duration-150 motion-reduce:transition-none"
-        style={{ paddingLeft: `var(--tc-sidebar, 0px)` }}
+        className="fixed inset-x-0 top-0 z-30 h-12 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)] transition-[padding] duration-150 motion-reduce:transition-none"
+        style={{
+          paddingLeft: `var(--tc-sidebar, 0px)`,
+          /*
+           * The header rebinds the generic surface and ink tokens to their chrome
+           * equivalents for its whole subtree, rather than threading a `variant` prop
+           * through every control inside it.
+           *
+           * Everything in here — both scope switchers and their dropdowns, the search
+           * button, the theme toggle, the role badge — is already written against
+           * --color-surface / --color-ink / --color-border-subtle. Rebinding those five
+           * properties at this one element recolours all of it, including components that
+           * know nothing about the header, and keeps a single definition of what "on
+           * chrome" means. It also means the dropdowns read as extensions of the header
+           * they hang from, which is what they are.
+           */
+          ["--color-surface" as string]: "var(--color-chrome)",
+          ["--color-surface-raised" as string]: "var(--color-chrome-raised)",
+          ["--color-border-subtle" as string]: "var(--color-chrome-border)",
+          ["--color-ink" as string]: "var(--color-chrome-ink)",
+          ["--color-ink-muted" as string]: "var(--color-chrome-ink-muted)",
+        }}
       >
         <div className="flex h-full items-center gap-2 px-3 lg:px-4">
           <button
@@ -395,10 +429,10 @@ export function AppShell({
                 // The dot is decorative and the count is split across spans, so the name
                 // is stated once here instead of assembled from fragments.
                 aria-label={`${signals.failing} failing tests in the last 30 days. Show runs with failures.`}
-                className="hidden items-center gap-1.5 rounded-md border border-[var(--color-status-failed)]/40 px-2 py-1 text-[11px] text-[var(--color-status-failed)] hover:bg-[var(--color-status-failed)]/5 sm:flex"
+                className="hidden items-center gap-1.5 rounded-md border border-[var(--color-chrome-danger)]/40 px-2 py-1 text-[11px] text-[var(--color-chrome-danger)] hover:bg-[var(--color-chrome-danger)]/10 sm:flex"
               >
                 <span
-                  className="inline-block size-1.5 rounded-full bg-[var(--color-status-failed)]"
+                  className="inline-block size-1.5 rounded-full bg-[var(--color-chrome-danger)]"
                   aria-hidden
                 />
                 <span className="font-mono tabular-nums">{signals.failing}</span>

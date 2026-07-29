@@ -2,7 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createClient, type Database, type Sql } from "./client.js";
 import { bootstrap } from "./bootstrap.js";
-import { persistResultBatch, addRunTotals, finalizeRun, failStalledRuns } from "./ingest.js";
+import {
+  persistResultBatch,
+  addRunTotals,
+  finalizeRun,
+  failStalledRuns,
+  refreshTestCaseStats,
+} from "./ingest.js";
 import {
   getRun,
   getRunResult,
@@ -36,6 +42,18 @@ function uniqueName(prefix: string): string {
   return `${prefix} ${letters}`;
 }
 
+/*
+ * Each suite bootstraps into its own throwaway organisation and drops it at the end.
+ *
+ * They used to share the default org, which had two costs. The tests were coupled — one
+ * suite's leftovers were visible to the other's queries — and, because bootstrap is
+ * idempotent by slug, running them against a development database silently recreated
+ * that organisation and its project. An org deliberately deleted would quietly reappear
+ * the next time anyone ran the suite. Deleting the org here cascades through every
+ * tenant-scoped table, which is the guarantee the org_id column exists to provide.
+ */
+const testOrgSlug = `test-queries-${Math.random().toString(36).slice(2, 10)}`;
+
 describeIfDb("read-path queries", () => {
   let sql: Sql;
   let db: Database;
@@ -47,7 +65,12 @@ describeIfDb("read-path queries", () => {
     const client = createClient({ databaseUrl: databaseUrl as string, maxConnections: 4 });
     sql = client.sql;
     db = client.db;
-    const boot = await bootstrap(db, { projectKey: "query-test", projectName: "Query Test" });
+    const boot = await bootstrap(db, {
+      orgSlug: testOrgSlug,
+      orgName: "Query Test Org",
+      projectKey: "query-test",
+      projectName: "Query Test",
+    });
     orgId = boot.orgId;
     projectId = boot.projectId;
 
@@ -97,9 +120,12 @@ describeIfDb("read-path queries", () => {
 
   afterAll(async () => {
     if (!sql) return;
+    // Dropping the org cascades the runs, results and test cases with it; the explicit
+    // run deletes are kept so a failure here still narrows to the right table.
     for (const runId of runIds) {
       await db.delete(schema.runs).where(eq(schema.runs.id, runId));
     }
+    await db.delete(schema.organizations).where(eq(schema.organizations.slug, testOrgSlug));
     await sql.end({ timeout: 5 });
   });
 
@@ -315,6 +341,109 @@ describeIfDb("read-path queries", () => {
       const reaped = await failStalledRuns(sql, { olderThanMinutes: 30 });
       expect(reaped.map((entry) => entry.runId)).not.toContain(freshId);
       expect((await getRun(sql, { orgId, runId: freshId }))?.status).toBe("parsing");
+    });
+  });
+
+  describe("flake score", () => {
+    it("ranks a well-evidenced flake above a test that hiccuped on its only run", async () => {
+      /*
+       * The ordering is the whole product of this score, and it used to be inverted.
+       * An unsmoothed rate makes one retry in one run a rate of 1.0, so a brand-new
+       * test scored a perfect 100 and sat above a test that had been flaking for weeks.
+       * Anyone working the list top-down would have started with the least evidence
+       * available.
+       *
+       * Asserted as a relative ordering rather than exact values, so the prior and the
+       * curve can be retuned without rewriting the test — but the ranking cannot silently
+       * invert again.
+       */
+      const flakyRetry = [
+        { attempt: 1, status: "failed" as const },
+        { attempt: 2, status: "passed" as const },
+      ];
+
+      const noviceName = uniqueName("novice flake");
+      const veteranName = uniqueName("veteran flake");
+
+      // The veteran flakes in 6 of 8 runs; the novice appears once, and flakes.
+      for (let i = 0; i < 8; i += 1) {
+        const results = [
+          {
+            name: veteranName,
+            status: "passed" as const,
+            suite: "specs/flake.spec.ts",
+            durationMs: 100,
+            ...(i < 6 ? { retries: flakyRetry } : {}),
+          },
+          ...(i === 7
+            ? [
+                {
+                  name: noviceName,
+                  status: "passed" as const,
+                  suite: "specs/flake.spec.ts",
+                  durationMs: 100,
+                  retries: flakyRetry,
+                },
+              ]
+            : []),
+        ];
+        const runId = await seedRun({
+          branch: "main",
+          environment: "staging",
+          framework: "playwright",
+          tags: {},
+          results,
+        });
+        runIds.push(runId);
+        await refreshTestCaseStats(sql, { projectId, runId, windowDays: 30 });
+      }
+
+      const scores = await sql<{ name: string; flake_score: string; runs_30d: number }[]>`
+        SELECT name, flake_score, runs_30d FROM test_cases
+        WHERE project_id = ${projectId} AND name IN (${veteranName}, ${noviceName})
+      `;
+      const veteran = scores.find((row) => row.name === veteranName);
+      const novice = scores.find((row) => row.name === noviceName);
+
+      expect(veteran?.runs_30d).toBe(8);
+      expect(novice?.runs_30d).toBe(1);
+      expect(Number(veteran?.flake_score)).toBeGreaterThan(Number(novice?.flake_score));
+
+      // Both are still recognisably flaky — smoothing discounts sparse evidence, it
+      // does not suppress it. A single retry flake is real and must stay visible.
+      expect(Number(novice?.flake_score)).toBeGreaterThan(20);
+    });
+
+    it("scores a consistently broken test at zero", async () => {
+      // A test that fails every time is a failure, not a flake. If it appeared here the
+      // flaky list would just be a second, worse copy of the failing list.
+      const brokenName = uniqueName("always broken");
+      for (let i = 0; i < 4; i += 1) {
+        const runId = await seedRun({
+          branch: "main",
+          environment: "staging",
+          framework: "playwright",
+          tags: {},
+          results: [
+            {
+              name: brokenName,
+              status: "failed",
+              suite: "specs/broken.spec.ts",
+              durationMs: 50,
+              failure: { type: "AssertionError", message: "always" },
+            },
+          ],
+        });
+        runIds.push(runId);
+        await refreshTestCaseStats(sql, { projectId, runId, windowDays: 30 });
+      }
+
+      const rows = await sql<{ flake_score: string; fail_rate_30d: string }[]>`
+        SELECT flake_score, fail_rate_30d FROM test_cases
+        WHERE project_id = ${projectId} AND name = ${brokenName}
+      `;
+      expect(Number(rows[0]?.flake_score)).toBe(0);
+      expect(Number(rows[0]?.fail_rate_30d)).toBe(100);
     });
   });
 

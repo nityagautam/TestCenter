@@ -23,7 +23,9 @@
     "mint-token": "tsx scripts/token.ts",
     "seed-perf": "tsx scripts/seed-perf.ts",
     "seed-test-org": "tsx scripts/seed-test-org.ts",
-    "seed-users": "tsx scripts/seed-users.ts"
+    "seed-users": "tsx scripts/seed-users.ts",
+    "remove-org": "tsx scripts/remove-org.ts",
+    "seed-scenarios": "tsx scripts/seed-scenarios.ts"
   },
   "dependencies": {
     "@testcenter/core": "workspace:*",

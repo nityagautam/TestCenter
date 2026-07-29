@@ -38,6 +38,35 @@
 
   /* Chart chrome sits one step off the surface so it stays recessive. */
   --color-grid: #ecebe7;
+
+  /*
+   * Application chrome — the header band.
+   *
+   * Deliberately outside the data-colour space. Run this indigo through the palette
+   * validator and it fails both the lightness band (0.301, far below the floor) and the
+   * chroma floor (0.073) — which is the point: it is structurally incapable of passing as
+   * a categorical series, so a large indigo surface can never be misread as encoding a
+   * value. The hue is equally deliberate. Every reserved status token is green, red,
+   * amber, orange, or gray, so a blue-violet header cannot be mistaken for a state
+   * either. That leaves the header free to do the one job it has: mark where the
+   * application ends and the data begins.
+   *
+   * Ink pairings are measured, not assumed: #ffffff is 13.8:1 and the muted step 7.4:1,
+   * both clearing AA for normal text.
+   */
+  --color-chrome: #232a52;
+  --color-chrome-raised: #2e3663;
+  --color-chrome-border: #3a4272;
+  --color-chrome-ink: #ffffff;
+  --color-chrome-ink-muted: #b9bcd6;
+
+  /*
+   * The reserved failure red measures 2.9:1 against the chrome surface, which is not
+   * readable. This is a lightened step of the same hue for the one status indicator that
+   * lives in the header, at 6.8:1. Safe precisely because the header pill states
+   * "failing" in words — the colour reinforces the meaning, it never carries it.
+   */
+  --color-chrome-danger: #ff9a9a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -59,6 +88,13 @@
     --color-series-3: #199e70;
 
     --color-grid: #2b2b28;
+
+    --color-chrome: #2b3252;
+    --color-chrome-raised: #39416b;
+    --color-chrome-border: #424a7a;
+    --color-chrome-ink: #ffffff;
+    --color-chrome-ink-muted: #c0c3dc;
+    --color-chrome-danger: #ff9a9a;
   }
 }
 
@@ -80,6 +116,13 @@
   --color-series-3: #199e70;
 
   --color-grid: #2b2b28;
+
+  --color-chrome: #2b3252;
+  --color-chrome-raised: #39416b;
+  --color-chrome-border: #424a7a;
+  --color-chrome-ink: #ffffff;
+  --color-chrome-ink-muted: #c0c3dc;
+  --color-chrome-danger: #ff9a9a;
 }
 
 html,

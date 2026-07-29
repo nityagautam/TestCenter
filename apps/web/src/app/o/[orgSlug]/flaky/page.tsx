@@ -70,23 +70,34 @@ export default async function FlakyPage({
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            {/* Fixed layout — see the note on the run results table. */}
+            <table className="w-full table-fixed text-left text-xs">
               <thead className="tc-sticky border-b border-[var(--color-border-subtle)] text-[10px] tracking-wide text-[var(--color-ink-muted)] uppercase">
                 <tr>
                   <th className="px-4 py-2 font-medium">Test</th>
-                  <th className="px-3 py-2 text-right font-medium">Flake</th>
-                  <th className="px-3 py-2 text-right font-medium">Fail rate</th>
-                  <th className="px-3 py-2 text-right font-medium">Runs</th>
-                  <th className="px-3 py-2 text-right font-medium">CI time</th>
+                  <th className="w-[4.5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
+                    Flake
+                  </th>
+                  <th className="w-[5.5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
+                    Fail rate
+                  </th>
+                  <th className="w-[4.5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
+                    Runs
+                  </th>
+                  <th className="w-[5.5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
+                    CI time
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-border-subtle)]">
                 {tests.map((test) => (
                   <tr key={test.id} className="hover:bg-[var(--color-surface)]/60">
-                    <td className="max-w-lg px-4 py-2">
+                    <td className="px-4 py-2">
+                      {/* Bound on the child, not the cell — see the note in tests/page.tsx. */}
                       <Link
                         href={`/o/${orgSlug}/tests/${test.id}`}
-                        className="font-medium hover:underline"
+                        className="block truncate font-medium hover:underline"
+                        title={test.name}
                       >
                         {test.name}
                       </Link>

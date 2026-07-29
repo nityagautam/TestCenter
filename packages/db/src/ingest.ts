@@ -378,7 +378,26 @@ export async function rollupProjectDay(
  * dashboard used to call something flaky, and *below* a test that merely failed
  * sometimes with no retries at all. The saturating curve puts a 20% retry rate at ~80
  * and keeps the ordering faithful to signal strength.
+ *
+ * Both rates are smoothed by FLAKE_PRIOR_RUNS, which is what makes the ranking hold up
+ * across tests with wildly different amounts of history. Without it the rate is the raw
+ * observed proportion, so one retry in a test's only run is a rate of 1.0 — a brand-new
+ * test that hiccuped once scored a perfect 100 and outranked a test that had been
+ * flaking in 30 of its last 40 runs. The leaderboard's top was reserved for its
+ * least-evidenced entries, which is precisely backwards for a list whose job is to say
+ * what to fix first. Smoothing pulls sparse observations toward zero and leaves
+ * well-evidenced ones almost untouched: one flake in one run now scores ~80, while a
+ * 30%-of-40-runs flake scores ~89 and keeps its place above it.
  */
+/**
+ * Pseudo-runs added to every flake-rate denominator.
+ *
+ * Four is chosen so a single observation is discounted meaningfully (a lone retry flake
+ * lands at ~80 rather than 100) without materially moving a test that has a real history
+ * behind it — at 40 runs the correction is under two points.
+ */
+const FLAKE_PRIOR_RUNS = 4;
+
 export async function refreshTestCaseStats(
   sql: Sql,
   input: { projectId: string; runId: string; windowDays?: number },
@@ -427,21 +446,16 @@ export async function refreshTestCaseStats(
         WHEN s.runs_window = 0 THEN 0
         ELSE ROUND(s.failures_window::numeric * 100 / s.runs_window, 2)
       END,
-      flake_score = CASE
-        WHEN s.runs_window < 2 THEN
-          -- With a single data point only an in-run retry flake is defensible.
-          CASE WHEN s.retry_flakes > 0 THEN 100 ELSE 0 END
-        ELSE ROUND(
-          (100 * (1 - exp(-8 * LEAST(1.0,
-            -- Retry flakes carry full weight; a lone status transition is a
-            -- regression rather than flakiness and is excluded entirely.
-            s.retry_flakes::numeric / s.runs_window
-            + CASE WHEN s.status_flips >= 2
-                   THEN s.status_flips::numeric / (s.runs_window - 1)
-                   ELSE 0 END
-          ))))::numeric,
-          2)
-      END,
+      flake_score = ROUND(
+        (100 * (1 - exp(-8 * LEAST(1.0,
+          -- Retry flakes carry full weight; a lone status transition is a
+          -- regression rather than flakiness and is excluded entirely.
+          s.retry_flakes::numeric / (s.runs_window + ${FLAKE_PRIOR_RUNS})
+          + CASE WHEN s.status_flips >= 2
+                 THEN s.status_flips::numeric / (s.runs_window - 1 + ${FLAKE_PRIOR_RUNS})
+                 ELSE 0 END
+        ))))::numeric,
+        2),
       avg_duration_ms = s.avg_duration,
       p95_duration_ms = s.p95_duration
     FROM stats s

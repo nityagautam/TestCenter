@@ -40,7 +40,7 @@ cd /Users/amishra/workspace/code/poc/TestCenter
 brew services start postgresql@17
 brew services start redis
 
-# Apply migrations, provision partitions, bootstrap
+# Apply migrations and provision partitions
 pnpm db:migrate
 
 # Seed the Test Organisation with believable history, then the account roster
@@ -380,6 +380,28 @@ up a pipeline.
 | Cross-org granting | Sign in as `admin@testcenter.dev`, open Platform admin, select any organisation and grant an address access — including organisations you are not a member of. |
 | Multiple failure modes | Open the test linked from "Most-failing tests" in `payments-service` — it has two distinct signatures. |
 | A duration regression | Test search → sort by **Slowest**. The seeded `slowing` tests climb steadily. |
+
+### The scenario projects
+
+Test Organisation carries four projects whose only purpose is to make awkward states
+reachable, so UI work does not depend on happening to have the right data. Regenerate them
+at any time with:
+
+```bash
+pnpm --filter @testcenter/db seed-scenarios            # 5,000-test scale run
+pnpm --filter @testcenter/db seed-scenarios test-organisation 20000   # larger
+```
+
+The script replaces its own projects rather than appending, so re-running is safe.
+
+| Project | What is in it |
+| --- | --- |
+| `Scenarios · Run states` | Every status the UI can render: a **pending** run awaiting upload, one stuck in **parsing** (the live progress banner and SSE stream), a **failed** import with a malformed-XML warning, a **partial** import carrying three warnings, an all-green run, an all-red run, a skip-heavy run, a run of errors rather than failures, retries that recovered and retries that never did, a four-way **sharded** run sharing a `run_group_id`, a pull-request run with a PR number and CI job URL, a re-run at attempt 3, an **empty** report that parsed to nothing, and a run with ten tags. |
+| `Scenarios · Awkward content` | The things that break layouts: a 180-character test name, a deep suite path, a 60-frame stack trace, 120 lines of captured stdout, CJK / Arabic / Cyrillic / emoji in names and messages, parameterised names, a 0 ms test beside a 32-minute one, a failure with a stack but no message, stderr-only output, result-level tags, and a test with **three** distinct failure signatures. |
+| `Scenarios · Scale` | One run of 5,000 results across 40 suites — the case the run result table has to survive until it is virtualized. |
+| `Scenarios · No data` | A project with no runs at all, for the empty state. |
+
+Two tests are left quarantined so the Quarantined filter and badge have subjects.
 
 ---
 

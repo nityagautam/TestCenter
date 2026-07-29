@@ -1,5 +1,5 @@
 import { createClient } from "../src/client.js";
-import { bootstrap } from "../src/bootstrap.js";
+import * as schema from "../src/schema.js";
 import { migrate, pendingMigrations } from "../src/migrate.js";
 import { maintainPartitions } from "../src/partitions.js";
 import { requireDatabaseUrl } from "./load-env.js";
@@ -48,11 +48,21 @@ async function main(): Promise<void> {
           : ""),
     );
 
-    console.log("→ bootstrapping org/project");
-    const boot = await bootstrap(db);
+    /*
+     * No organisation is created here on purpose.
+     *
+     * This used to bootstrap a default org and project so a fresh database had somewhere
+     * to accept a run before sign-in existed. Onboarding now does that properly, so
+     * bootstrapping only manufactures an organisation nobody is a member of — and
+     * recreated it on every migrate, so deleting it never stuck.
+     *
+     * Use `seed-test-org` for development data, or sign in and create one.
+     */
+    const orgs = await db.select({ id: schema.organizations.id }).from(schema.organizations);
     console.log(
-      `✓ org ${boot.orgId}${boot.created.org ? " (created)" : ""}, ` +
-        `project ${boot.projectId}${boot.created.project ? " (created)" : ""}`,
+      orgs.length === 0
+        ? "✓ no organisations yet — sign in to create one, or run `pnpm --filter @testcenter/db seed-test-org`"
+        : `✓ ${orgs.length} organisation(s) present`,
     );
   } finally {
     await sql.end({ timeout: 5 });

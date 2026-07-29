@@ -18,6 +18,7 @@ import {
   StatTile,
   StatusBadge,
 } from "@/components/ui";
+import { passRateTone } from "@/lib/health";
 import { formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext } from "@/lib/viewer";
@@ -116,7 +117,7 @@ export default async function OrgDashboard({
           <StatTile
             label="Pass rate"
             value={formatPercent(summary.passRate30d)}
-            tone={summary.failing30d > 0 ? "failed" : "passed"}
+            tone={passRateTone(summary.passRate30d)}
             hint="last 30 days"
           />
           <StatTile label="Runs" value={summary.runs30d} hint={`${summary.runsToday} today`} />

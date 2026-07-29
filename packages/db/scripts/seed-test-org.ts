@@ -362,10 +362,14 @@ async function main(): Promise<void> {
             runStartedAt,
           });
           await addRunTotals(sql, runId, outcome.totals);
+          // finishedAt is stated rather than defaulted, otherwise every backdated run
+          // records a finish time of now() and a 40-day-old run reads as "finished just
+          // now" on its detail page.
           await finalizeRun(sql, {
             runId,
             status: "complete",
             durationMs: outcome.totals.durationMs,
+            finishedAt: new Date(runStartedAt.getTime() + outcome.totals.durationMs),
             framework: spec.framework,
           });
           await rollupProjectDay(sql, { orgId, projectId, day: runStartedAt, branch });

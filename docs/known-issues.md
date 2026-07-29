@@ -207,6 +207,71 @@ Three of my own test expectations were wrong rather than the code:
 Recorded because in each case the instinct to "fix the code" would have broken correct
 behaviour.
 
+### A14. The headline pass rate was always red
+
+`tone={summary.failing30d > 0 ? "failed" : "passed"}` on both the org and project
+dashboards. Any single failing test anywhere painted the pass rate with the critical
+colour, so a 97.7% pass rate rendered in the same red as an outage — and since every real
+project has at least one broken test, the loudest signal on the page was permanently lit.
+
+Replaced with banded thresholds in `apps/web/src/lib/health.ts` (≥98% healthy, ≥90%
+degraded, below that critical), and a null rate — no runs in the window — now renders
+neutral rather than asserting a verdict about a suite nobody has run. The *count* of
+failing tests keeps its unconditional red, which is correct: a failure count above zero
+really is a failure count.
+
+### A15. Flake score ranked its least-evidenced entries highest
+
+The score divided flake events by the observed run count, so a test seen exactly once that
+needed one retry had a rate of 1.0 and scored a perfect **100** — above a test that had
+been flaking in 30 of its last 40 runs (~88). The flaky leaderboard's job is to say what
+to fix first, and its top was reserved for the weakest evidence available. A synthetic
+5,000-test seed run made this obvious: 94 brand-new tests instantly occupied the entire
+list.
+
+Both rates are now smoothed by `FLAKE_PRIOR_RUNS = 4` pseudo-runs in the denominator, so
+sparse observations are pulled toward zero while well-evidenced ones move by under two
+points. One flake in one run scores ~80; the 30%-of-40-runs case scores ~89 and keeps its
+place above it. `queries.test.ts` now asserts the ordering and the zero for a
+consistently-broken test, since the property matters more than the exact numbers.
+
+### A16. `max-width` on a `<td>` does nothing
+
+Four data tables bounded their name column with `max-w-md` / `max-w-lg` on the cell.
+Under auto table layout the algorithm sizes each column to its content and ignores that
+declaration entirely, so a 200-character test name overran its cell and drove straight
+through the status and fail-rate columns. Constraining a block *child* fixed the
+truncation but not the geometry: an absolute maximum cannot know how much width the
+sidebar left, so the last two columns were pushed off the right edge instead.
+
+All four tables (tests, flaky, run results, run result suites) are now `table-fixed` with
+proportioned column widths, which gives `truncate` a definite width to resolve against and
+makes the layout independent of content. Narrow measurement columns also carry
+`whitespace-nowrap`, because a duration broken across two lines reads as two values.
+
+Found by seeding deliberately awkward content rather than by reading the code.
+
+### A17. The test suite recreated organisations in the development database
+
+`bootstrap()` is idempotent by slug, and both integration suites called it with the
+default slug. Running `pnpm test` against a development database therefore recreated the
+`default` organisation and its project — an org deliberately deleted came back the next
+time anyone ran the tests. The two suites also shared that org, so each could see the
+other's leftovers.
+
+Each suite now bootstraps a uniquely-slugged throwaway organisation and deletes it in
+`afterAll`, which cascades through every tenant-scoped table. `seed-perf` likewise got its
+own `perf-harness` org. Verified: after a full run, `test-organisation` is the only
+organisation present.
+
+### A18. Backdated seed runs recorded wall-clock durations
+
+`finalizeRun` defaults `finishedAt` to `now()` and derives the duration from
+`started_at`, which is right for a live ingest and wrong for seeded history. A run placed
+30 hours in the past came out with a 30-hour duration, and the dashboard duly reported an
+average run duration of **3h 18m**. Both seeders now state the duration and the finish
+time explicitly, and existing rows were realigned. The average is now 27s.
+
 ---
 
 ## Part B — outstanding

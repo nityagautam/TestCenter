@@ -54,7 +54,13 @@ async function main(): Promise<void> {
   const { sql, db } = client;
 
   try {
-    const boot = await bootstrap(db, { projectKey: "perf", projectName: "Perf Harness" });
+    // Its own organisation, so running the perf harness does not recreate the default org.
+    const boot = await bootstrap(db, {
+      orgSlug: "perf-harness",
+      orgName: "Perf Harness",
+      projectKey: "perf",
+      projectName: "Perf Harness",
+    });
     const { orgId, projectId } = boot;
 
     const existing = await sql<{ n: number }[]>`

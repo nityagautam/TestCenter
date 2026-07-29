@@ -54,6 +54,18 @@ const TENANT_SCOPED_TABLES = [
   "idempotency_keys",
 ] as const;
 
+/*
+ * Each suite bootstraps into its own throwaway organisation and drops it at the end.
+ *
+ * They used to share the default org, which had two costs. The tests were coupled — one
+ * suite's leftovers were visible to the other's queries — and, because bootstrap is
+ * idempotent by slug, running them against a development database silently recreated
+ * that organisation and its project. An org deliberately deleted would quietly reappear
+ * the next time anyone ran the suite. Deleting the org here cascades through every
+ * tenant-scoped table, which is the guarantee the org_id column exists to provide.
+ */
+const testOrgSlug = `test-schema-${Math.random().toString(36).slice(2, 10)}`;
+
 describeIfDb("schema", () => {
   let sql: Sql;
   let db: Database;
@@ -64,13 +76,20 @@ describeIfDb("schema", () => {
     const client = createClient({ databaseUrl: databaseUrl as string, maxConnections: 3 });
     sql = client.sql;
     db = client.db;
-    const boot = await bootstrap(db, { projectKey: "schema-test", projectName: "Schema Test" });
+    const boot = await bootstrap(db, {
+      orgSlug: testOrgSlug,
+      orgName: "Schema Test Org",
+      projectKey: "schema-test",
+      projectName: "Schema Test",
+    });
     orgId = boot.orgId;
     projectId = boot.projectId;
   });
 
   afterAll(async () => {
-    if (sql) await sql.end({ timeout: 5 });
+    if (!sql) return;
+    await db.delete(schema.organizations).where(eq(schema.organizations.slug, testOrgSlug));
+    await sql.end({ timeout: 5 });
   });
 
   it("applied the migration and recorded a checksum", async () => {
@@ -449,7 +468,12 @@ describeIfDb("schema", () => {
   });
 
   it("bootstraps idempotently", async () => {
-    const again = await bootstrap(db, { projectKey: "schema-test", projectName: "Schema Test" });
+    const again = await bootstrap(db, {
+      orgSlug: testOrgSlug,
+      orgName: "Schema Test Org",
+      projectKey: "schema-test",
+      projectName: "Schema Test",
+    });
     expect(again.created).toEqual({ org: false, project: false });
     expect(again.projectId).toBe(projectId);
   });
