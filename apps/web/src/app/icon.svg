@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Test Center">
+  <title>Test Center</title>
+  <!--
+    A results grid on the application's chrome indigo.
+
+    The obvious favicon for a test tool is a green tick, which is both the template answer
+    and wrong here: green and red are reserved status colours in this product, and a green
+    mark beside the product name asserts "everything is passing" every time the tab is
+    looked at. The sidebar's brand dot was changed from green to white for exactly that
+    reason, and the favicon follows it.
+
+    What it draws instead is the app's own signature: the execution-history strip, the row of
+    cells that answers "how has this test behaved". Three filled cells and one outlined —
+    complete and incomplete — which is a results grid rather than a verdict.
+
+    A 32-unit grid with cells on even coordinates, so the shapes stay on whole pixels when
+    the browser renders this at 16px. The tile carries its own background so the mark reads
+    on both a light and a dark tab bar.
+  -->
+  <rect width="32" height="32" rx="7" fill="#232a52" />
+  <g fill="#ffffff">
+    <rect x="6" y="6" width="9" height="9" rx="2" />
+    <rect x="17" y="6" width="9" height="9" rx="2" />
+    <rect x="6" y="17" width="9" height="9" rx="2" />
+  </g>
+  <!--
+    Dimmed rather than outlined: the cell still to be accounted for.
+
+    This was first drawn as a 2-unit stroked outline, which is legible at 180px and gone at
+    16px — downscaling turns a thin stroke into a sub-pixel hairline, and the mark lost its
+    fourth cell exactly at the size a favicon is actually used. A filled rectangle at lower
+    opacity survives any scale, because area does not thin out the way a line does.
+  -->
+  <rect x="17" y="17" width="9" height="9" rx="2" fill="#ffffff" fill-opacity="0.4" />
+</svg>

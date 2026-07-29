@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { listProjects, listSuites, searchTests } from "@testcenter/db";
 import { Card, EmptyState, StatusBadge } from "@/components/ui";
+import { FilterMenu } from "@/components/filter-menu";
 import { SearchBox } from "@/components/search-box";
 import {
   formatDuration,
@@ -177,18 +178,46 @@ export async function TestSearch({
       </div>
 
       <div className="mb-4 space-y-2.5">
-        <SearchBox
-          action={basePath}
-          defaultValue={query.q ?? ""}
-          hidden={Object.fromEntries(
-            Object.entries(query).filter(
-              ([key, value]) => key !== "q" && key !== "page" && typeof value === "string" && value,
-            ) as [string, string][],
-          )}
-          placeholder="Search test names, classes and suites…"
-        />
+        {/*
+         * One toolbar: find, then narrow, then order — left to right in the sequence they
+         * are used.
+         *
+         * The search field was full-width with the filters on a row beneath, which spent the
+         * page's whole width on a field that usually holds one word and split a single job
+         * across two bands. It is now sized to its content and the controls sit beside it.
+         *
+         * Status stays a segmented control rather than becoming a second dropdown: it is the
+         * filter people reach for constantly, and a menu would make "show me the failing
+         * tests" two clicks while hiding which state is active. Ordering is a menu because it
+         * is one choice among five and its current value is worth stating on the trigger.
+         */}
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchBox
+            action={basePath}
+            defaultValue={query.q ?? ""}
+            hidden={Object.fromEntries(
+              Object.entries(query).filter(
+                ([key, value]) =>
+                  key !== "q" && key !== "page" && typeof value === "string" && value,
+              ) as [string, string][],
+            )}
+            placeholder="Search name, class or suite…"
+            /*
+             * The elastic member of the row.
+             *
+             * Everything else here is sized by its content — six status options, one sort
+             * label — so the search field is the only thing that can absorb whatever width
+             * is left, and it is also the control that benefits from having it. A fixed
+             * width left a ragged 70px of dead space at the end of the toolbar on a wide
+             * screen; `flex-1` spends that on the field instead, at every viewport.
+             *
+             * `min-w-0` lets it shrink below its placeholder rather than forcing an
+             * overflow, and `min-w-[14rem]` keeps it usable until the row genuinely has to
+             * wrap, at which point it takes a line of its own.
+             */
+            className="min-w-0 flex-1 basis-[14rem]"
+          />
 
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <Segmented
             label="Status"
             options={STATUS_FILTERS.map((option) => ({
@@ -198,28 +227,15 @@ export async function TestSearch({
             }))}
           />
 
-          <div className="flex items-center gap-2 text-[11px]">
-            <span className="text-[var(--color-ink-muted)]">Sort</span>
-            <div className="flex items-center gap-1.5">
-              {SORTS.map((option) => {
-                const active = (query.sort ?? "recent") === option.value;
-                return (
-                  <Link
-                    key={option.value}
-                    href={buildHref({ sort: option.value })}
-                    aria-current={active ? "true" : undefined}
-                    className={
-                      active
-                        ? "font-semibold text-[var(--color-ink)] underline decoration-2 underline-offset-4"
-                        : "text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:underline hover:underline-offset-4"
-                    }
-                  >
-                    {option.label}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
+          <FilterMenu
+            label="Sort"
+            options={SORTS.map((option) => ({
+              label: option.label,
+              href: buildHref({ sort: option.value }),
+              active: (query.sort ?? "recent") === option.value,
+            }))}
+            align="left"
+          />
         </div>
 
         {/* Active narrowing, shown only when it exists, so the chrome stays quiet when it
@@ -485,7 +501,7 @@ function Segmented({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex overflow-hidden rounded-md border border-[var(--color-border-subtle)]"
+      className="inline-flex h-9 items-stretch overflow-hidden rounded-md border border-[var(--color-border-subtle)]"
     >
       {options.map((option, index) => (
         <Link
@@ -493,7 +509,7 @@ function Segmented({
           href={option.href}
           role="radio"
           aria-checked={option.active}
-          className={`px-2.5 py-1 text-[11px] transition-colors ${
+          className={`inline-flex items-center px-3 text-xs transition-colors ${
             index > 0 ? "border-l border-[var(--color-border-subtle)]" : ""
           } ${
             option.active

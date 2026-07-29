@@ -14,16 +14,25 @@ export function SearchBox({
   defaultValue,
   hidden = {},
   placeholder = "Search…",
+  className = "flex-1",
 }: {
   action: string;
   defaultValue: string;
   hidden?: Record<string, string>;
   placeholder?: string;
+  /**
+   * Width, decided by the caller.
+   *
+   * It used to stretch to the full content width, which is a lot of runway for a query
+   * that is usually one word, and it pushed the filters onto a row of their own. The page
+   * knows what else is on the line; the input does not.
+   */
+  className?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <form action={action} method="get" className="flex gap-2">
+    <form action={action} method="get" className={`flex gap-2 ${className}`}>
       {Object.entries(hidden).map(([key, value]) => (
         <input key={key} type="hidden" name={key} value={value} />
       ))}
@@ -35,7 +44,10 @@ export function SearchBox({
           defaultValue={defaultValue}
           placeholder={placeholder}
           aria-label="Search tests"
-          className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-3 py-2 pr-16 text-xs outline-none focus:border-[var(--color-ink-muted)]"
+          className={`h-9 w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-3 text-xs outline-none focus:border-[var(--color-ink-muted)] ${
+            // Room for the clear button, but only when there is one to make room for.
+            defaultValue ? "pr-12" : ""
+          }`}
         />
         {defaultValue ? (
           <button
@@ -51,9 +63,12 @@ export function SearchBox({
         ) : null}
       </div>
 
+      {/* h-9 is the shared control height for this toolbar. Padding-derived heights left
+          the segmented filter visibly shorter than the field and the buttons beside it,
+          which reads as three unrelated controls rather than one row. */}
       <button
         type="submit"
-        className="rounded-md border border-[var(--color-border-subtle)] px-3 py-2 text-xs font-medium hover:border-[var(--color-ink-muted)]"
+        className="h-9 shrink-0 rounded-md border border-[var(--color-border-subtle)] px-3 text-xs font-medium hover:border-[var(--color-ink-muted)]"
       >
         Search
       </button>
