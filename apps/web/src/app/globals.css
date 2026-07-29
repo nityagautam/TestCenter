@@ -1,28 +1,85 @@
 @import "tailwindcss";
 
+/*
+ * Palette.
+ *
+ * These are validated values, not chosen by eye. The status four are the reserved
+ * good/warning/serious/critical steps; the categorical slots are the first three of
+ * the validated order, which are the ones that clear the all-pairs colourblind
+ * floors in both modes.
+ *
+ * Known and deliberately mitigated: status-good and status-critical sit at ΔE 4.1
+ * under deuteranopia. Green-vs-red is unavoidable domain convention for tests, so
+ * pass/fail is never carried by colour alone — every status is paired with a label,
+ * stacked segments keep a fixed order (failed, flaky, passed, skipped) separated by
+ * 2px surface gaps, and the counts appear as text beside every bar. Remove any of
+ * those and the charts stop being readable for red-green colourblind users.
+ *
+ * Dark values are separately chosen steps for the dark surface, not an inversion.
+ */
 @theme {
-  --color-surface: oklch(99% 0.002 250);
-  --color-surface-raised: oklch(100% 0 0);
-  --color-border-subtle: oklch(91% 0.005 250);
-  --color-ink: oklch(24% 0.015 260);
-  --color-ink-muted: oklch(52% 0.012 260);
+  --color-surface: #fcfcfb;
+  --color-surface-raised: #ffffff;
+  --color-border-subtle: #e6e5e1;
+  --color-ink: #0b0b0b;
+  --color-ink-muted: #52514e;
 
-  /* Status colours are shared by the run list, charts and badges so a "failed"
-     result looks identical everywhere in the product. */
-  --color-status-passed: oklch(62% 0.14 150);
-  --color-status-failed: oklch(58% 0.19 25);
-  --color-status-skipped: oklch(70% 0.03 260);
-  --color-status-flaky: oklch(74% 0.15 75);
+  /* Reserved status tokens — never reused as a series colour. */
+  --color-status-passed: #0ca30c;
+  --color-status-failed: #d03b3b;
+  --color-status-flaky: #fab219;
+  --color-status-error: #ec835a;
+  --color-status-skipped: #8b8a85;
+
+  /* Categorical slots, in validated order. Identity only, never state. */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+
+  /* Chart chrome sits one step off the surface so it stays recessive. */
+  --color-grid: #ecebe7;
 }
 
 @media (prefers-color-scheme: dark) {
-  @theme {
-    --color-surface: oklch(19% 0.012 260);
-    --color-surface-raised: oklch(23% 0.014 260);
-    --color-border-subtle: oklch(31% 0.014 260);
-    --color-ink: oklch(95% 0.005 260);
-    --color-ink-muted: oklch(70% 0.012 260);
+  :root:where(:not([data-theme="light"])) {
+    --color-surface: #1a1a19;
+    --color-surface-raised: #232322;
+    --color-border-subtle: #35342f;
+    --color-ink: #ffffff;
+    --color-ink-muted: #c3c2b7;
+
+    --color-status-passed: #0ca30c;
+    --color-status-failed: #d03b3b;
+    --color-status-flaky: #fab219;
+    --color-status-error: #ec835a;
+    --color-status-skipped: #8b8a85;
+
+    --color-series-1: #3987e5;
+    --color-series-2: #d95926;
+    --color-series-3: #199e70;
+
+    --color-grid: #2b2b28;
   }
+}
+
+:root[data-theme="dark"] {
+  --color-surface: #1a1a19;
+  --color-surface-raised: #232322;
+  --color-border-subtle: #35342f;
+  --color-ink: #ffffff;
+  --color-ink-muted: #c3c2b7;
+
+  --color-status-passed: #0ca30c;
+  --color-status-failed: #d03b3b;
+  --color-status-flaky: #fab219;
+  --color-status-error: #ec835a;
+  --color-status-skipped: #8b8a85;
+
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+
+  --color-grid: #2b2b28;
 }
 
 html,
@@ -34,4 +91,23 @@ body {
 body {
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+}
+
+/* Visible focus is the difference between usable and unusable by keyboard. */
+:focus-visible {
+  outline: 2px solid var(--color-series-1);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/*
+ * Forced-colors / high-contrast: colour is gone entirely, so the fixed segment
+ * order and the adjacent numeric labels are all that remain. Keep the gaps visible
+ * by falling back to real borders only in this mode.
+ */
+@media (forced-colors: active) {
+  [data-chart-segment] {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+  }
 }

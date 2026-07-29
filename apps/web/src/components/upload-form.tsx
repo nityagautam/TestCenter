@@ -22,12 +22,20 @@ type FileState =
   | { status: "done"; file: File; runId: string; tests: number | null }
   | { status: "error"; file: File; message: string };
 
-export function UploadForm({ projects }: { projects: ProjectOption[] }) {
+export function UploadForm({
+  projects,
+  orgSlug,
+  defaultBranch = "",
+}: {
+  projects: ProjectOption[];
+  orgSlug: string;
+  defaultBranch?: string;
+}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [project, setProject] = useState(projects[0]?.key ?? "");
-  const [branch, setBranch] = useState("");
+  const [branch, setBranch] = useState(defaultBranch);
   const [environment, setEnvironment] = useState("");
   const [tagText, setTagText] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -127,7 +135,7 @@ export function UploadForm({ projects }: { projects: ProjectOption[] }) {
     setBusy(false);
     // Land on the run so parse progress is visible immediately; a single upload is
     // the common case and an extra click to find it would be friction.
-    if (lastRunId) router.push(`/runs/${lastRunId}`);
+    if (lastRunId) router.push(`/o/${orgSlug}/runs/${lastRunId}`);
   }
 
   const queued = files.filter((entry) => entry.status === "queued").length;
@@ -235,7 +243,7 @@ export function UploadForm({ projects }: { projects: ProjectOption[] }) {
                   </div>
                 </div>
                 {entry.status === "done" ? (
-                  <a href={`/runs/${entry.runId}`} className="text-[11px] underline">
+                  <a href={`/o/${orgSlug}/runs/${entry.runId}`} className="text-[11px] underline">
                     view run
                   </a>
                 ) : null}

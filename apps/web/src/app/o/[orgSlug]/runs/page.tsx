@@ -4,7 +4,7 @@ import { findProjectByKey, listRuns, runFilterOptions, tagFacets } from "@testce
 import { Button, Card, EmptyState, ResultBar, StatusBadge, TagChip } from "@/components/ui";
 import { formatDuration, formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
 import { getServices } from "@/lib/services";
-import { currentOrgId } from "@/lib/session";
+import { can, requirePageContext } from "@/lib/viewer";
 
 /**
  * Run list.
@@ -42,7 +42,11 @@ function parseTagParams(tag: string | string[] | undefined): Tags {
 }
 
 /** Builds a URL with one parameter changed, preserving everything else. */
-function buildHref(current: SearchParams, changes: Record<string, string | null>): string {
+function buildHref(
+  base: string,
+  current: SearchParams,
+  changes: Record<string, string | null>,
+): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(current)) {
     if (key === "cursor") continue; // any filter change resets pagination
@@ -54,10 +58,10 @@ function buildHref(current: SearchParams, changes: Record<string, string | null>
     if (value !== null) params.append(key, value);
   }
   const query = params.toString();
-  return query ? `/runs?${query}` : "/runs";
+  return query ? `${base}?${query}` : base;
 }
 
-function addTagHref(current: SearchParams, key: string, value: string): string {
+function addTagHref(base: string, current: SearchParams, key: string, value: string): string {
   const params = new URLSearchParams();
   for (const [paramKey, paramValue] of Object.entries(current)) {
     if (paramKey === "cursor") continue;
@@ -67,7 +71,7 @@ function addTagHref(current: SearchParams, key: string, value: string): string {
   const existing = params.getAll("tag");
   const candidate = `${key}:${value}`;
   if (!existing.includes(candidate)) params.append("tag", candidate);
-  return `/runs?${params.toString()}`;
+  return `${base}?${params.toString()}`;
 }
 
 function decodeCursor(value: string | undefined): { startedAt: Date; id: string } | null {
@@ -86,23 +90,24 @@ function encodeCursor(cursor: { startedAt: Date; id: string }): string {
   return Buffer.from(`${cursor.startedAt.toISOString()}|${cursor.id}`).toString("base64url");
 }
 
-export default async function RunsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function RunsPage({
+  params: routeParams,
+  searchParams,
+}: {
+  params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<SearchParams>;
+}) {
   const params = await searchParams;
-  const orgId = await currentOrgId();
-
-  if (!orgId) {
-    return (
-      <main className="mx-auto max-w-7xl px-6 py-10">
-        <EmptyState
-          title="No organization provisioned"
-          description="Run `pnpm db:migrate` to bootstrap the default organization and project."
-        />
-      </main>
-    );
-  }
-
+  const { orgSlug } = await routeParams;
+  const context = await requirePageContext(orgSlug);
+  const orgId = context.org.id;
   const { sql } = getServices();
+  const base = `/o/${orgSlug}/runs`;
   const tags = parseTagParams(params.tag);
+  // Upload needs a project, so send them to pick one when the list is unfiltered.
+  const uploadHref = params.project
+    ? `/o/${orgSlug}/p/${params.project}/upload`
+    : `/o/${orgSlug}/projects`;
 
   const project = params.project
     ? await findProjectByKey(sql, { orgId, key: params.project })
@@ -128,19 +133,22 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
 
   const activeFilters = [
     params.branch
-      ? { label: `branch:${params.branch}`, href: buildHref(params, { branch: null }) }
+      ? { label: `branch:${params.branch}`, href: buildHref(base, params, { branch: null }) }
       : null,
     params.environment
-      ? { label: `env:${params.environment}`, href: buildHref(params, { environment: null }) }
+      ? { label: `env:${params.environment}`, href: buildHref(base, params, { environment: null }) }
       : null,
     params.framework
-      ? { label: `framework:${params.framework}`, href: buildHref(params, { framework: null }) }
+      ? {
+          label: `framework:${params.framework}`,
+          href: buildHref(base, params, { framework: null }),
+        }
       : null,
     params.failed === "true"
-      ? { label: "has failures", href: buildHref(params, { failed: null }) }
+      ? { label: "has failures", href: buildHref(base, params, { failed: null }) }
       : null,
     params.search
-      ? { label: `"${params.search}"`, href: buildHref(params, { search: null }) }
+      ? { label: `"${params.search}"`, href: buildHref(base, params, { search: null }) }
       : null,
     ...Object.entries(tags).map(([key, value]) => ({
       label: `${key}:${value}`,
@@ -153,7 +161,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
         }
         remaining.forEach(([k, v]) => search.append("tag", `${k}:${v}`));
         const query = search.toString();
-        return query ? `/runs?${query}` : "/runs";
+        return query ? `/o/${orgSlug}/runs?${query}` : "/runs";
       })(),
     })),
   ].filter((entry): entry is { label: string; href: string } => entry !== null);
@@ -168,12 +176,16 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button href={buildHref(params, { failed: params.failed === "true" ? null : "true" })}>
+          <Button
+            href={buildHref(base, params, { failed: params.failed === "true" ? null : "true" })}
+          >
             {params.failed === "true" ? "Showing failures" : "Only failures"}
           </Button>
-          <Button href="/upload" variant="primary">
-            Upload report
-          </Button>
+          {can(context, "run:upload") ? (
+            <Button href={uploadHref} variant="primary">
+              Upload report
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -190,7 +202,10 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
               <span className="text-[var(--color-ink-muted)]">×</span>
             </Link>
           ))}
-          <Link href="/runs" className="text-[11px] text-[var(--color-ink-muted)] underline">
+          <Link
+            href={`/o/${orgSlug}/runs`}
+            className="text-[11px] text-[var(--color-ink-muted)] underline"
+          >
             clear all
           </Link>
         </div>
@@ -207,9 +222,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                   : "Upload a JUnit XML report, or POST one to /api/v1/ingest from CI."
               }
               action={
-                <Button href="/upload" variant="primary">
-                  Upload a report
-                </Button>
+                can(context, "run:upload") ? (
+                  <Button href={uploadHref} variant="primary">
+                    Upload a report
+                  </Button>
+                ) : undefined
               }
             />
           ) : (
@@ -222,7 +239,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <Link
-                            href={`/runs/${run.id}`}
+                            href={`/o/${orgSlug}/runs/${run.id}`}
                             className="text-sm font-medium hover:underline"
                           >
                             {run.name ?? run.framework ?? "Run"}
@@ -256,7 +273,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                                   key={key}
                                   tagKey={key}
                                   value={value}
-                                  href={addTagHref(params, key, value)}
+                                  href={addTagHref(base, params, key, value)}
                                 />
                               ))}
                           </div>
@@ -301,7 +318,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
 
           {page.nextCursor ? (
             <div className="border-t border-[var(--color-border-subtle)] px-5 py-3">
-              <Button href={buildHref(params, { cursor: encodeCursor(page.nextCursor) })}>
+              <Button href={buildHref(base, params, { cursor: encodeCursor(page.nextCursor) })}>
                 Load older runs
               </Button>
             </div>
@@ -318,7 +335,7 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
                 {facets.map((facet) => (
                   <li key={`${facet.key}:${facet.value}`}>
                     <Link
-                      href={addTagHref(params, facet.key, facet.value)}
+                      href={addTagHref(base, params, facet.key, facet.value)}
                       className="flex items-center justify-between gap-2 rounded px-2 py-1 text-[11px] hover:bg-[var(--color-surface)]"
                     >
                       <span className="truncate font-mono">
@@ -340,8 +357,8 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
               title="Branch"
               values={options.branches}
               active={params.branch}
-              hrefFor={(value) => buildHref(params, { branch: value })}
-              clearHref={buildHref(params, { branch: null })}
+              hrefFor={(value) => buildHref(base, params, { branch: value })}
+              clearHref={buildHref(base, params, { branch: null })}
             />
           ) : null}
 
@@ -350,8 +367,8 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
               title="Framework"
               values={options.frameworks}
               active={params.framework}
-              hrefFor={(value) => buildHref(params, { framework: value })}
-              clearHref={buildHref(params, { framework: null })}
+              hrefFor={(value) => buildHref(base, params, { framework: value })}
+              clearHref={buildHref(base, params, { framework: null })}
             />
           ) : null}
 
@@ -360,8 +377,8 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
               title="Environment"
               values={options.environments}
               active={params.environment}
-              hrefFor={(value) => buildHref(params, { environment: value })}
-              clearHref={buildHref(params, { environment: null })}
+              hrefFor={(value) => buildHref(base, params, { environment: value })}
+              clearHref={buildHref(base, params, { environment: null })}
             />
           ) : null}
         </aside>

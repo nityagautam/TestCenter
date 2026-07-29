@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { logger } from "@testcenter/core";
-import { resolveApiToken, schema } from "@testcenter/db";
+import { AccessDeniedError, resolveApiToken, schema } from "@testcenter/db";
 import { auth } from "@/auth";
 import { getServices } from "@/lib/services";
 
@@ -43,6 +43,13 @@ export class ApiError extends Error {
 }
 
 export function apiErrorResponse(error: unknown): NextResponse {
+  // Authorisation failures come from the db access layer, which knows nothing about
+  // HTTP. Mapping them here keeps a denied request from surfacing as a 500 — and a
+  // 500 on a permission problem is indistinguishable from a real bug.
+  if (error instanceof AccessDeniedError) {
+    const status = error.reason === "unauthenticated" ? 401 : 403;
+    return NextResponse.json({ error: { code: error.reason, message: error.message } }, { status });
+  }
   if (error instanceof ApiError) {
     return NextResponse.json(
       { error: { code: error.code, message: error.message } },

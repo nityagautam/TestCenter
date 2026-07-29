@@ -4,6 +4,8 @@ import type { Database, Sql } from "./client.js";
 import * as schema from "./schema.js";
 import type { MembershipRole } from "./schema.js";
 
+export type { MembershipRole };
+
 /**
  * Access control.
  *

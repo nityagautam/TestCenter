@@ -360,12 +360,24 @@ export async function rollupProjectDay(
  * Scoped to the tests touched by this run rather than the whole project, so cost
  * is proportional to the run rather than to accumulated history.
  *
- * The flake score combines two independent signals:
- *   - retry flakiness: the test failed then passed inside one run (highest
- *     confidence — no history needed)
- *   - status instability: the test changed outcome between consecutive runs
- * A test that is simply broken fails consistently and scores 0, which is what
- * keeps the flake list actionable instead of just listing every failing test.
+ * The flake score answers one question: how unreliable is this test? It combines
+ * two signals of inconsistency and saturates, on the reasoning that a test failing
+ * intermittently 40% of the time and one failing 60% of the time are equally
+ * urgent — the difference stops being actionable well before the top of the scale.
+ *
+ *   retry flakiness — failed then passed within a single run. The highest-confidence
+ *     signal available: no history needed, and it cannot be explained by anything
+ *     other than nondeterminism.
+ *   status instability — flipped outcome between consecutive runs, counted only when
+ *     there are at least two flips. A single transition is a regression (it broke, and
+ *     stayed broken), not flakiness, so a consistently failing test scores 0 and the
+ *     flake list stays a list of flaky tests rather than a second list of failures.
+ *
+ * Calibration matters as much as the shape. A linear weighting was tried first and
+ * scored a test needing retries in 30% of its runs at 15.8 — below the threshold the
+ * dashboard used to call something flaky, and *below* a test that merely failed
+ * sometimes with no retries at all. The saturating curve puts a 20% retry rate at ~80
+ * and keeps the ordering faithful to signal strength.
  */
 export async function refreshTestCaseStats(
   sql: Sql,
@@ -415,15 +427,21 @@ export async function refreshTestCaseStats(
         WHEN s.runs_window = 0 THEN 0
         ELSE ROUND(s.failures_window::numeric * 100 / s.runs_window, 2)
       END,
-      flake_score = LEAST(100, CASE
+      flake_score = CASE
         WHEN s.runs_window < 2 THEN
-          -- With one data point only an in-run retry flake is defensible.
+          -- With a single data point only an in-run retry flake is defensible.
           CASE WHEN s.retry_flakes > 0 THEN 100 ELSE 0 END
         ELSE ROUND(
-          (s.retry_flakes::numeric * 100 / s.runs_window) * 0.6 +
-          (s.status_flips::numeric * 100 / (s.runs_window - 1)) * 0.4,
+          (100 * (1 - exp(-8 * LEAST(1.0,
+            -- Retry flakes carry full weight; a lone status transition is a
+            -- regression rather than flakiness and is excluded entirely.
+            s.retry_flakes::numeric / s.runs_window
+            + CASE WHEN s.status_flips >= 2
+                   THEN s.status_flips::numeric / (s.runs_window - 1)
+                   ELSE 0 END
+          ))))::numeric,
           2)
-      END),
+      END,
       avg_duration_ms = s.avg_duration,
       p95_duration_ms = s.p95_duration
     FROM stats s

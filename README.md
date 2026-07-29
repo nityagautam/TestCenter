@@ -3,16 +3,45 @@
 Test intelligence for every framework. Ingest test results from pytest, Playwright, JUnit,
 TestNG, Cypress, Jest and others — via direct upload or API/CI — then triage and trend them.
 
-**Status: Phase 1 complete — the product is usable.** Upload a JUnit XML report from the
-browser or from CI, then browse runs, drill into failures, and filter by tag. See
-[`docs/test-center-plan.md`](docs/test-center-plan.md) for the architecture and phase plan.
+**Status: multi-tenant product.** Sign in, land in the organisations you have access to,
+create projects, upload results from CI or the browser, then search tests and read a
+test's full history. See [`docs/test-center-plan.md`](docs/test-center-plan.md) for the
+architecture and phase plan.
+
+Scope lives in the URL — `/o/:org` for views that span projects, `/o/:org/p/:project`
+for project-scoped ones — so every link is shareable and unambiguous.
 
 | Page | What it does |
 | --- | --- |
-| `/` | Health across recent runs, per-project pass rate |
-| `/runs` | Filterable run list — branch, env, framework, tag facets, keyset pagination |
-| `/runs/:id` | Summary tiles, suite tree, failures-first result table, stack traces, tag editing |
-| `/upload` | Drag-and-drop upload with live parse progress, plus CI recipes |
+| `/o/:org` | Dashboard: pass-rate and duration trends, outcome volume, flakiest and most-failing tests |
+| `/o/:org/runs` | Filterable run list — branch, env, framework, tag facets, keyset pagination |
+| `/o/:org/runs/:id` | Summary tiles, suite tree, failures-first result table, stack traces, tag editing |
+| `/o/:org/tests` | Search by name fragment; filter by failing / flaky / slow / quarantined |
+| `/o/:org/tests/:id` | **Test history** — outcome strip, distinct failure modes, every failure in full |
+| `/o/:org/flaky` | Flaky leaderboard with the CI time each flake has burned |
+| `/o/:org/projects` | Projects, and creating one (mints a CI token and shows the recipe) |
+| `/o/:org/settings/members` | Grant access by email, set roles, revoke |
+| `/o/:org/settings/tokens` | Create and revoke CI tokens |
+
+## Access model
+
+Organisation membership grants access to every project in that organisation; roles
+control what you can *do*. A new user either creates their own organisation or is
+granted access to an existing one by an administrator — grants are by **email** and
+bind to the account at first login, which gives invite ergonomics without needing to
+send mail.
+
+| Role | Can |
+| --- | --- |
+| viewer | read results |
+| member | upload results, edit tags, quarantine tests |
+| maintainer | create and edit projects |
+| admin | manage members and API tokens |
+| owner | everything, including deleting the organisation |
+
+Platform admins (`TESTCENTER_ADMIN_EMAILS`) see and can grant access to every
+organisation. That list is re-asserted on every sign-in, so privilege cannot be
+escalated from inside the app and removing an address actually revokes it.
 
 ## Architecture in one paragraph
 
@@ -125,6 +154,7 @@ Visit <http://localhost:3000> for the status board, or `curl localhost:3000/api/
 | `pnpm db:reset` | drop and rebuild the schema (refuses non-local databases) |
 | `pnpm --filter @testcenter/db mint-token <project>` | create a CI API token (shown once) |
 | `pnpm --filter @testcenter/db seed-perf [runs] [tests]` | seed history and assert read-path budgets |
+| `pnpm --filter @testcenter/db seed-test-org [days]` | seed the Test Organisation with believable history |
 | `pnpm --filter @testcenter/worker enqueue partitions` | enqueue a real job to smoke-test the queue path |
 
 ## Things worth knowing before changing code
@@ -164,3 +194,29 @@ raw SQL for bulk inserts while everything else uses drizzle.
 **Read-path budget is enforced, not assumed.** `seed-perf` measures the five queries the UI
 issues against real data and fails if any exceeds 400ms p95. At 400k results they run in
 2–6ms and pages render in 18–48ms.
+
+**Isolation is tested from the outside, not assumed.** `packages/db/src/access.test.ts`
+creates two real organisations and a third unaffiliated user, then tries to read across
+using ids that are perfectly valid in their own tenant. A hidden organisation and a
+nonexistent one return the identical error, so slugs cannot be enumerated.
+
+**The flake score is calibrated, and the calibration was wrong once.** It combines
+retry-flakiness (failed then passed inside one run — the highest-confidence signal) with
+status instability, counting the latter only at two or more flips so a consistently
+failing test scores 0 and stays out of the flake list. A linear weighting was tried
+first and scored a test needing retries in 30% of its runs at **15.8** — below the
+threshold the dashboard used to call anything flaky, and below a test that merely failed
+sometimes. The saturating curve puts a 20% retry rate near 80 and keeps the ordering
+faithful to signal strength. `seed-test-org` exists partly to make this checkable.
+
+**Red/green pass-fail bars are unreadable for red-green colourblind users** —
+status-good and status-critical measure ΔE 4.1 under deuteranopia. Green/red is
+unavoidable domain convention for tests, so pass/fail is never carried by colour alone:
+every status is paired with a label or glyph, stacked segments keep a fixed order
+separated by 2px surface gaps, and counts appear as text beside every chart. Removing
+any of those breaks the charts for those readers.
+
+**Functions cannot be passed from a server component to a client one.** Both chart
+components originally took a `formatValue`/`hrefFor` callback and failed at runtime with
+a 500. They now take serializable descriptors (`format="percent"`, `runHrefBase`). If you
+add a client component prop, keep it serializable.

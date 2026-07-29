@@ -13,7 +13,7 @@ import {
   truncateStart,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
-import { currentOrgId } from "@/lib/session";
+import { requirePageContext } from "@/lib/viewer";
 
 /**
  * Run detail.
@@ -38,13 +38,13 @@ export default async function RunPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ runId: string }>;
+  params: Promise<{ orgSlug: string; runId: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  const { runId } = await params;
+  const { orgSlug, runId } = await params;
   const query = await searchParams;
-  const orgId = await currentOrgId();
-  if (!orgId) notFound();
+  const context = await requirePageContext(orgSlug);
+  const orgId = context.org.id;
 
   const { sql } = getServices();
   const run = await getRun(sql, { orgId, runId });
@@ -68,7 +68,7 @@ export default async function RunPage({
   ]);
 
   const failing = run.failed + run.errored;
-  const base = `/runs/${runId}`;
+  const base = `/o/${orgSlug}/runs/${runId}`;
 
   const withParam = (changes: Record<string, string | null>): string => {
     const next = new URLSearchParams();
@@ -88,12 +88,12 @@ export default async function RunPage({
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
       <nav className="mb-4 flex items-center gap-2 text-xs text-[var(--color-ink-muted)]">
-        <Link href="/runs" className="hover:text-[var(--color-ink)] hover:underline">
+        <Link href={`/o/${orgSlug}/runs`} className="hover:text-[var(--color-ink)] hover:underline">
           Runs
         </Link>
         <span>/</span>
         <Link
-          href={`/runs?project=${run.projectKey}`}
+          href={`/o/${orgSlug}/runs?project=${run.projectKey}`}
           className="hover:text-[var(--color-ink)] hover:underline"
         >
           {run.projectKey}
@@ -385,6 +385,13 @@ export default async function RunPage({
                             className="font-medium hover:underline"
                           >
                             {result.name}
+                          </Link>{" "}
+                          <Link
+                            href={`/o/${orgSlug}/tests/${result.testCaseId}`}
+                            className="text-[10px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+                            title="Full history for this test"
+                          >
+                            history
                           </Link>
                           {result.failureMessage ? (
                             <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-status-failed)]">

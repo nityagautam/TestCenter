@@ -21,7 +21,8 @@
     "reset": "tsx scripts/reset.ts",
     "test": "vitest run",
     "mint-token": "tsx scripts/token.ts",
-    "seed-perf": "tsx scripts/seed-perf.ts"
+    "seed-perf": "tsx scripts/seed-perf.ts",
+    "seed-test-org": "tsx scripts/seed-test-org.ts"
   },
   "dependencies": {
     "@testcenter/core": "workspace:*",
