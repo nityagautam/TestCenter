@@ -137,20 +137,39 @@ export async function drainDefaultPartition(sql: Sql): Promise<number> {
     const start = monthStart(new Date(month));
     const end = addMonths(start, 1);
     const name = partitionName(start);
-    await sql.unsafe(
-      `CREATE TABLE IF NOT EXISTS ${name} PARTITION OF ${PARENT_TABLE}
-       FOR VALUES FROM ('${isoDate(start)}') TO ('${isoDate(end)}')`,
-    );
-    // Delete-and-reinsert in one statement so the rows are never missing.
-    const result = await sql.unsafe(
-      `WITH moved AS (
-         DELETE FROM test_results_default
-         WHERE started_at >= '${isoDate(start)}' AND started_at < '${isoDate(end)}'
-         RETURNING *
-       )
-       INSERT INTO ${PARENT_TABLE} SELECT * FROM moved`,
-    );
-    moved += result.count ?? 0;
+
+    /*
+     * Order matters, and the obvious order is wrong.
+     *
+     * Attaching a partition makes Postgres verify that the DEFAULT partition holds
+     * no rows belonging to the new range — so creating the partition first fails
+     * with "updated partition constraint for default partition would be violated
+     * by some row" precisely when there is work to do.
+     *
+     * The rows therefore have to leave DEFAULT first, which means they are briefly
+     * held outside the table. That window is wrapped in a transaction with an
+     * ON COMMIT DROP temp table: if the CREATE or the re-INSERT fails, the DELETE
+     * rolls back with it and no result is lost.
+     */
+    const relocated = await sql.begin(async (tx) => {
+      await tx.unsafe(
+        `CREATE TEMP TABLE _drain_batch ON COMMIT DROP AS
+           WITH removed AS (
+             DELETE FROM test_results_default
+             WHERE started_at >= '${isoDate(start)}' AND started_at < '${isoDate(end)}'
+             RETURNING *
+           )
+           SELECT * FROM removed`,
+      );
+      await tx.unsafe(
+        `CREATE TABLE IF NOT EXISTS ${name} PARTITION OF ${PARENT_TABLE}
+         FOR VALUES FROM ('${isoDate(start)}') TO ('${isoDate(end)}')`,
+      );
+      const inserted = await tx.unsafe(`INSERT INTO ${PARENT_TABLE} SELECT * FROM _drain_batch`);
+      return inserted.count ?? 0;
+    });
+
+    moved += relocated as number;
   }
   return moved;
 }

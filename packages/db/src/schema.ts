@@ -44,6 +44,11 @@ export const organizations = pgTable("organizations", {
     .default(sql`uuidv7()`),
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
+  /** Set when this org was auto-created as a user's personal space. */
+  personalForUserId: uuid("personal_for_user_id"),
+  createdBy: uuid("created_by"),
+  maxProjects: integer("max_projects").notNull().default(50),
+  maxRunsPerDay: integer("max_runs_per_day").notNull().default(5000),
   ...timestamps,
 });
 
@@ -56,6 +61,12 @@ export const users = pgTable("users", {
   avatarUrl: text("avatar_url"),
   googleSub: text("google_sub").unique(),
   status: text("status").notNull().default("active"),
+  /**
+   * Platform admins see and grant access to every org. Seeded from
+   * TESTCENTER_ADMIN_EMAILS at login, never grantable from inside the app.
+   */
+  isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
+  onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   ...timestamps,
 });
@@ -88,11 +99,16 @@ export const memberships = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }),
     role: text("role").$type<MembershipRole>().notNull(),
+    /**
+     * Set instead of userId when access was granted to someone who has not signed
+     * in yet; bound to the account on first login.
+     */
+    invitedEmail: text("invited_email"),
+    grantedBy: uuid("granted_by"),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [index("memberships_user_idx").on(table.userId)],
@@ -116,6 +132,7 @@ export const projects = pgTable(
     retentionDays: integer("retention_days").notNull().default(365),
     artifactRetentionDays: integer("artifact_retention_days").notNull().default(90),
     settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: uuid("created_by"),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     ...timestamps,
   },
@@ -197,6 +214,7 @@ export const runs = pgTable(
     passRate: numeric("pass_rate", { precision: 5, scale: 2 }).notNull().default("0"),
 
     tags: jsonb("tags").$type<Tags>().notNull().default({}),
+    warnings: jsonb("warnings").$type<{ code: string; message: string }[]>().notNull().default([]),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),

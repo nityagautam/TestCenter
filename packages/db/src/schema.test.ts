@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { computeFingerprint } from "@testcenter/core";
 import { createClient, type Database, type Sql } from "./client.js";
-import { listPartitions, maintainPartitions } from "./partitions.js";
+import { drainDefaultPartition, listPartitions, maintainPartitions } from "./partitions.js";
 import { persistResultBatch } from "./ingest.js";
 import { bootstrap, generateApiToken, hashApiToken, resolveApiToken } from "./bootstrap.js";
 import * as schema from "./schema.js";
@@ -147,6 +147,58 @@ describeIfDb("schema", () => {
       const second = await maintainPartitions(sql, { lookaheadMonths: 2, retentionMonths: 12 });
       expect(second.created).toEqual([]);
       expect(second.dropped).toEqual([]);
+    });
+
+    it("relocates backdated rows out of the DEFAULT partition", async () => {
+      // Backdated results are normal: a re-upload of an old CI run, a backfill, or
+      // a seed spanning months. They land in DEFAULT because only the current month
+      // plus lookahead are provisioned.
+      //
+      // Draining them is order-sensitive in a way that is easy to get backwards:
+      // attaching a partition makes Postgres verify DEFAULT holds no rows in the new
+      // range, so creating the partition first fails exactly when there is work to
+      // do. The rows must leave DEFAULT first, inside a transaction so a failure
+      // cannot lose them.
+      const backdated = new Date(Date.UTC(2020, 4, 15));
+      const caseName = uniqueName("backdated");
+      const fingerprint = computeFingerprint({ projectId, name: caseName });
+      const testCase = await db
+        .insert(schema.testCases)
+        .values({ orgId, projectId, fingerprint: fingerprint.digest, name: caseName })
+        .returning({ id: schema.testCases.id });
+      const testCaseId = testCase[0]?.id as number;
+
+      const run = await db
+        .insert(schema.runs)
+        .values({ orgId, projectId, framework: "junit", status: "complete", startedAt: backdated })
+        .returning({ id: schema.runs.id });
+      const runId = run[0]?.id as string;
+
+      await db.insert(schema.testResults).values({
+        orgId,
+        projectId,
+        runId,
+        testCaseId,
+        status: "passed",
+        startedAt: backdated,
+      });
+
+      const landed = await sql<{ partition: string }[]>`
+        SELECT tableoid::regclass::text AS partition FROM test_results WHERE run_id = ${runId}
+      `;
+      expect(landed[0]?.partition).toBe("test_results_default");
+
+      const moved = await drainDefaultPartition(sql);
+      expect(moved).toBeGreaterThanOrEqual(1);
+
+      const relocated = await sql<{ partition: string }[]>`
+        SELECT tableoid::regclass::text AS partition FROM test_results WHERE run_id = ${runId}
+      `;
+      expect(relocated[0]?.partition).toBe("test_results_2020_05");
+
+      await db.delete(schema.runs).where(eq(schema.runs.id, runId));
+      await db.delete(schema.testCases).where(eq(schema.testCases.id, testCaseId));
+      await sql.unsafe("DROP TABLE IF EXISTS test_results_2020_05");
     });
 
     it("routes an inserted result into the partition for its month", async () => {

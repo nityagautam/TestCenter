@@ -5,3 +5,4 @@ export * from "./partitions.js";
 export * from "./bootstrap.js";
 export * from "./ingest.js";
 export * from "./queries.js";
+export * from "./access.js";
