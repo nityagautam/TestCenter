@@ -56,6 +56,19 @@ createdb testcenter
 #   BLOB_DRIVER=fs
 ```
 
+If Postgres fails to start with `could not open directory
+"/usr/local/lib/postgresql@17"`, Homebrew linked the libs without the version
+suffix the binary was compiled to expect (`pg_config --pkglibdir` shows the path it
+wants). Repair with:
+
+```bash
+ln -sfn ../Cellar/postgresql@17/$(ls /usr/local/Cellar/postgresql@17)/lib/postgresql \
+  /usr/local/lib/postgresql@17
+ln -sfn ../Cellar/postgresql@17/$(ls /usr/local/Cellar/postgresql@17)/share/postgresql \
+  /usr/local/share/postgresql@17
+brew services restart postgresql@17
+```
+
 `BLOB_DRIVER=fs` is a filesystem blob store that implements the same signed-URL upload
 contract as S3, so the upload path you exercise locally is the production path rather than a
 special case that hides bugs until deploy.
