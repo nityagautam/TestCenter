@@ -9,6 +9,10 @@ import {
   formatRelativeTime,
   truncateStart,
   formatInteger,
+  basename,
+  commonPrefix,
+  dirname,
+  truncateMiddle,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { requirePageContext } from "@/lib/viewer";
@@ -124,17 +128,55 @@ export async function TestSearch({
 
   const totalPages = Math.max(Math.ceil(results.total / perPage), 1);
 
+  /*
+   * The opening every visible name shares, lifted out of the rows.
+   *
+   * Without this the list was fifty rows reading `On Cluster "SWADESHUAT", Negative Produc…`
+   * — the same 25 characters repeated, with the ellipsis swallowing the only part that told
+   * them apart. Computed from the rows actually on screen rather than from the whole result
+   * set, so it always describes exactly what is being displayed.
+   */
+  const namePrefix = commonPrefix(results.tests.map((test) => test.name));
+
+  /*
+   * The secondary line shows whichever identifier actually tells the rows apart.
+   *
+   * A JUnit report gives three overlapping names and which one is informative depends on
+   * the framework. Playwright and pytest put a path in `suite`, so its leaf is the useful
+   * part. Cucumber puts the file-level report name in `suite` — identical on every row —
+   * and the feature in `classname`, so the feature is the useful part. Showing `suite`
+   * unconditionally meant fifty rows repeating "JCP Bulk Upload Ext feature for Bulk SEO —
+   * Product Meta", a whole line of height carrying nothing.
+   *
+   * Whichever is chosen then gets the same shared-prefix treatment as the name, and if
+   * nothing survives it the line is dropped rather than printed empty.
+   */
+  const facetOf = (test: (typeof results.tests)[number]): string =>
+    test.suite?.includes("/") ? basename(test.suite) : (test.classname ?? test.suite ?? "");
+  const facetPrefix = commonPrefix(results.tests.map(facetOf));
+
   return (
     <main className="mx-auto max-w-7xl px-6 py-6">
-      <div className="mb-4">
+      {/*
+       * One header block: what you are looking at, then how to narrow it.
+       *
+       * The filters were three rows of identically-styled chips — twenty-two boxes in which
+       * a status, a project and a sort order were visually indistinguishable, so the top
+       * third of the page was a wall you had to read carefully to use at all. Now status is
+       * a single segmented control (one control, one choice), ordering is quiet text
+       * because it is a preference rather than a filter, and the project chips are gone:
+       * the header switcher does that job from every page and lands you on the same
+       * section, so a second copy here was competing with it for the same click.
+       */}
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h1 className="text-lg font-semibold tracking-tight">Tests</h1>
-        <p className="mt-0.5 text-xs text-[var(--color-ink-muted)]">
+        <p className="font-mono text-[11px] text-[var(--color-ink-muted)] tabular-nums">
           {formatInteger(results.total)} test{results.total === 1 ? "" : "s"}
           {project ? ` in ${project.name}` : " across all projects"}
         </p>
       </div>
 
-      <div className="mb-4 space-y-3">
+      <div className="mb-4 space-y-2.5">
         <SearchBox
           action={basePath}
           defaultValue={query.q ?? ""}
@@ -146,73 +188,71 @@ export async function TestSearch({
           placeholder="Search test names, classes and suites…"
         />
 
-        {/* Filters in one row above the results, per the interaction guidance. */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <FilterGroup label="Status">
-            {STATUS_FILTERS.map((option) => (
-              <FilterChip
-                key={option.value}
-                href={buildHref({ status: option.value || null })}
-                active={(query.status ?? "") === option.value}
-              >
-                {option.label}
-              </FilterChip>
-            ))}
-          </FilterGroup>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <Segmented
+            label="Status"
+            options={STATUS_FILTERS.map((option) => ({
+              label: option.label,
+              href: buildHref({ status: option.value || null }),
+              active: (query.status ?? "") === option.value,
+            }))}
+          />
 
-          {scopedProjectKey ? (
-            <FilterGroup label="Project">
-              {/* Fixed by the route. The chip is not a filter to toggle, so the only
-                  option offered is the one that actually changes scope — widening to the
-                  organisation. Switching to a different project is the header dropdown's
-                  job, which now keeps you on this section. */}
-              <span className="rounded border border-[var(--color-ink-muted)] px-1.5 py-0.5 text-[11px] font-semibold">
-                {scopedProjectKey}
-              </span>
-              <FilterChip href={`/o/${orgSlug}/tests`} active={false}>
-                all projects
-              </FilterChip>
-            </FilterGroup>
-          ) : projects.length > 1 ? (
-            <FilterGroup label="Project">
-              <FilterChip href={buildHref({ project: null })} active={!query.project}>
-                All
-              </FilterChip>
-              {projects.slice(0, 6).map((candidate) => (
-                <FilterChip
-                  key={candidate.key}
-                  href={`/o/${orgSlug}/p/${candidate.key}/tests`}
-                  active={query.project === candidate.key}
-                >
-                  {candidate.key}
-                </FilterChip>
-              ))}
-            </FilterGroup>
-          ) : null}
-
-          <FilterGroup label="Sort">
-            {SORTS.map((option) => (
-              <FilterChip
-                key={option.value}
-                href={buildHref({ sort: option.value })}
-                active={(query.sort ?? "recent") === option.value}
-              >
-                {option.label}
-              </FilterChip>
-            ))}
-          </FilterGroup>
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-[var(--color-ink-muted)]">Sort</span>
+            <div className="flex items-center gap-1.5">
+              {SORTS.map((option) => {
+                const active = (query.sort ?? "recent") === option.value;
+                return (
+                  <Link
+                    key={option.value}
+                    href={buildHref({ sort: option.value })}
+                    aria-current={active ? "true" : undefined}
+                    className={
+                      active
+                        ? "font-semibold text-[var(--color-ink)] underline decoration-2 underline-offset-4"
+                        : "text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:underline hover:underline-offset-4"
+                    }
+                  >
+                    {option.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
-        {query.suite ? (
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-[var(--color-ink-muted)]">Suite:</span>
-            <Link
-              href={buildHref({ suite: null })}
-              className="inline-flex items-center gap-1 rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 font-mono text-[11px] hover:border-[var(--color-status-failed)]"
-            >
-              {query.suite}
-              <span className="text-[var(--color-ink-muted)]">×</span>
-            </Link>
+        {/* Active narrowing, shown only when it exists, so the chrome stays quiet when it
+            does not. Each one is removable where it sits. */}
+        {scopedProjectKey || query.suite || namePrefix ? (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+            {scopedProjectKey ? (
+              <>
+                <ActiveFilter
+                  label="project"
+                  value={scopedProjectKey}
+                  removeHref={`/o/${orgSlug}/tests`}
+                  removeLabel={`Show tests across all projects instead of ${scopedProjectKey}`}
+                />
+              </>
+            ) : null}
+            {query.suite ? (
+              <ActiveFilter
+                label="suite"
+                value={query.suite}
+                removeHref={buildHref({ suite: null })}
+                removeLabel={`Remove the suite filter ${query.suite}`}
+              />
+            ) : null}
+            {namePrefix ? (
+              <span
+                className="text-[var(--color-ink-muted)]"
+                title="Shared by every name below, hidden from the rows so the differences are readable"
+              >
+                names begin{" "}
+                <span className="font-mono text-[var(--color-ink)]">{namePrefix.trim()}</span>
+              </span>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -251,75 +291,94 @@ export async function TestSearch({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border-subtle)]">
-                  {results.tests.map((test) => (
-                    <tr key={test.id} className="hover:bg-[var(--color-surface)]/60">
-                      <td className="px-4 py-2">
-                        {/* max-width on the <td> is inert under auto table layout — the
-                            algorithm sizes the column to its content and ignores it. The bound
-                            has to sit on a block child for `truncate` to have a width to work
-                            against; without it a 200-character test name pushed straight
-                            through the status and fail-rate columns. The full name stays
-                            reachable via the title and on the detail page. */}
-                        <Link
-                          href={`/o/${orgSlug}/tests/${test.id}`}
-                          className="block truncate font-medium hover:underline"
-                          title={test.name}
-                        >
-                          {test.name}
-                        </Link>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 font-mono text-[10px] text-[var(--color-ink-muted)]">
-                          {/* Redundant when every row belongs to the same project. */}
-                          {scopedProjectKey ? null : <span>{test.projectKey}</span>}
-                          {test.suite ? (
-                            <Link
-                              href={buildHref({ suite: test.suite })}
-                              className="truncate hover:underline"
-                              title={test.suite}
-                            >
-                              {truncateStart(test.suite, 40)}
-                            </Link>
+                  {results.tests.map((test) => {
+                    // Strip the shared opening; it is stated once above the table.
+                    const shown =
+                      namePrefix && test.name.startsWith(namePrefix)
+                        ? test.name.slice(namePrefix.length)
+                        : test.name;
+                    const rawFacet = facetOf(test);
+                    const facet =
+                      facetPrefix && rawFacet.startsWith(facetPrefix)
+                        ? rawFacet.slice(facetPrefix.length)
+                        : rawFacet;
+                    const failRate = Number(test.failRate30d);
+                    const flake = Number(test.flakeScore);
+                    return (
+                      <tr key={test.id} className="group hover:bg-[var(--color-surface-raised)]/70">
+                        <td className="px-4 py-2">
+                          {/* max-width on the <td> is inert under auto table layout — the
+                              algorithm sizes the column to its content and ignores it, which
+                              is why the column is sized by the header and the bound sits on
+                              this block child instead. The full name stays available via the
+                              title and on the detail page. */}
+                          <Link
+                            href={`/o/${orgSlug}/tests/${test.id}`}
+                            className="block truncate font-medium group-hover:underline"
+                            title={test.name}
+                          >
+                            {truncateMiddle(shown)}
+                          </Link>
+                          {facet || test.quarantined || !scopedProjectKey ? (
+                            <div className="mt-0.5 flex items-center gap-x-2 font-mono text-[10px] text-[var(--color-ink-muted)]">
+                              {/* Redundant when every row belongs to the same project. */}
+                              {scopedProjectKey ? null : (
+                                <span className="shrink-0">{test.projectKey}</span>
+                              )}
+                              {facet && test.suite ? (
+                                <Link
+                                  href={buildHref({ suite: test.suite })}
+                                  className="truncate hover:text-[var(--color-ink)] hover:underline"
+                                  title={`Filter by suite: ${test.suite}`}
+                                >
+                                  {facet}
+                                </Link>
+                              ) : null}
+                              {test.quarantined ? (
+                                <span className="shrink-0 rounded bg-[var(--color-status-skipped)]/15 px-1 text-[var(--color-ink-muted)]">
+                                  quarantined
+                                </span>
+                              ) : null}
+                            </div>
                           ) : null}
-                          {test.quarantined ? (
-                            <span className="rounded bg-[var(--color-status-skipped)]/15 px-1">
-                              quarantined
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        {test.lastStatus ? <StatusBadge status={test.lastStatus} /> : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">
-                        <span
-                          className={
-                            Number(test.failRate30d) > 0
-                              ? "text-[var(--color-status-failed)]"
-                              : "text-[var(--color-ink-muted)]"
-                          }
-                        >
-                          {formatPercent(test.failRate30d)}
-                        </span>
-                        <div className="text-[10px] text-[var(--color-ink-muted)]">
-                          {test.failures30d}/{test.runs30d}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">
-                        {Number(test.flakeScore) > 0 ? (
-                          <span className="text-[var(--color-status-flaky)]">
-                            {Number(test.flakeScore).toFixed(0)}
+                        </td>
+                        <td className="px-3 py-2">
+                          {test.lastStatus ? <StatusBadge status={test.lastStatus} /> : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">
+                          {/* A rate of zero is the good case and does not need saying twice.
+                              Muting it lets the eye land on the rows that are not zero. */}
+                          <span
+                            className={
+                              failRate > 0
+                                ? "text-[var(--color-status-failed)]"
+                                : "text-[var(--color-ink-muted)]"
+                            }
+                          >
+                            {formatPercent(test.failRate30d)}
                           </span>
-                        ) : (
-                          <span className="text-[var(--color-ink-muted)]">—</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-[var(--color-ink-muted)] tabular-nums">
-                        {formatDuration(test.p95DurationMs)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
-                        {formatRelativeTime(test.lastSeenAt)}
-                      </td>
-                    </tr>
-                  ))}
+                          <div className="text-[10px] text-[var(--color-ink-muted)]/70">
+                            {test.failures30d}/{test.runs30d}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">
+                          {flake > 0 ? (
+                            <span className="text-[var(--color-status-flaky)]">
+                              {flake.toFixed(0)}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--color-ink-muted)]/40">·</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono whitespace-nowrap text-[var(--color-ink-muted)] tabular-nums">
+                          {formatDuration(test.p95DurationMs)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
+                          {formatRelativeTime(test.lastSeenAt)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -349,27 +408,56 @@ export async function TestSearch({
         <aside>
           {suites.length > 0 ? (
             <Card>
-              <div className="border-b border-[var(--color-border-subtle)] px-4 py-2.5">
+              <div className="flex items-baseline justify-between border-b border-[var(--color-border-subtle)] px-4 py-2.5">
                 <h2 className="text-[10px] font-medium tracking-widest uppercase">Suites</h2>
+                {query.suite ? (
+                  <Link
+                    href={buildHref({ suite: null })}
+                    className="text-[10px] text-[var(--color-ink-muted)] underline"
+                  >
+                    clear
+                  </Link>
+                ) : null}
               </div>
-              <ul className="max-h-96 overflow-y-auto p-2">
-                {suites.map((suite) => (
-                  <li key={suite.suite}>
-                    <Link
-                      href={buildHref({ suite: suite.suite })}
-                      className={`flex items-center justify-between gap-2 rounded px-2 py-1 text-[11px] hover:bg-[var(--color-surface)] ${
-                        query.suite === suite.suite ? "bg-[var(--color-surface)] font-semibold" : ""
-                      }`}
-                    >
-                      <span className="truncate font-mono" title={suite.suite}>
-                        {truncateStart(suite.suite, 24)}
-                      </span>
-                      <span className="shrink-0 text-[var(--color-ink-muted)] tabular-nums">
-                        {suite.tests}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
+              <ul className="max-h-96 overflow-y-auto p-1.5">
+                {suites.map((suite) => {
+                  const active = query.suite === suite.suite;
+                  return (
+                    <li key={suite.suite}>
+                      <Link
+                        href={buildHref({ suite: active ? null : suite.suite })}
+                        title={suite.suite}
+                        aria-current={active ? "true" : undefined}
+                        className={`flex items-baseline justify-between gap-2 rounded px-2 py-1 text-[11px] ${
+                          active
+                            ? "bg-[var(--color-surface-raised)] font-semibold"
+                            : "hover:bg-[var(--color-surface-raised)]"
+                        }`}
+                      >
+                        {/*
+                         * File name first, directory second and muted.
+                         *
+                         * This was one truncated-from-the-left path per row, which cut both
+                         * ends off — `…/scale/group-33.spec…` — so the entries were neither
+                         * readable nor distinguishable, and every count read 125. The leaf is
+                         * the identifying part and now gets the space; the path is context and
+                         * gets what is left, with the whole thing on hover.
+                         */}
+                        <span className="min-w-0 truncate">
+                          <span className="font-mono">{basename(suite.suite)}</span>
+                          {dirname(suite.suite) ? (
+                            <span className="ml-1 font-mono text-[9px] text-[var(--color-ink-muted)]">
+                              {truncateStart(dirname(suite.suite), 18)}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="shrink-0 font-mono text-[var(--color-ink-muted)] tabular-nums">
+                          {formatInteger(suite.tests)}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             </Card>
           ) : null}
@@ -379,36 +467,72 @@ export async function TestSearch({
   );
 }
 
-function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * One control, one choice.
+ *
+ * Six separate bordered chips read as six independent toggles; a segmented control reads
+ * as a single question with one answer, which is what a status filter is. It is also a
+ * radiogroup to a screen reader rather than six unrelated links.
+ */
+function Segmented({
+  label,
+  options,
+}: {
+  label: string;
+  options: { label: string; href: string; active: boolean }[];
+}) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[10px] tracking-wide text-[var(--color-ink-muted)] uppercase">
-        {label}
-      </span>
-      <div className="flex flex-wrap gap-1">{children}</div>
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="inline-flex overflow-hidden rounded-md border border-[var(--color-border-subtle)]"
+    >
+      {options.map((option, index) => (
+        <Link
+          key={option.label}
+          href={option.href}
+          role="radio"
+          aria-checked={option.active}
+          className={`px-2.5 py-1 text-[11px] transition-colors ${
+            index > 0 ? "border-l border-[var(--color-border-subtle)]" : ""
+          } ${
+            option.active
+              ? "bg-[var(--color-ink)] font-semibold text-[var(--color-surface)]"
+              : "text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-ink)]"
+          }`}
+        >
+          {option.label}
+        </Link>
+      ))}
     </div>
   );
 }
 
-function FilterChip({
-  href,
-  active,
-  children,
+/** An applied narrowing, with the way out attached to it. */
+function ActiveFilter({
+  label,
+  value,
+  removeHref,
+  removeLabel,
 }: {
-  href: string;
-  active: boolean;
-  children: React.ReactNode;
+  label: string;
+  value: string;
+  removeHref: string;
+  removeLabel: string;
 }) {
   return (
-    <Link
-      href={href}
-      className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors ${
-        active
-          ? "border-[var(--color-ink-muted)] font-semibold"
-          : "border-[var(--color-border-subtle)] text-[var(--color-ink-muted)] hover:border-[var(--color-ink-muted)]"
-      }`}
-    >
-      {children}
-    </Link>
+    <span className="inline-flex max-w-full items-baseline gap-1 rounded border border-[var(--color-border-subtle)] py-0.5 pr-1 pl-2">
+      <span className="text-[var(--color-ink-muted)]">{label}</span>
+      <span className="min-w-0 truncate font-mono text-[var(--color-ink)]" title={value}>
+        {value}
+      </span>
+      <Link
+        href={removeHref}
+        aria-label={removeLabel}
+        className="shrink-0 px-1 text-[var(--color-ink-muted)] hover:text-[var(--color-status-failed)]"
+      >
+        ×
+      </Link>
+    </span>
   );
 }

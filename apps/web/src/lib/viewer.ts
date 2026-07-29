@@ -103,10 +103,25 @@ export async function requirePageContext(orgSlug: string): Promise<PageContext> 
 export async function requirePageProject(
   context: AccessContext,
   projectKey: string,
-): Promise<{ id: string; key: string; name: string; defaultBranch: string }> {
+  options: { includeArchived?: boolean } = {},
+): Promise<{
+  id: string;
+  key: string;
+  name: string;
+  defaultBranch: string;
+  archivedAt: Date | null;
+}> {
+  /*
+   * `includeArchived` is for the settings page only.
+   *
+   * Every other project page stays 404 for an archived project — an archived project should
+   * not be accepting uploads or presenting dashboards as though it were live. But settings
+   * has to resolve it, because settings is where un-archiving happens, and excluding it
+   * there made archiving irreversible.
+   */
   const { sql } = getServices();
   try {
-    return await requireProject(sql, context, projectKey);
+    return await requireProject(sql, context, projectKey, options);
   } catch (error) {
     if (error instanceof AccessDeniedError) {
       const { notFound } = await import("next/navigation");

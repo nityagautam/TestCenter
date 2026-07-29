@@ -461,16 +461,23 @@ export interface ProjectSummary {
   id: string;
   key: string;
   name: string;
+  /** Non-null when the project is archived; only ever populated with includeArchived. */
+  archivedAt: Date | null;
   lastRunAt: Date | null;
   lastRunStatus: string | null;
   runs7d: number;
   passRate7d: string | null;
 }
 
-export async function listProjects(sql: Sql, orgId: string): Promise<ProjectSummary[]> {
+export async function listProjects(
+  sql: Sql,
+  orgId: string,
+  options: { includeArchived?: boolean } = {},
+): Promise<ProjectSummary[]> {
+  const includeArchived = options.includeArchived ?? false;
   return sql<ProjectSummary[]>`
     SELECT
-      p.id, p.key, p.name,
+      p.id, p.key, p.name, p.archived_at AS "archivedAt",
       recent.last_run_at   AS "lastRunAt",
       recent.last_status   AS "lastRunStatus",
       COALESCE(recent.runs_7d, 0)::int AS "runs7d",
@@ -485,7 +492,8 @@ export async function listProjects(sql: Sql, orgId: string): Promise<ProjectSumm
       FROM runs
       WHERE runs.project_id = p.id
     ) recent ON true
-    WHERE p.org_id = ${orgId} AND p.archived_at IS NULL
+    WHERE p.org_id = ${orgId}
+      ${includeArchived ? sql`` : sql`AND p.archived_at IS NULL`}
     ORDER BY recent.last_run_at DESC NULLS LAST, p.name ASC
   `;
 }

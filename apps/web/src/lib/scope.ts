@@ -23,7 +23,7 @@ export function projectKeyFromPath(pathname: string, orgSlug: string): string | 
  * level, and `upload` has no organisation-wide equivalent at all, so carrying either
  * across would land on a page that does not exist or does not mean the same thing.
  */
-const SHARED_SECTIONS = new Set(["runs", "tests"]);
+const SHARED_SECTIONS = new Set(["runs", "tests", "flaky"]);
 
 /**
  * The section of the current path, when it is one both scopes have.

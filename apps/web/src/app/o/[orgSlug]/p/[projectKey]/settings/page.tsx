@@ -2,8 +2,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { schema } from "@testcenter/db";
+import { archiveProject, deleteProject, restoreProject } from "@/app/actions/projects";
 import { PermissionDenied } from "@/components/permission-denied";
 import { Card, CardHeader } from "@/components/ui";
+import { formatRelativeTime } from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext, requirePageProject } from "@/lib/viewer";
 
@@ -29,7 +31,9 @@ export default async function ProjectSettingsPage({
   const { orgSlug, projectKey } = await params;
   const { ok, error } = await searchParams;
   const context = await requirePageContext(orgSlug);
-  const project = await requirePageProject(context, projectKey);
+  // Archived projects must resolve here: this is the page that un-archives them.
+  const project = await requirePageProject(context, projectKey, { includeArchived: true });
+  const archived = project.archivedAt !== null;
 
   if (!can(context, "project:edit")) {
     return (
@@ -209,36 +213,91 @@ export default async function ProjectSettingsPage({
         </form>
       </Card>
 
-      {can(context, "project:delete") ? (
-        <Card className="border-[var(--color-status-failed)]/30">
-          <CardHeader title="Archive project" />
+      {can(context, "project:archive") ? (
+        <Card className="mb-5">
+          <CardHeader title={archived ? "Restore project" : "Archive project"} />
           <div className="px-5 py-4">
+            {archived ? (
+              <>
+                <p className="mb-3 text-xs leading-relaxed text-[var(--color-ink-muted)]">
+                  This project was archived {formatRelativeTime(project.archivedAt)}. It is hidden
+                  from lists and dashboards and accepts no uploads, but every run and result is
+                  still stored. Restoring puts it back exactly as it was.
+                </p>
+                <form action={restoreProject.bind(null, orgSlug, project.key)}>
+                  <button
+                    type="submit"
+                    className="rounded-md bg-[var(--color-ink)] px-3 py-1.5 text-xs font-medium text-[var(--color-surface)] hover:opacity-90"
+                  >
+                    Restore {project.key}
+                  </button>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="mb-3 text-xs leading-relaxed text-[var(--color-ink-muted)]">
+                  Archiving hides the project and stops it accepting uploads. Results are kept and
+                  stay readable — test history is evidence, so nothing is deleted here, and you can
+                  restore it from this page at any time.
+                </p>
+                <form action={archiveProject.bind(null, orgSlug, project.key)}>
+                  <button
+                    type="submit"
+                    className="rounded-md border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs font-medium hover:border-[var(--color-ink-muted)]"
+                  >
+                    Archive {project.key}
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
+        </Card>
+      ) : null}
+
+      {/*
+       * Deletion is separated from archiving, visually and by role.
+       *
+       * They used to be one control — the button said "Archive" and the capability was called
+       * `project:delete` — which left no way to actually delete and no way to un-archive.
+       * They are different actions with different consequences, so they look different: this
+       * one is the only card on the page with a red border, it is owner-only, and it will not
+       * proceed without the project key typed by hand. A destructive action reachable by one
+       * click is a destructive action that happens by accident.
+       */}
+      {can(context, "project:delete") ? (
+        <Card className="border-[var(--color-status-failed)]/40">
+          <CardHeader title="Delete project permanently" />
+          <div className="px-5 py-4">
+            <p className="mb-1 text-xs leading-relaxed text-[var(--color-ink-muted)]">
+              Deletes {project.key} together with{" "}
+              <span className="text-[var(--color-ink)]">every run, result and API token</span> under
+              it. This cannot be undone and the history cannot be recovered.
+            </p>
             <p className="mb-3 text-xs leading-relaxed text-[var(--color-ink-muted)]">
-              Archiving hides the project and stops it accepting uploads. Results are kept and stay
-              readable — test history is evidence, so nothing is deleted here.
+              If the intent is only to stop using the project, archive it instead — that keeps the
+              history and is reversible.
             </p>
             <form
-              action={async () => {
-                "use server";
-                const { db: database } = getServices();
-                const { requirePageContext: resolve, can: allows } = await import("@/lib/viewer");
-                const current = await resolve(orgSlug);
-                if (!allows(current, "project:delete")) {
-                  redirect(`/o/${orgSlug}/p/${projectKey}/settings?error=Not+permitted`);
-                }
-                await database
-                  .update(schema.projects)
-                  .set({ archivedAt: new Date() })
-                  .where(eq(schema.projects.id, project.id));
-                revalidatePath(`/o/${orgSlug}/projects`);
-                redirect(`/o/${orgSlug}/projects`);
-              }}
+              action={deleteProject.bind(null, orgSlug, project.key)}
+              className="flex flex-wrap items-end gap-2"
             >
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-[var(--color-ink-muted)]">
+                  Type <span className="font-mono text-[var(--color-ink)]">{project.key}</span> to
+                  confirm
+                </span>
+                <input
+                  name="confirm"
+                  autoComplete="off"
+                  aria-label={`Type ${project.key} to confirm deletion`}
+                  className="w-56 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-2 py-1.5 font-mono text-xs outline-none focus:border-[var(--color-status-failed)]"
+                />
+              </label>
               <button
                 type="submit"
                 className="rounded-md border border-[var(--color-status-failed)]/50 px-3 py-1.5 text-xs font-medium text-[var(--color-status-failed)] hover:bg-[var(--color-status-failed)]/5"
               >
-                Archive {project.key}
+                Delete permanently
               </button>
             </form>
           </div>

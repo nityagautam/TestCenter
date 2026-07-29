@@ -40,8 +40,8 @@ send mail.
 | viewer | read results |
 | member | upload results, edit tags, quarantine tests |
 | maintainer | create and edit projects |
-| admin | manage members and API tokens |
-| owner | everything, including deleting the organisation |
+| admin | manage members and API tokens; archive and restore projects |
+| owner | everything, including deleting a project or the organisation |
 
 Platform admins (`TESTCENTER_ADMIN_EMAILS`) see and can grant access to every
 organisation. That list is re-asserted on every sign-in, so privilege cannot be

@@ -34,8 +34,10 @@ describe("sharedSectionFromPath", () => {
   it("recognises sections that exist at both scopes", () => {
     expect(sharedSectionFromPath("/o/acme/runs", ORG)).toBe("runs");
     expect(sharedSectionFromPath("/o/acme/tests", ORG)).toBe("tests");
+    expect(sharedSectionFromPath("/o/acme/flaky", ORG)).toBe("flaky");
     expect(sharedSectionFromPath("/o/acme/p/checkout-web/runs", ORG)).toBe("runs");
     expect(sharedSectionFromPath("/o/acme/p/checkout-web/tests", ORG)).toBe("tests");
+    expect(sharedSectionFromPath("/o/acme/p/checkout-web/flaky", ORG)).toBe("flaky");
   });
 
   it("ignores anything below the section", () => {
@@ -50,7 +52,6 @@ describe("sharedSectionFromPath", () => {
     expect(sharedSectionFromPath("/o/acme/p/checkout-web/upload", ORG)).toBeNull();
     expect(sharedSectionFromPath("/o/acme/p/checkout-web/settings", ORG)).toBeNull();
     expect(sharedSectionFromPath("/o/acme/settings/members", ORG)).toBeNull();
-    expect(sharedSectionFromPath("/o/acme/flaky", ORG)).toBeNull();
     expect(sharedSectionFromPath("/o/acme", ORG)).toBeNull();
     expect(sharedSectionFromPath("/o/acme/p/checkout-web", ORG)).toBeNull();
   });
@@ -71,11 +72,13 @@ describe("switching scope keeps you where you are", () => {
   it("narrows an organisation-wide list to a project, staying on the list", () => {
     expect(projectScopeHref("/o/acme/tests", ORG, "payments")).toBe("/o/acme/p/payments/tests");
     expect(projectScopeHref("/o/acme/runs", ORG, "payments")).toBe("/o/acme/p/payments/runs");
+    expect(projectScopeHref("/o/acme/flaky", ORG, "payments")).toBe("/o/acme/p/payments/flaky");
   });
 
   it("widens back to the organisation, staying on the list", () => {
     expect(orgScopeHref("/o/acme/p/checkout-web/tests", ORG)).toBe("/o/acme/tests");
     expect(orgScopeHref("/o/acme/p/checkout-web/runs", ORG)).toBe("/o/acme/runs");
+    expect(orgScopeHref("/o/acme/p/checkout-web/flaky", ORG)).toBe("/o/acme/flaky");
   });
 
   it("falls back to the overview when the section cannot cross scopes", () => {
@@ -83,7 +86,8 @@ describe("switching scope keeps you where you are", () => {
     expect(projectScopeHref("/o/acme/p/checkout-web/settings", ORG, "payments")).toBe(
       "/o/acme/p/payments",
     );
-    expect(projectScopeHref("/o/acme/flaky", ORG, "payments")).toBe("/o/acme/p/payments");
+    // `flaky` exists at both scopes now, so it is carried rather than dropped; `settings`
+    // still falls back because it means something different at each level.
     expect(orgScopeHref("/o/acme/p/checkout-web/settings", ORG)).toBe("/o/acme");
   });
 });

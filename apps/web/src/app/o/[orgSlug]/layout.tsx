@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { listProjects, orgSummary } from "@testcenter/db";
+import { PROJECT_SCOPE_COOKIE, readProjectScope } from "@/lib/project-scope";
 import { readSidebarState, SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { readThemePreference, THEME_COOKIE } from "@/lib/theme";
 import { AppShell } from "@/components/app-shell";
@@ -35,6 +36,18 @@ export default async function OrgLayout({
   const sidebar = readSidebarState(store.get(SIDEBAR_COOKIE)?.value);
   const theme = readThemePreference(store.get(THEME_COOKIE)?.value);
 
+  /*
+   * Read here, in the server render, so a page whose URL carries no project still arrives
+   * with the right project selected rather than correcting itself after hydration.
+   *
+   * Validated against the projects this viewer can actually see, so a project that has been
+   * deleted, renamed, or had access revoked cannot leave a phantom selection in the header
+   * pointing at something that is no longer there.
+   */
+  const remembered = readProjectScope(store.get(PROJECT_SCOPE_COOKIE)?.value, orgSlug);
+  const rememberedProjectKey =
+    remembered && projects.some((project) => project.key === remembered) ? remembered : null;
+
   return (
     <AppShell
       orgSlug={orgSlug}
@@ -57,6 +70,7 @@ export default async function OrgLayout({
         canManageMembers: can(context, "member:manage"),
       }}
       signals={{ failing: summary.failing30d, flaky: summary.flakyTests }}
+      rememberedProjectKey={rememberedProjectKey}
       initialSidebar={sidebar}
       initialTheme={theme}
     >

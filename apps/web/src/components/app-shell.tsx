@@ -5,8 +5,9 @@ import { usePathname } from "next/navigation";
 import { orgScopeHref, projectKeyFromPath, projectScopeHref } from "@/lib/scope";
 import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import { signOutAction } from "@/app/actions/auth";
-import { setSidebarState } from "@/app/actions/ui";
+import { clearProjectScope, setProjectScope, setSidebarState } from "@/app/actions/ui";
 import type { SidebarState } from "@/lib/sidebar";
+import { CREDIT } from "@/lib/credit";
 import { CommandPalette } from "@/components/command-palette";
 import { NavLink } from "@/components/nav-link";
 import { ScopeSwitcher, type ScopeOption } from "@/components/scope-switcher";
@@ -52,6 +53,12 @@ export interface AppShellProps {
   capabilities: { canCreateProject: boolean; canUpload: boolean; canManageMembers: boolean };
   /** Live counts so the collapsed rail still carries signal. */
   signals: { failing: number; flaky: number };
+  /**
+   * The project the user last selected, when the current URL does not name one.
+   *
+   * Already validated against `projects` by the layout, so the shell can trust it.
+   */
+  rememberedProjectKey: string | null;
   /** Rendered from a cookie, so a collapsed sidebar never flashes open. */
   initialSidebar: SidebarState;
   /** Same reason: the theme is correct in the first painted frame. */
@@ -66,6 +73,7 @@ export function AppShell({
   viewer,
   capabilities,
   signals,
+  rememberedProjectKey,
   initialSidebar,
   initialTheme,
 }: AppShellProps) {
@@ -135,9 +143,36 @@ export function AppShell({
   useEffect(() => setMobileOpen(false), [pathname]);
 
   const currentOrg = orgs.find((org) => org.slug === orgSlug) ?? null;
-  const currentProjectKey = projectKeyFromPath(pathname, orgSlug);
+
+  /*
+   * The selected project: what the URL says, or failing that what the user last chose.
+   *
+   * The path wins when it has an opinion, so opening a shared link lands on the project
+   * that link is about rather than on whatever the recipient was last looking at. When the
+   * path is silent — a test detail page, a run detail page, the organisation dashboard —
+   * the remembered choice stands. Deriving it from the path alone meant the header dropdown
+   * reset to "All projects" and the project's nav section disappeared the moment you opened
+   * a test from that project's own list, which is exactly when you least expect to lose your
+   * place.
+   */
+  const pathProjectKey = projectKeyFromPath(pathname, orgSlug);
+  const currentProjectKey = pathProjectKey ?? rememberedProjectKey;
   const currentProject = projects.find((project) => project.key === currentProjectKey) ?? null;
-  const projectBase = currentProjectKey ? `/o/${orgSlug}/p/${currentProjectKey}` : null;
+  const projectBase = currentProject ? `/o/${orgSlug}/p/${currentProject.key}` : null;
+
+  /*
+   * Persist what the path told us, so the next page that cannot see the project still knows.
+   *
+   * Only fires when the path names a project and it differs from what is stored — navigating
+   * within a project, or across pages that do not name one, writes nothing. Clearing is not
+   * done here: leaving a project by visiting an organisation-wide page must not forget the
+   * selection, because that is the behaviour being fixed. Only choosing "All projects" clears
+   * it, and that path calls the action directly.
+   */
+  useEffect(() => {
+    if (!pathProjectKey || pathProjectKey === rememberedProjectKey) return;
+    startTransition(() => void setProjectScope(orgSlug, pathProjectKey));
+  }, [pathProjectKey, rememberedProjectKey, orgSlug]);
 
   /*
    * Scope changes keep you in the same section wherever the section exists at both levels.
@@ -196,6 +231,12 @@ export function AppShell({
           </NavLink>
           <NavLink href={`${projectBase}/tests`} icon="tests" collapsed={collapsed}>
             Tests
+          </NavLink>
+          {/* No count here, unlike the organisation entry: `signals.flaky` is the
+              organisation-wide total, and showing it against a project would attribute
+              other projects' flakes to this one. The page states its own count. */}
+          <NavLink href={`${projectBase}/flaky`} icon="flaky" collapsed={collapsed}>
+            Flaky tests
           </NavLink>
           {capabilities.canUpload ? (
             <NavLink href={`${projectBase}/upload`} icon="upload" collapsed={collapsed}>
@@ -330,6 +371,37 @@ export function AppShell({
             </>
           )}
         </div>
+
+        {/*
+         * Developer credit.
+         *
+         * Its own strip below the account block, and explicitly prefixed "Built by",
+         * because the block directly above it is also a person's name — an unlabelled
+         * second name stacked under the signed-in user reads as a second account. The
+         * label is what keeps the two apart.
+         *
+         * Deliberately the quietest thing in the shell: smaller than the nav, muted, no
+         * link. A credit earns its place by being present, not by competing with the
+         * navigation someone opened the app to use.
+         */}
+        <div
+          className={`shrink-0 border-t border-[var(--color-border-subtle)] py-2.5 ${
+            collapsed && !mobileOpen ? "px-2" : "px-4"
+          }`}
+        >
+          {collapsed && !mobileOpen ? (
+            <div
+              className="text-center font-mono text-[10px] text-[var(--color-ink-muted)]"
+              title={CREDIT.title}
+            >
+              {CREDIT.initials}
+            </div>
+          ) : (
+            <p className="truncate text-[10px] text-[var(--color-ink-muted)]">
+              Built by <span className="text-[var(--color-ink)]">{CREDIT.name}</span>
+            </p>
+          )}
+        </div>
       </aside>
 
       {/* Dismiss layer for the mobile drawer. aria-hidden because Escape and the
@@ -414,6 +486,7 @@ export function AppShell({
             hrefFor={projectHref}
             clearHref={allProjectsHref}
             clearLabel="All projects"
+            clearAction={clearProjectScope.bind(null, orgSlug, allProjectsHref)}
             emptyLabel="All projects"
             {...(capabilities.canCreateProject
               ? { createHref: `/o/${orgSlug}/projects/new`, createLabel: "New project" }

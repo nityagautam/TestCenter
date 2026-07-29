@@ -155,10 +155,34 @@ control what you can *do*, and are ordered — each includes everything below it
 | Edit tags, quarantine tests | | ✓ | ✓ | ✓ | ✓ |
 | Delete runs | | | ✓ | ✓ | ✓ |
 | Create projects / edit project settings | | | ✓ | ✓ | ✓ |
-| Archive projects | | | | ✓ | ✓ |
+| Archive **and restore** projects | | | | ✓ | ✓ |
 | Manage members and API tokens | | | | ✓ | ✓ |
 | Platform admin area | | | | | superadmin only |
+| **Delete a project permanently** | | | | | ✓ |
 | Delete the organisation | | | | | ✓ |
+
+### Archiving, restoring, deleting a project
+
+Three different things, deliberately kept apart:
+
+| Action | Who | What happens | Reversible |
+| --- | --- | --- | --- |
+| **Archive** | admin, owner | The project disappears from lists and dashboards and stops accepting uploads. Every run and result is kept. | Yes |
+| **Restore** | admin, owner | Puts it back exactly as it was. | — |
+| **Delete** | **owner only** | Removes the project with every run, result and API token under it. | **No** |
+
+Archived projects are listed under **Archived** at the bottom of *Projects*, each with a
+**Restore** button. That list is the point: an archive nobody can browse is a delete with
+extra steps, and archiving used to hide the project from every list *including* that one —
+so the only route back was to remember and type its settings URL. Its other pages stay 404
+while archived, since an archived project should not be serving dashboards; settings is the
+one exception, because settings is where restoring happens.
+
+Deletion is owner-only and needs the project key typed by hand. It is the only action on a
+project that destroys history, and there is nothing to click afterwards to undo it — so if
+the intent is just "we stopped using this", archive instead.
+
+---
 
 ### Measured, not intended
 

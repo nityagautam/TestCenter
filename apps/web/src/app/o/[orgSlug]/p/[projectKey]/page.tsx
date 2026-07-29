@@ -37,10 +37,10 @@ export default async function ProjectOverview({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string; projectKey: string }>;
-  searchParams: Promise<{ created?: string; token?: string; days?: string }>;
+  searchParams: Promise<{ created?: string; token?: string; days?: string; ok?: string }>;
 }) {
   const { orgSlug, projectKey } = await params;
-  const { created, token, days: daysParam } = await searchParams;
+  const { created, token, days: daysParam, ok } = await searchParams;
   const context = await requirePageContext(orgSlug);
   const project = await requirePageProject(context, projectKey);
   const { sql } = getServices();
@@ -86,6 +86,13 @@ export default async function ProjectOverview({
             <CiSnippet projectKey={project.key} token={token ?? null} />
           </div>
         </Card>
+      ) : null}
+      {/* Confirmation after a redirect — restoring a project lands here, and a message that
+          is redirected with but never rendered is worse than no message at all. */}
+      {ok ? (
+        <p className="mb-4 rounded-md border border-[var(--color-status-passed)]/40 bg-[var(--color-status-passed)]/5 px-3 py-2 text-xs text-[var(--color-status-passed)]">
+          {ok}
+        </p>
       ) : null}
 
       {!hasRuns ? (
@@ -217,7 +224,19 @@ export default async function ProjectOverview({
 
             <div className="space-y-5">
               <Card className="overflow-hidden">
-                <CardHeader title="Flakiest tests" />
+                {/* Points at this project's leaderboard, not the organisation's — the card
+                    is showing this project's flakes, so "view all" has to mean more of the
+                    same rather than a wider list the reader did not ask for. */}
+                <CardHeader
+                  title="Flakiest tests"
+                  action={
+                    flaky.length > 0 ? (
+                      <Link href={`${base}/flaky`} className="text-[11px] underline">
+                        view all
+                      </Link>
+                    ) : undefined
+                  }
+                />
                 {flaky.length === 0 ? (
                   <p className="px-5 py-5 text-center text-xs text-[var(--color-ink-muted)]">
                     None detected.

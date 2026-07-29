@@ -114,6 +114,73 @@ export function formatCount(value: number): string {
 }
 
 /** Trims a long suite path from the left, keeping the meaningful tail. */
+/**
+ * The prefix every one of these strings shares, trimmed to a sensible boundary.
+ *
+ * Test names are frequently mostly boilerplate. In a Cucumber suite parameterised by
+ * cluster, fifty rows all begin `On Cluster "SWADESHUAT", ` — so a list truncated at the
+ * right ends up showing the same 25 characters fifty times and eliding the only part that
+ * differs. Lifting the shared opening into a caption once, and dropping it from the rows,
+ * gives that space back to the words that actually distinguish them.
+ *
+ * Deliberately conservative: it only reports a prefix long enough to be worth removing,
+ * and it cuts back to a separator so the remainder starts at something readable rather
+ * than mid-word. Returns "" when there is nothing worth lifting, which callers treat as
+ * "show the names as they are".
+ */
+export function commonPrefix(values: readonly string[], minLength = 12): string {
+  if (values.length < 3) return "";
+  const first = values[0] as string;
+  let end = first.length;
+  for (const value of values) {
+    let i = 0;
+    while (i < end && i < value.length && value[i] === first[i]) i += 1;
+    end = i;
+    if (end < minLength) return "";
+  }
+  // Back off to the last separator, so the visible remainder is not a word fragment.
+  const candidate = first.slice(0, end);
+  const cut = Math.max(
+    candidate.lastIndexOf(", "),
+    candidate.lastIndexOf(" · "),
+    candidate.lastIndexOf("."),
+    candidate.lastIndexOf(" "),
+    candidate.lastIndexOf("_"),
+  );
+  if (cut < minLength) return "";
+  return candidate.slice(0, cut + 1);
+}
+
+/**
+ * Truncates in the middle, keeping both ends.
+ *
+ * CSS can only ellipsize one end, which is the wrong end for names like
+ * `Negative Test for bulk collection with invalid data with file "…-Invalid-3-Rec.csv",
+ * case no "2"` — three such rows are identical for the first eighty characters and differ
+ * only in the fixture and the case number. Clipping the right made them indistinguishable;
+ * keeping a tail makes each row identifiable at a glance.
+ *
+ * The budget is in characters rather than pixels, so it is approximate — the CSS
+ * `truncate` stays on as a backstop for narrow columns.
+ */
+export function truncateMiddle(value: string, max = 78, tail = 24): string {
+  if (value.length <= max) return value;
+  const head = Math.max(max - tail - 1, 8);
+  return `${value.slice(0, head).trimEnd()}…${value.slice(-tail).trimStart()}`;
+}
+
+/** `specs/scale/group-33.spec.ts` → `group-33.spec.ts`. The part that differs. */
+export function basename(value: string): string {
+  const parts = value.split(/[/\\]/);
+  return parts[parts.length - 1] || value;
+}
+
+/** The directory part, for showing context beside a basename. */
+export function dirname(value: string): string {
+  const index = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  return index > 0 ? value.slice(0, index) : "";
+}
+
 export function truncateStart(value: string, max = 60): string {
   if (value.length <= max) return value;
   return `…${value.slice(value.length - max + 1)}`;

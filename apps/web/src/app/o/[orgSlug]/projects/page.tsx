@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listProjects } from "@testcenter/db";
+import { restoreProject } from "@/app/actions/projects";
 import { Button, Card, CardHeader, EmptyState } from "@/components/ui";
 import { formatPercent, formatRelativeTime } from "@/lib/format";
 import { getServices } from "@/lib/services";
@@ -7,12 +8,31 @@ import { can, requirePageContext } from "@/lib/viewer";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
+export default async function ProjectsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<{ ok?: string; error?: string }>;
+}) {
   const { orgSlug } = await params;
+  const { ok, error } = await searchParams;
   const context = await requirePageContext(orgSlug);
   const { sql } = getServices();
-  const projects = await listProjects(sql, context.org.id);
+
+  /*
+   * Fetched with archived included, then split.
+   *
+   * Archiving previously removed a project from every list, including this one, so the only
+   * way back to it was to remember and type its settings URL. An archive nobody can browse
+   * is a delete with extra steps — so archived projects get their own quiet section here,
+   * each with the action that undoes it.
+   */
+  const all = await listProjects(sql, context.org.id, { includeArchived: true });
+  const projects = all.filter((project) => project.archivedAt === null);
+  const archived = all.filter((project) => project.archivedAt !== null);
   const mayCreate = can(context, "project:create");
+  const mayArchive = can(context, "project:archive");
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-6">
@@ -29,6 +49,17 @@ export default async function ProjectsPage({ params }: { params: Promise<{ orgSl
           </Button>
         ) : null}
       </div>
+
+      {ok ? (
+        <p className="mb-4 rounded-md border border-[var(--color-status-passed)]/40 bg-[var(--color-status-passed)]/5 px-3 py-2 text-xs text-[var(--color-status-passed)]">
+          {ok}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="mb-4 rounded-md border border-[var(--color-status-failed)]/40 bg-[var(--color-status-failed)]/5 px-3 py-2 text-xs text-[var(--color-status-failed)]">
+          {error}
+        </p>
+      ) : null}
 
       <Card className="overflow-hidden">
         <CardHeader title={`${projects.length} project${projects.length === 1 ? "" : "s"}`} />
@@ -92,6 +123,55 @@ export default async function ProjectsPage({ params }: { params: Promise<{ orgSl
           </ul>
         )}
       </Card>
+
+      {archived.length > 0 ? (
+        <Card className="mt-5 overflow-hidden">
+          <CardHeader
+            title={`${archived.length} archived`}
+            action={
+              <span className="text-[11px] text-[var(--color-ink-muted)]">
+                hidden from dashboards · results kept
+              </span>
+            }
+          />
+          <ul className="divide-y divide-[var(--color-border-subtle)]">
+            {archived.map((project) => (
+              <li key={project.id} className="flex items-center gap-4 px-5 py-3">
+                <div className="min-w-0 flex-1">
+                  {/* Deliberately not a link to the project: its pages stay 404 while
+                      archived. Settings is the one page that resolves it, because settings is
+                      where it gets restored. */}
+                  <div className="truncate text-sm text-[var(--color-ink-muted)]">
+                    {project.name}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] text-[var(--color-ink-muted)]">
+                    <span>{project.key}</span>
+                    <span>archived {formatRelativeTime(project.archivedAt)}</span>
+                  </div>
+                </div>
+                {mayArchive ? (
+                  <>
+                    <form action={restoreProject.bind(null, orgSlug, project.key)}>
+                      <button
+                        type="submit"
+                        className="shrink-0 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] hover:border-[var(--color-ink-muted)]"
+                      >
+                        Restore
+                      </button>
+                    </form>
+                    <Link
+                      href={`/o/${orgSlug}/p/${project.key}/settings`}
+                      className="shrink-0 text-[11px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+                    >
+                      Settings
+                    </Link>
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
     </main>
   );
 }

@@ -35,7 +35,16 @@ export const CAPABILITIES = {
   "run:delete": "maintainer",
   "project:create": "maintainer",
   "project:edit": "maintainer",
-  "project:delete": "admin",
+  /** Archive and restore. Reversible, so it sits with the other admin powers. */
+  "project:archive": "admin",
+  /**
+   * Permanent deletion, which takes every run and result with it.
+   *
+   * Owner rather than admin. Archiving already covers "we have stopped using this", and it
+   * is reversible; this is the one action on a project that destroys evidence and cannot be
+   * undone, so it belongs with deleting the organisation itself.
+   */
+  "project:delete": "owner",
   "token:manage": "admin",
   "member:manage": "admin",
   "org:edit": "admin",
@@ -223,11 +232,35 @@ export async function requireProject(
   sql: Sql,
   context: AccessContext,
   projectKey: string,
-): Promise<{ id: string; key: string; name: string; defaultBranch: string }> {
-  const rows = await sql<{ id: string; key: string; name: string; defaultBranch: string }[]>`
-    SELECT id, key, name, default_branch AS "defaultBranch"
+  options: { includeArchived?: boolean } = {},
+): Promise<{
+  id: string;
+  key: string;
+  name: string;
+  defaultBranch: string;
+  archivedAt: Date | null;
+}> {
+  /*
+   * Archived projects are hidden by default but must remain *reachable*.
+   *
+   * They used to be excluded here unconditionally, which meant archiving a project locked
+   * the door behind it: the settings page resolves the project through this function, so
+   * there was no page left on which to un-archive it. Archiving was a one-way trip, which
+   * is not what "archive" means to anyone.
+   */
+  const rows = await sql<
+    {
+      id: string;
+      key: string;
+      name: string;
+      defaultBranch: string;
+      archivedAt: Date | null;
+    }[]
+  >`
+    SELECT id, key, name, default_branch AS "defaultBranch", archived_at AS "archivedAt"
     FROM projects
-    WHERE org_id = ${context.org.id} AND key = ${projectKey} AND archived_at IS NULL
+    WHERE org_id = ${context.org.id} AND key = ${projectKey}
+      ${options.includeArchived ? sql`` : sql`AND archived_at IS NULL`}
     LIMIT 1
   `;
   const project = rows[0];

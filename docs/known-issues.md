@@ -357,6 +357,61 @@ Verified: zero console errors across the dashboard, run list, test search, flaky
 project overview, and the overlay badge is gone. One latent member of the class is left
 open deliberately — see the relative-time entry in the backlog.
 
+### A22. The selected project reset itself on any page that did not name one
+
+The project came only from the URL path, so it was only true on `/o/:org/p/:key/…`. Open a
+test from a project's own test list and the URL becomes `/o/:org/tests/:id` — no project in
+it — so the header dropdown snapped back to "All projects" and the project's nav section
+disappeared, while the page displayed a test belonging to that project. Same for a run, and
+for any organisation-wide page. Nothing had changed except that the next URL happened not
+to mention where you were.
+
+Selection is now a remembered preference, held in a cookie and read by the layout during
+the server render, so a page whose URL is silent still arrives with the right project
+selected in the first painted frame.
+
+- **The path still wins when it has an opinion**, so a shared link lands on the project it
+  is about rather than on whatever the recipient last opened — and visiting a project URL
+  updates the memory.
+- **The value is qualified by organisation** (`orgSlug:projectKey`) and validated against
+  the projects the viewer can see, so a selection cannot leak between organisations that
+  both have a `web` project, and a deleted or newly-inaccessible project cannot leave a
+  phantom selection in the header.
+- **Only "All projects" clears it.** Visiting an organisation-wide page does not, which is
+  the whole point.
+
+Two things went wrong while building it, both worth recording:
+
+- Clearing via a plain link raced the redirect: the destination's server render could read
+  the cookie before the delete landed, so choosing "All projects" arrived on an
+  organisation-wide page still showing the project. The clear and the navigation now happen
+  in one server action.
+- That action is submitted from a form inside the dropdown, and the row initially kept the
+  menu's close-on-click handler. Closing unmounts the form, and a form unmounted mid-submit
+  never submits — so "All projects" silently did nothing at all. A link survives that
+  because the browser owns the navigation; a form does not.
+
+### A23. Archiving a project was a one-way trip, and nothing could be deleted
+
+One button did neither job properly. It said "Archive", it was gated on a capability called
+`project:delete`, and afterwards the project was unreachable: `requireProject`,
+`findProjectByKey` and `listProjects` all filtered `archived_at IS NULL`, so the settings
+page could not resolve it and the projects list did not show it. There was no page left on
+which to un-archive, and no way to actually delete either. Archiving was an
+indistinguishable-from-deletion action with a reassuring name.
+
+- `requireProject` and `listProjects` take `includeArchived`. The settings page passes it,
+  because that is where restoring happens; every other project page stays 404 for an
+  archived project, since an archived project should not be serving dashboards.
+- The projects list has an **Archived** section with a Restore button per row.
+- The capability is split: `project:archive` (admin) for the reversible action,
+  `project:delete` (**owner**) for the one that destroys history.
+- Deleting requires the project key typed by hand, and the runs, results, test cases and
+  tokens cascade from the foreign keys. Verified end to end: wrong confirmation refuses and
+  changes nothing, correct confirmation removes the project with zero orphaned rows.
+
+Found because two projects in the development organisation were already archived and stuck.
+
 ---
 
 ## Part B — outstanding

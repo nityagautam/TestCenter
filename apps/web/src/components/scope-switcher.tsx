@@ -33,6 +33,7 @@ export function ScopeSwitcher({
   createLabel,
   clearHref,
   clearLabel,
+  clearAction,
 }: {
   label: string;
   current: ScopeOption | null;
@@ -48,6 +49,13 @@ export function ScopeSwitcher({
    */
   clearHref?: string;
   clearLabel?: string;
+  /**
+   * Submitted instead of following `clearHref`, when clearing has to change server state
+   * before the next render. The project switcher needs it: forgetting the remembered
+   * project and navigating must happen in one round trip, or the destination renders with
+   * the project still selected.
+   */
+  clearAction?: (() => Promise<void>) | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -55,7 +63,8 @@ export function ScopeSwitcher({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const itemRefs = useRef<(HTMLAnchorElement | null)[]>([]);
+  // Anchors or submit buttons — the clear row is a button when it carries an action.
+  const itemRefs = useRef<(HTMLElement | null)[]>([]);
 
   const visible = filter.trim()
     ? options.filter(
@@ -79,6 +88,7 @@ export function ScopeSwitcher({
     detail: string | null;
     badge: string | undefined;
     selected: boolean;
+    action?: (() => Promise<void>) | undefined;
   }
   const rows: Row[] = [
     ...(clearHref && !filter.trim()
@@ -90,6 +100,7 @@ export function ScopeSwitcher({
             detail: null,
             badge: undefined,
             selected: current === null,
+            action: clearAction,
           },
         ]
       : []),
@@ -231,21 +242,12 @@ export function ScopeSwitcher({
                 Nothing matches
               </li>
             ) : null}
-            {rows.map((row, index) => (
-              <li key={row.id}>
-                <Link
-                  ref={(node) => {
-                    itemRefs.current[index] = node;
-                  }}
-                  href={row.href}
-                  role="menuitemradio"
-                  aria-checked={row.selected}
-                  tabIndex={index === activeIndex ? 0 : -1}
-                  onClick={() => close(false)}
-                  className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs outline-none hover:bg-[var(--color-surface)] focus-visible:bg-[var(--color-surface)] ${
-                    row.selected ? "bg-[var(--color-surface)] font-semibold" : ""
-                  }`}
-                >
+            {rows.map((row, index) => {
+              const rowClass = `flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs outline-none hover:bg-[var(--color-surface)] focus-visible:bg-[var(--color-surface)] ${
+                row.selected ? "bg-[var(--color-surface)] font-semibold" : ""
+              }`;
+              const body = (
+                <>
                   <span className="min-w-0">
                     <span className="block truncate">{row.name}</span>
                     {row.detail ? (
@@ -259,9 +261,55 @@ export function ScopeSwitcher({
                       {row.badge}
                     </span>
                   ) : null}
-                </Link>
-              </li>
-            ))}
+                </>
+              );
+
+              return (
+                <li key={row.id}>
+                  {row.action ? (
+                    /*
+                     * Same row, same keyboard position; a form because it changes server
+                     * state before navigating rather than just following a URL.
+                     *
+                     * Note the absence of an onClick that closes the menu. Closing unmounts
+                     * the form, and a form unmounted mid-submit never submits — the first
+                     * version of this silently did nothing, leaving the cookie in place and
+                     * the old project still selected. A link survives that because the
+                     * browser owns the navigation; a form does not. The redirect replaces the
+                     * page, which dismisses the menu anyway.
+                     */
+                    <form action={row.action}>
+                      <button
+                        ref={(node) => {
+                          itemRefs.current[index] = node;
+                        }}
+                        type="submit"
+                        role="menuitemradio"
+                        aria-checked={row.selected}
+                        tabIndex={index === activeIndex ? 0 : -1}
+                        className={rowClass}
+                      >
+                        {body}
+                      </button>
+                    </form>
+                  ) : (
+                    <Link
+                      ref={(node) => {
+                        itemRefs.current[index] = node;
+                      }}
+                      href={row.href}
+                      role="menuitemradio"
+                      aria-checked={row.selected}
+                      tabIndex={index === activeIndex ? 0 : -1}
+                      onClick={() => close(false)}
+                      className={rowClass}
+                    >
+                      {body}
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </ul>
 
           {createHref ? (
