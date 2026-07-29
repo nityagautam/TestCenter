@@ -22,7 +22,8 @@
     "test": "vitest run",
     "mint-token": "tsx scripts/token.ts",
     "seed-perf": "tsx scripts/seed-perf.ts",
-    "seed-test-org": "tsx scripts/seed-test-org.ts"
+    "seed-test-org": "tsx scripts/seed-test-org.ts",
+    "seed-users": "tsx scripts/seed-users.ts"
   },
   "dependencies": {
     "@testcenter/core": "workspace:*",

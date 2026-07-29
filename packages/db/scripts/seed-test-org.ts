@@ -4,7 +4,6 @@ import { createClient } from "../src/client.js";
 import {
   createOrganization,
   createProject,
-  grantOrgAccess,
   requireOrgAccess,
   upsertUserOnSignIn,
 } from "../src/access.js";
@@ -141,8 +140,9 @@ async function main(): Promise<void> {
     // ── people ───────────────────────────────────────────────────────────────
     const owner = (
       await upsertUserOnSignIn(db, {
-        email: "qa-lead@test-organisation.dev",
-        name: "QA Lead",
+        email: "admin@testcenter.dev",
+        name: "admin",
+        // Platform admin comes from TESTCENTER_ADMIN_EMAILS, never from a seed.
         adminEmails: [],
       })
     ).viewer;
@@ -165,24 +165,9 @@ async function main(): Promise<void> {
 
     const context = await requireOrgAccess(db, owner, ORG_SLUG);
 
-    // A few teammates at different roles, so permission behaviour is testable without
-    // hand-crafting memberships each time.
-    for (const [email, role] of [
-      ["dev@test-organisation.dev", "member"],
-      ["manager@test-organisation.dev", "viewer"],
-      ["sre@test-organisation.dev", "maintainer"],
-      ["future-hire@test-organisation.dev", "member"], // deliberately never signs in
-    ] as const) {
-      await grantOrgAccess(db, { orgId, email, role, grantedBy: owner });
-    }
-    for (const email of [
-      "dev@test-organisation.dev",
-      "manager@test-organisation.dev",
-      "sre@test-organisation.dev",
-    ]) {
-      await upsertUserOnSignIn(db, { email, name: email.split("@")[0] ?? email, adminEmails: [] });
-    }
-    console.log("✓ granted access to 3 teammates (+1 pending, never signed in)");
+    // The account roster lives in seed-users.ts so there is one definition of who
+    // exists at which role, rather than two lists that drift apart.
+    console.log("→ applying the account roster (see scripts/seed-users.ts)");
 
     const alreadySeeded = await sql<{ n: number }[]>`
       SELECT count(*)::int AS n FROM runs WHERE org_id = ${orgId}
@@ -191,7 +176,7 @@ async function main(): Promise<void> {
       console.log(
         `✓ ${alreadySeeded[0]?.n} run(s) already present — skipping generation so history is not duplicated`,
       );
-      console.log(`\nSign in at /signin as qa-lead@test-organisation.dev`);
+      console.log(`\nRun \`pnpm --filter @testcenter/db seed-users\` to apply the account roster.`);
       return;
     }
 
@@ -426,11 +411,8 @@ async function main(): Promise<void> {
     `;
     for (const row of shape) console.log(`  ${row.label.padEnd(20)} ${row.value}`);
 
-    console.log(`\nSign in at /signin as one of:`);
-    console.log(`  qa-lead@test-organisation.dev      owner`);
-    console.log(`  sre@test-organisation.dev          maintainer`);
-    console.log(`  dev@test-organisation.dev          member`);
-    console.log(`  manager@test-organisation.dev      viewer   (cannot upload)`);
+    console.log(`\nNow run: pnpm --filter @testcenter/db seed-users`);
+    console.log(`Then sign in at /signin — email only, no password.`);
   } finally {
     await sql.end({ timeout: 10 });
   }

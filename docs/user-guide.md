@@ -16,8 +16,10 @@ brew services start redis
 # Apply migrations, provision partitions, bootstrap
 pnpm db:migrate
 
-# Seed the Test Organisation with believable history (safe to re-run)
+# Seed the Test Organisation with believable history, then the account roster
+# (both safe to re-run)
 pnpm --filter @testcenter/db seed-test-org 45
+pnpm --filter @testcenter/db seed-users
 
 # Run web + worker together
 pnpm dev
@@ -65,32 +67,46 @@ addition, and worth doing deliberately rather than by accident.
 
 That is the whole flow. First sign-in creates the account; later sign-ins reuse it.
 
-### Seeded accounts
+### Accounts
 
-All four already have access to **Test Organisation** (4 projects, 45 days of history,
-330 runs, ~14,500 results):
+All of these already have access to **Test Organisation** (4 projects, 45 days of
+history, 330 runs, ~14,500 results). Type the email, leave everything else blank.
 
 | Email | Role | Use it to see |
 | --- | --- | --- |
-| `qa-lead@test-organisation.dev` | **owner** | everything, including archiving projects |
-| `sre@test-organisation.dev` | **maintainer** | creating and editing projects, but not managing members |
-| `dev@test-organisation.dev` | **member** | uploading results and tagging, but not creating projects |
-| `manager@test-organisation.dev` | **viewer** | read-only — Upload and Members are hidden, and blocked server-side |
-| `future-hire@test-organisation.dev` | member *(pending)* | a grant made before the account existed — signing in activates it |
+| `admin@testcenter.dev` | **superadmin + owner** | everything, plus the Platform admin area across all organisations |
+| `qalead@testcenter.dev` | **maintainer** | creating and editing projects, but *not* managing members or tokens |
+| `sdet@testcenter.dev` | **member** | uploading results and tagging, but *not* creating projects |
+| `qa@testcenter.dev` | **viewer** | read-only — Upload and Members are hidden, and refused server-side |
+| `future-hire@testcenter.dev` | member *(pending)* | a grant made before the account existed — signing in activates it |
 
-### Platform administrators
+The roster lives in `packages/db/scripts/seed-users.ts` and is idempotent, so it survives
+a database reset:
 
-These two addresses are listed in `TESTCENTER_ADMIN_EMAILS` in `.env`:
+```bash
+pnpm --filter @testcenter/db seed-users
+```
 
-- `ashutoshmishra@gofynd.com`
-- `nityanarayan44@live.com`
+### Superadmin
 
-Sign in as either and you additionally get **Platform admin** in the left nav. Platform
-admins see **every** organisation and can grant access to organisations they are not
-members of — this is how a new user gets into an existing team.
+`admin@testcenter.dev` is **both** the organisation owner and a platform administrator.
+Those are two separate things:
 
-Platform status is re-read from `.env` on **every** sign-in. Removing an address from the
-list revokes the privilege at their next login, and no action inside the app can grant it.
+- **owner** is a role *within* Test Organisation — granted by a membership row.
+- **superadmin** (platform admin) spans *all* organisations — granted only by listing the
+  address in `TESTCENTER_ADMIN_EMAILS` in `.env`.
+
+Platform status is re-read from `.env` on **every** sign-in, deliberately outside anything
+the database or a seed script can set. Removing an address revokes it at the next login,
+and no action inside the app can grant it — otherwise "superadmin" would be escalatable
+from within the product it protects.
+
+Also configured as platform admins: `ashutoshmishra@gofynd.com`,
+`nityanarayan44@live.com`.
+
+Sign in as `admin@testcenter.dev` and you get **Platform admin** in the left nav: every
+organisation, with the ability to grant access to ones you are not a member of. That is
+how a new user gets into an existing team.
 
 ### Try any address at all
 
@@ -105,16 +121,20 @@ create your own organisation, or skip and be told what to ask an administrator f
 Organisation membership grants access to **every project** in that organisation. Roles
 control what you can *do*, and are ordered — each includes everything below it.
 
-| | viewer | member | maintainer | admin | owner |
+| | viewer<br>`qa@` | member<br>`sdet@` | maintainer<br>`qalead@` | admin | owner<br>`admin@` |
 | --- | :-: | :-: | :-: | :-: | :-: |
-| Read runs, tests, dashboards | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Dashboard, runs, tests, flaky, projects | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Upload results | | ✓ | ✓ | ✓ | ✓ |
 | Edit tags, quarantine tests | | ✓ | ✓ | ✓ | ✓ |
 | Delete runs | | | ✓ | ✓ | ✓ |
-| Create / edit projects | | | ✓ | ✓ | ✓ |
+| Create projects / edit project settings | | | ✓ | ✓ | ✓ |
 | Archive projects | | | | ✓ | ✓ |
 | Manage members and API tokens | | | | ✓ | ✓ |
+| Platform admin area | | | | | superadmin only |
 | Delete the organisation | | | | | ✓ |
+
+This table was verified by request against every account, not written from intent — each
+row reflects what the server actually returns.
 
 Two things worth knowing:
 
@@ -242,11 +262,12 @@ up a pipeline.
 
 | To see | Do this |
 | --- | --- |
-| Roles actually enforced | Sign in as `manager@…` (viewer). Upload and Members vanish from the nav; visiting `/o/test-organisation/settings/members` explains why rather than erroring. |
-| A pending grant activating | Sign in as `future-hire@test-organisation.dev` — never signed in before, and lands straight in Test Organisation because the grant was waiting. |
+| Roles actually enforced | Sign in as `qa@testcenter.dev` (viewer). Upload and Members vanish from the nav; visiting `/o/test-organisation/settings/members` explains why rather than erroring. |
+| Maintainer's ceiling | Sign in as `qalead@testcenter.dev`. Projects can be created and edited, but Members and API tokens are refused — maintainer sits below admin. |
+| A pending grant activating | Sign in as `future-hire@testcenter.dev` — never signed in before, and lands straight in Test Organisation with member access because the grant was waiting. |
 | A brand-new user | Sign in as any unknown address. You get the onboarding choice, then the "no access yet" page with your address to hand to an admin. |
 | Tenant isolation | As a new user, create your own organisation, then try `/o/test-organisation` directly. You are redirected away — and a nonexistent slug behaves identically, so slugs cannot be probed. |
-| Cross-org granting | Sign in as `ashutoshmishra@gofynd.com`, open Platform admin, select Test Organisation and grant your own test address access. |
+| Cross-org granting | Sign in as `admin@testcenter.dev`, open Platform admin, select any organisation and grant an address access — including organisations you are not a member of. |
 | Multiple failure modes | Open the test linked from "Most-failing tests" in `payments-service` — it has two distinct signatures. |
 | A duration regression | Test search → sort by **Slowest**. The seeded `slowing` tests climb steadily. |
 
