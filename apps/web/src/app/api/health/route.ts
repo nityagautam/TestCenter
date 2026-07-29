@@ -68,7 +68,11 @@ export async function GET(request: Request): Promise<NextResponse> {
       checks.blobStore = {
         ok: true,
         latencyMs: Date.now() - startedAt,
-        detail: `driver=${blobStore.driver}`,
+        // The root is included because web and worker must resolve it identically;
+        // a divergence shows up here instead of as a mysterious ENOENT at ingest.
+        detail:
+          `driver=${blobStore.driver}` +
+          ("root" in blobStore ? ` root=${String((blobStore as { root: unknown }).root)}` : ""),
       };
     } catch (error) {
       checks.blobStore = { ok: false, detail: errorMessage(error) };

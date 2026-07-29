@@ -27,23 +27,51 @@ export type Database = ReturnType<typeof drizzle<typeof schema>>;
 
 let cached: { sql: Sql; db: Database } | null = null;
 
-export function createClient(config: DbConfig): { sql: Sql; db: Database } {
-  const sql = postgres(config.databaseUrl, {
-    max: config.maxConnections ?? 10,
+/**
+ * Two pools, deliberately.
+ *
+ * `drizzle(sql)` mutates the postgres.js instance it is handed: it installs its own
+ * type handling so it can do the mapping itself. A side effect is that the raw
+ * template path on that same instance can no longer serialize a `Date` — it throws
+ * `Buffer.byteLength received an instance of Date` when binding a timestamptz.
+ *
+ * That matters here because the ingest hot path uses raw SQL for multi-row inserts
+ * (the query builder is a poor fit for bulk writes) while the rest of the app uses
+ * drizzle. Sharing one instance silently broke every bulk insert. Separate pools
+ * keep both paths correct; the cost is a handful of extra connections, which is
+ * nothing next to a category of write bug that only appears at runtime.
+ */
+function connect(config: DbConfig, max: number, role: string): Sql {
+  return postgres(config.databaseUrl, {
+    max,
     idle_timeout: 30,
     connect_timeout: 10,
     // A runaway dashboard query must not pin a connection indefinitely.
     connection: {
-      application_name: config.applicationName ?? "test-center",
+      application_name: `${config.applicationName ?? "test-center"}-${role}`,
       statement_timeout: config.statementTimeoutMs ?? 30_000,
     },
     onnotice: () => {},
     transform: { undefined: null },
   });
+}
 
-  const db = drizzle(sql, { schema, casing: "snake_case" });
+export function createClient(config: DbConfig): { sql: Sql; db: Database } {
+  const total = config.maxConnections ?? 10;
+  const drizzleMax = Math.max(2, Math.floor(total / 2));
+  const rawMax = Math.max(2, total - drizzleMax);
+
+  const sql = connect(config, rawMax, "sql");
+  const drizzleSql = connect(config, drizzleMax, "orm");
+  const db = drizzle(drizzleSql, { schema, casing: "snake_case" });
+
+  // Tracked so closeClient can drain both pools; a leaked pool keeps the process
+  // alive and makes graceful shutdown hang.
+  ownedPools.set(sql, drizzleSql);
   return { sql, db };
 }
+
+const ownedPools = new WeakMap<Sql, Sql>();
 
 /** Process-wide singleton. Safe under Next.js hot reload. */
 export function getClient(config?: Partial<DbConfig>): { sql: Sql; db: Database } {
@@ -56,8 +84,21 @@ export function getClient(config?: Partial<DbConfig>): { sql: Sql; db: Database 
 
 export async function closeClient(): Promise<void> {
   if (!cached) return;
-  await cached.sql.end({ timeout: 5 });
+  const ormPool = ownedPools.get(cached.sql);
+  await Promise.all([
+    cached.sql.end({ timeout: 5 }),
+    ormPool ? ormPool.end({ timeout: 5 }) : Promise.resolve(),
+  ]);
   cached = null;
+}
+
+/** Drains both pools of a client obtained from `createClient`. */
+export async function closeCreatedClient(client: { sql: Sql }): Promise<void> {
+  const ormPool = ownedPools.get(client.sql);
+  await Promise.all([
+    client.sql.end({ timeout: 5 }),
+    ormPool ? ormPool.end({ timeout: 5 }) : Promise.resolve(),
+  ]);
 }
 
 /** Liveness probe for /api/health. Cheap enough to call per request. */

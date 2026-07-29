@@ -19,7 +19,9 @@
     "migrate:check": "tsx scripts/migrate.ts --check",
     "partitions": "tsx scripts/partitions.ts",
     "reset": "tsx scripts/reset.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "mint-token": "tsx scripts/token.ts",
+    "seed-perf": "tsx scripts/seed-perf.ts"
   },
   "dependencies": {
     "@testcenter/core": "workspace:*",

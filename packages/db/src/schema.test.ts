@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { computeFingerprint } from "@testcenter/core";
 import { createClient, type Database, type Sql } from "./client.js";
 import { listPartitions, maintainPartitions } from "./partitions.js";
+import { persistResultBatch } from "./ingest.js";
 import { bootstrap, generateApiToken, hashApiToken, resolveApiToken } from "./bootstrap.js";
 import * as schema from "./schema.js";
 
@@ -291,6 +292,108 @@ describeIfDb("schema", () => {
     it("refuses a token that does not exist", async () => {
       expect(await resolveApiToken(db, "tc_not-a-real-token")).toBeNull();
     });
+  });
+
+  it("binds a Date through raw SQL even though drizzle shares the database", async () => {
+    // Regression guard. drizzle(sql) mutates the postgres.js instance it is given,
+    // installing its own type handling; a side effect is that raw template queries
+    // on that same instance can no longer serialize a Date. Because the ingest hot
+    // path uses raw SQL for bulk inserts while the rest of the app uses drizzle,
+    // sharing one instance silently broke every multi-row write with
+    // "Buffer.byteLength received an instance of Date". createClient now gives each
+    // its own pool.
+    const now = new Date();
+    const rows = await sql<{ ts: Date }[]>`SELECT ${now}::timestamptz AS ts`;
+    expect(rows[0]?.ts.getTime()).toBe(now.getTime());
+
+    // The multi-row helper is the shape that actually failed.
+    const name = uniqueName("date binding");
+    const fingerprint = computeFingerprint({ projectId, name });
+    const inserted = await sql<{ id: string }[]>`
+      INSERT INTO test_cases ${sql(
+        [
+          {
+            org_id: orgId,
+            project_id: projectId,
+            fingerprint: fingerprint.digest,
+            fingerprint_version: 1,
+            name,
+            first_seen_at: now,
+            last_seen_at: now,
+            last_status: "passed",
+          },
+        ],
+        "org_id",
+        "project_id",
+        "fingerprint",
+        "fingerprint_version",
+        "name",
+        "first_seen_at",
+        "last_seen_at",
+        "last_status",
+      )}
+      RETURNING id
+    `;
+    // postgres.js returns int8 as a string rather than narrowing to a JS number.
+    const newId = Number(inserted[0]?.id);
+    expect(newId).toBeGreaterThan(0);
+    await db.delete(schema.testCases).where(eq(schema.testCases.id, newId));
+  });
+
+  it("stores jsonb columns as objects, not double-encoded strings", async () => {
+    // Regression guard. postgres.js JSON-encodes a value bound to a jsonb column or
+    // an explicit ::jsonb cast, so pre-stringifying it stores a JSON *string* scalar.
+    // Everything still inserts without error, but `@>` containment never matches and
+    // jsonb_array_length() fails with "cannot get array length of a scalar" — so tag
+    // filtering silently returns nothing. sql.json() encodes exactly once.
+    const run = await db
+      .insert(schema.runs)
+      .values({ orgId, projectId, framework: "junit", status: "complete" })
+      .returning({ id: schema.runs.id });
+    const runId = run[0]?.id as string;
+
+    await persistResultBatch(sql, {
+      orgId,
+      projectId,
+      runId,
+      runStartedAt: new Date(),
+      results: [
+        {
+          name: uniqueName("jsonb encoding"),
+          status: "failed",
+          suite: "tests/encoding.spec.ts",
+          tags: { severity: "p1", owner: "payments" },
+          failure: { type: "AssertionError", message: "boom" },
+        },
+      ],
+    });
+
+    const types = await sql<{ tag_type: string }[]>`
+      SELECT jsonb_typeof(tags) AS tag_type FROM test_results WHERE run_id = ${runId}
+    `;
+    expect(types[0]?.tag_type).toBe("object");
+
+    // The query that actually depends on it: containment must match.
+    const matched = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM test_results
+      WHERE run_id = ${runId} AND tags @> ${sql.json({ severity: "p1" })}
+    `;
+    expect(matched[0]?.n).toBe(1);
+
+    const runTypes = await sql<{ warn_type: string; tag_type: string }[]>`
+      SELECT jsonb_typeof(warnings) AS warn_type, jsonb_typeof(tags) AS tag_type
+      FROM runs WHERE id = ${runId}
+    `;
+    expect(runTypes[0]?.warn_type).toBe("array");
+    expect(runTypes[0]?.tag_type).toBe("object");
+
+    // jsonb_array_length is what the run list calls for the warning badge.
+    const lengths = await sql<{ n: number }[]>`
+      SELECT jsonb_array_length(warnings) AS n FROM runs WHERE id = ${runId}
+    `;
+    expect(lengths[0]?.n).toBe(0);
+
+    await db.delete(schema.runs).where(eq(schema.runs.id, runId));
   });
 
   it("bootstraps idempotently", async () => {

@@ -44,6 +44,9 @@ importers:
       '@testcenter/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@testcenter/parsers':
+        specifier: workspace:*
+        version: link:../../packages/parsers
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
@@ -62,6 +65,9 @@ importers:
       server-only:
         specifier: ^0.0.1
         version: 0.0.1
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.3.3
@@ -96,6 +102,9 @@ importers:
       '@testcenter/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@testcenter/parsers':
+        specifier: workspace:*
+        version: link:../../packages/parsers
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)

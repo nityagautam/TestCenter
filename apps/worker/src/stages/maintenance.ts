@@ -1,5 +1,10 @@
 import type { Env, Job, MaintenanceJobPayload, Logger } from "@testcenter/core";
-import { drainDefaultPartition, maintainPartitions, type Sql } from "@testcenter/db";
+import {
+  drainDefaultPartition,
+  failStalledRuns,
+  maintainPartitions,
+  type Sql,
+} from "@testcenter/db";
 
 /**
  * Scheduled maintenance.
@@ -43,6 +48,16 @@ export async function handleMaintenance(context: MaintenanceContext): Promise<vo
         );
         const moved = await drainDefaultPartition(sql);
         logger.info({ moved }, "relocated rows out of DEFAULT partition");
+      }
+
+      // A run stuck in "parsing" shows a spinner forever. Reaping is bundled with
+      // partition maintenance so it runs on the same schedule without another job.
+      const stalled = await failStalledRuns(sql);
+      if (stalled.length > 0) {
+        logger.warn(
+          { runIds: stalled.map((entry) => entry.runId) },
+          "failed run(s) whose ingest never completed",
+        );
       }
       return;
     }

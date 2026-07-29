@@ -3,9 +3,16 @@
 Test intelligence for every framework. Ingest test results from pytest, Playwright, JUnit,
 TestNG, Cypress, Jest and others — via direct upload or API/CI — then triage and trend them.
 
-**Status: Phase 0 (foundations) complete.** No product UI yet; `/` renders a system status
-board. See [`docs/test-center-plan.md`](docs/test-center-plan.md) for the architecture and the
-phase plan.
+**Status: Phase 1 complete — the product is usable.** Upload a JUnit XML report from the
+browser or from CI, then browse runs, drill into failures, and filter by tag. See
+[`docs/test-center-plan.md`](docs/test-center-plan.md) for the architecture and phase plan.
+
+| Page | What it does |
+| --- | --- |
+| `/` | Health across recent runs, per-project pass rate |
+| `/runs` | Filterable run list — branch, env, framework, tag facets, keyset pagination |
+| `/runs/:id` | Summary tiles, suite tree, failures-first result table, stack traces, tag editing |
+| `/upload` | Drag-and-drop upload with live parse progress, plus CI recipes |
 
 ## Architecture in one paragraph
 
@@ -21,12 +28,36 @@ ports in `packages/core`. Infrastructure SDKs may only be imported inside
 open.
 
 ```
-apps/web        Next.js App Router — UI + API route handlers
-apps/worker     long-running ingest/rollup/maintenance worker (containerized)
-packages/core   canonical result model, fingerprinting, BlobStore/Queue ports, config, logging
-packages/db     SQL migrations, partition management, Drizzle schema, typed client
+apps/web           Next.js App Router — UI + API route handlers
+apps/worker        long-running ingest/rollup/maintenance worker (containerized)
+packages/core      canonical result model, fingerprinting, ports, config, logging
+packages/parsers   parser registry + streaming JUnit/xUnit XML parser
+packages/db        migrations, partitions, ingest persistence, read-path queries
 packages/adapters  the ONLY place S3/Redis SDKs are imported
 ```
+
+## Ingesting results
+
+One command, no dependencies:
+
+```bash
+curl -X POST "$TESTCENTER_URL/api/v1/ingest?project=demo&branch=main&tag=suite:regression" \
+  -H "Authorization: Bearer $TESTCENTER_TOKEN" \
+  -F "report=@reports/junit.xml"
+```
+
+For large reports, bytes go straight to object storage and never through the API:
+
+```
+POST /api/v1/runs              → { runId, uploads: [{ uploadUrl }] }
+PUT  <uploadUrl>               → the report bytes
+POST /api/v1/runs/:id/complete → queues parsing
+```
+
+Mint a token with `pnpm --filter @testcenter/db mint-token <project-key>`.
+
+One JUnit/xUnit parser covers pytest `--junitxml`, Playwright's junit reporter, Maven
+Surefire, Gradle, jest-junit, Cypress, Robot and TestNG.
 
 ## Getting started
 
@@ -92,6 +123,8 @@ Visit <http://localhost:3000> for the status board, or `curl localhost:3000/api/
 | `pnpm db:migrate:check` | non-zero exit if anything is unapplied (CI drift guard) |
 | `pnpm db:partitions` | create lookahead partitions, drop expired; `--dry-run`, `--list`, `--drain` |
 | `pnpm db:reset` | drop and rebuild the schema (refuses non-local databases) |
+| `pnpm --filter @testcenter/db mint-token <project>` | create a CI API token (shown once) |
+| `pnpm --filter @testcenter/db seed-perf [runs] [tests]` | seed history and assert read-path budgets |
 | `pnpm --filter @testcenter/worker enqueue partitions` | enqueue a real job to smoke-test the queue path |
 
 ## Things worth knowing before changing code
@@ -116,3 +149,18 @@ retrofit. Row-level security, metering and invite flows are deliberately deferre
 
 **Failure signatures are computed at ingest from day one** even though the clustering UI is
 Phase 3, so that feature opens against real history instead of an empty table.
+
+**jsonb values must be bound with `sql.json()`.** postgres.js JSON-encodes anything bound
+to a jsonb column or an explicit `::jsonb` cast, so pre-stringifying stores a JSON *string*
+scalar. Nothing errors on insert — but `tags @> ...` silently stops matching and
+`jsonb_array_length()` fails outright. Migration `0003` repairs such rows and a test pins
+the encoding.
+
+**drizzle and raw SQL need separate connection pools.** `drizzle(sql)` mutates the
+postgres.js instance it is given, and afterwards the raw template path can no longer bind a
+`Date`. `createClient` therefore opens one pool per access style; the ingest hot path uses
+raw SQL for bulk inserts while everything else uses drizzle.
+
+**Read-path budget is enforced, not assumed.** `seed-perf` measures the five queries the UI
+issues against real data and fails if any exceeds 400ms p95. At 400k results they run in
+2–6ms and pages render in 18–48ms.

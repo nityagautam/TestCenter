@@ -38,7 +38,12 @@ const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 300;
 
 export class FsBlobStore implements BlobStore {
   readonly driver = "fs";
-  private readonly root: string;
+  /**
+   * Absolute, and exposed on purpose: the web app and the worker must agree on this
+   * path, and when they do not the symptom is a missing artifact rather than an
+   * obvious misconfiguration. /api/health reports it.
+   */
+  readonly root: string;
   private readonly publicBaseUrl: string;
   private readonly signingSecret: string;
 

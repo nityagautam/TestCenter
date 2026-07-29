@@ -1,4 +1,4 @@
-import { createQueueConsumer, createQueueProducer } from "@testcenter/adapters";
+import { createBlobStore, createQueueConsumer, createQueueProducer } from "@testcenter/adapters";
 import {
   loadEnv,
   QUEUES,
@@ -31,6 +31,7 @@ const { sql, db } = getClient({
 
 const consumer = createQueueConsumer(env);
 const producer = createQueueProducer(env);
+const blobStore = createBlobStore(env);
 
 const MAINTENANCE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let maintenanceTimer: NodeJS.Timeout | undefined;
@@ -51,7 +52,7 @@ async function main(): Promise<void> {
         projectId: job.payload.projectId,
         stage: "ingest",
       });
-      await handleIngest({ db, sql, env, job, logger: log });
+      await handleIngest({ db, sql, env, blobStore, job, logger: log });
     },
     // Parsing is CPU-bound; running many at once on one process just makes each
     // slower and risks memory pressure on large reports.

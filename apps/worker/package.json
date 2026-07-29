@@ -15,6 +15,7 @@
     "@testcenter/adapters": "workspace:*",
     "@testcenter/core": "workspace:*",
     "@testcenter/db": "workspace:*",
+    "@testcenter/parsers": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

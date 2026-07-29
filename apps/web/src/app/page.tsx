@@ -1,207 +1,225 @@
-import { QUEUES } from "@testcenter/core";
-import { listPartitions, ping, schema } from "@testcenter/db";
-import { desc } from "drizzle-orm";
-import { authProvidersConfigured } from "@/auth";
+import Link from "next/link";
+import { listProjects, listRuns } from "@testcenter/db";
+import {
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  ResultBar,
+  StatTile,
+  StatusBadge,
+  TagChip,
+} from "@/components/ui";
+import { formatDuration, formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
 import { getServices } from "@/lib/services";
+import { currentOrgId } from "@/lib/session";
 
 /**
- * Phase 0 landing page: a system status board.
+ * Overview.
  *
- * There is no product UI yet by design — Phase 0 delivers the foundations, and the
- * useful thing to show is whether those foundations are actually wired up. This
- * page is the human-readable form of the Phase 0 exit criteria and is replaced by
- * the run list in Phase 1.
+ * Answers the question someone opens this app to ask: is anything broken right now,
+ * and which project. Aggregate health first, then the most recent runs — deeper
+ * analysis lives behind the run list.
  */
 export const dynamic = "force-dynamic";
 
-interface StatusRow {
-  label: string;
-  value: string;
-  ok: boolean | null;
-  hint?: string;
-}
-
-async function collectStatus(): Promise<StatusRow[]> {
-  const { sql, db, queue, blobStore, env } = getServices();
-  const rows: StatusRow[] = [];
-
-  const database = await ping(sql);
-  rows.push({
-    label: "Postgres",
-    value: database.ok ? `connected in ${database.latencyMs}ms` : "unreachable",
-    ok: database.ok,
-    hint: database.ok ? undefined : "Is Postgres running? Check DATABASE_URL.",
-  });
-
-  if (database.ok) {
-    try {
-      const migrations = await db
-        .select({ name: schema.schemaMigrations.name })
-        .from(schema.schemaMigrations)
-        .orderBy(desc(schema.schemaMigrations.name));
-      rows.push({
-        label: "Migrations",
-        value:
-          migrations.length === 0
-            ? "none applied"
-            : `${migrations.length} applied (latest ${migrations[0]?.name})`,
-        ok: migrations.length > 0,
-        hint: migrations.length > 0 ? undefined : "Run `pnpm db:migrate`.",
-      });
-
-      const partitions = (await listPartitions(sql)).filter((name) => /_\d{4}_\d{2}$/.test(name));
-      const now = new Date();
-      const currentMonth = `test_results_${now.getUTCFullYear()}_${String(
-        now.getUTCMonth() + 1,
-      ).padStart(2, "0")}`;
-      const hasCurrent = partitions.includes(currentMonth);
-      rows.push({
-        label: "Partitions",
-        value: hasCurrent
-          ? `${partitions.length} monthly, current month present`
-          : `${partitions.length} monthly, current month MISSING`,
-        ok: hasCurrent,
-        hint: hasCurrent
-          ? "Retention drops a partition instead of running a DELETE."
-          : "Run `pnpm db:partitions` — results are landing in test_results_default.",
-      });
-
-      const orgs = await db.select({ slug: schema.organizations.slug }).from(schema.organizations);
-      const projects = await db.select({ key: schema.projects.key }).from(schema.projects);
-      rows.push({
-        label: "Bootstrap",
-        value:
-          orgs.length > 0
-            ? `org ${orgs.map((org) => org.slug).join(", ")} · ${projects.length} project(s)`
-            : "no org yet",
-        ok: orgs.length > 0,
-        hint: orgs.length > 0 ? undefined : "Run `pnpm db:migrate` to bootstrap.",
-      });
-    } catch (error) {
-      rows.push({
-        label: "Schema",
-        value: error instanceof Error ? error.message : "query failed",
-        ok: false,
-      });
-    }
-  }
-
-  try {
-    const depth = await queue.depth(QUEUES.ingest);
-    rows.push({
-      label: "Queue (ingest)",
-      value: `waiting ${depth.waiting} · active ${depth.active} · failed ${depth.failed}`,
-      ok: true,
-      hint: "Queue depth is the primary ingest-lag SLI.",
-    });
-  } catch (error) {
-    rows.push({
-      label: "Queue (ingest)",
-      value: error instanceof Error ? error.message : "unreachable",
-      ok: false,
-      hint: "Is Redis running? Check REDIS_URL.",
-    });
-  }
-
-  rows.push({
-    label: "Object storage",
-    value: `driver ${blobStore.driver}`,
-    ok: true,
-    hint:
-      blobStore.driver === "fs"
-        ? "Local filesystem driver — same signed-upload contract as S3, no Docker needed."
-        : "S3-compatible endpoint.",
-  });
-
-  rows.push({
-    label: "Auth",
-    value: authProvidersConfigured ? "Google OIDC configured" : "not configured",
-    ok: authProvidersConfigured ? true : null,
-    hint: authProvidersConfigured
-      ? `Allowed domains: ${process.env.AUTH_ALLOWED_DOMAINS || "(any)"}`
-      : "Set AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET to enable sign-in.",
-  });
-
-  rows.push({
-    label: "Environment",
-    value: `${env.NODE_ENV} · retention ${env.TESTCENTER_RETENTION_MONTHS} months`,
-    ok: true,
-  });
-
-  return rows;
-}
-
-function StatusDot({ ok }: { ok: boolean | null }) {
-  const color =
-    ok === true
-      ? "bg-[var(--color-status-passed)]"
-      : ok === false
-        ? "bg-[var(--color-status-failed)]"
-        : "bg-[var(--color-status-skipped)]";
-  return <span className={`inline-block size-2.5 shrink-0 rounded-full ${color}`} aria-hidden />;
-}
-
 export default async function HomePage() {
-  const rows = await collectStatus();
-  const failing = rows.filter((row) => row.ok === false).length;
+  const orgId = await currentOrgId();
+  if (!orgId) {
+    return (
+      <main className="mx-auto max-w-5xl px-6 py-16">
+        <EmptyState
+          title="No organization provisioned"
+          description="Run `pnpm db:migrate` to apply migrations, provision partitions and bootstrap the default organization and project."
+        />
+      </main>
+    );
+  }
+
+  const { sql } = getServices();
+  const [projects, recent] = await Promise.all([
+    listProjects(sql, orgId),
+    listRuns(sql, { orgId }, { limit: 8 }),
+  ]);
+
+  const runs = recent.runs;
+  const totalTests = runs.reduce((sum, run) => sum + run.total, 0);
+  const totalFailing = runs.reduce((sum, run) => sum + run.failed + run.errored, 0);
+  const totalFlaky = runs.reduce((sum, run) => sum + run.flaky, 0);
+  const executed = runs.reduce((sum, run) => sum + run.passed + run.failed + run.errored, 0);
+  const passed = runs.reduce((sum, run) => sum + run.passed, 0);
+  const passRate = executed === 0 ? 0 : Number(((passed / executed) * 100).toFixed(2));
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16">
-      <header className="mb-10">
-        <p className="text-xs font-medium tracking-widest text-[var(--color-ink-muted)] uppercase">
-          Phase 0 · Foundations
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Test Center</h1>
-        <p className="mt-3 max-w-xl text-sm leading-relaxed text-[var(--color-ink-muted)]">
-          Ingest test results from any framework, then triage and trend them. This page is the Phase
-          0 status board — it is replaced by the run list in Phase 1.
-        </p>
-      </header>
-
-      <section
-        className="overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]"
-        aria-label="System status"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-5 py-3">
-          <h2 className="text-sm font-medium">System status</h2>
-          <span className="text-xs text-[var(--color-ink-muted)]">
-            {failing === 0 ? "all checks passing" : `${failing} check(s) failing`}
-          </span>
+    <main className="mx-auto max-w-7xl px-6 py-8">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Overview</h1>
+          <p className="mt-1 text-xs text-[var(--color-ink-muted)]">
+            Health across the most recent runs
+          </p>
         </div>
-        <ul className="divide-y divide-[var(--color-border-subtle)]">
-          {rows.map((row) => (
-            <li key={row.label} className="flex gap-3 px-5 py-3.5">
-              <span className="mt-1.5">
-                <StatusDot ok={row.ok} />
-              </span>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="text-sm font-medium">{row.label}</span>
-                  <span className="font-mono text-xs text-[var(--color-ink-muted)]">
-                    {row.value}
-                  </span>
-                </div>
-                {row.hint ? (
-                  <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-muted)]">
-                    {row.hint}
-                  </p>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
+        <div className="flex gap-2">
+          <Button href="/runs">All runs</Button>
+          <Button href="/upload" variant="primary">
+            Upload report
+          </Button>
+        </div>
+      </div>
 
-      <section className="mt-8 rounded-xl border border-[var(--color-border-subtle)] px-5 py-4">
-        <h2 className="text-sm font-medium">Next: Phase 1</h2>
-        <p className="mt-2 text-xs leading-relaxed text-[var(--color-ink-muted)]">
-          JUnit/xUnit XML ingest (covers pytest, Playwright, Surefire, Gradle, jest-junit, Cypress,
-          Robot and TestNG), upload UI and API, run list and run detail, and tagging v1.
-        </p>
-        <p className="mt-2 text-xs text-[var(--color-ink-muted)]">
-          Health JSON: <code className="font-mono">/api/health?deep=1</code>
-        </p>
-      </section>
+      {runs.length === 0 ? (
+        <Card>
+          <EmptyState
+            title="No test results yet"
+            description="Upload a JUnit XML report from the browser, or POST one to /api/v1/ingest from CI. Results appear here as soon as they finish parsing."
+            action={
+              <Button href="/upload" variant="primary">
+                Upload your first report
+              </Button>
+            }
+          />
+        </Card>
+      ) : (
+        <>
+          <Card className="mb-6">
+            <div className="grid grid-cols-2 divide-x divide-y divide-[var(--color-border-subtle)] sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0">
+              <StatTile
+                label="Pass rate"
+                value={formatPercent(passRate)}
+                tone={totalFailing > 0 ? "failed" : "passed"}
+                hint="recent runs"
+              />
+              <StatTile label="Runs" value={runs.length} />
+              <StatTile label="Tests" value={totalTests} />
+              <StatTile
+                label="Failing"
+                value={totalFailing}
+                tone={totalFailing > 0 ? "failed" : "neutral"}
+              />
+              <StatTile
+                label="Flaky"
+                value={totalFlaky}
+                tone={totalFlaky > 0 ? "flaky" : "neutral"}
+              />
+            </div>
+          </Card>
+
+          <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
+            <Card className="overflow-hidden">
+              <CardHeader
+                title="Recent runs"
+                action={
+                  <Link href="/runs" className="text-[11px] underline">
+                    view all
+                  </Link>
+                }
+              />
+              <ul className="divide-y divide-[var(--color-border-subtle)]">
+                {runs.map((run) => {
+                  const failing = run.failed + run.errored;
+                  return (
+                    <li key={run.id} className="px-5 py-3 hover:bg-[var(--color-surface)]/60">
+                      <div className="flex items-start gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link
+                              href={`/runs/${run.id}`}
+                              className="truncate text-sm font-medium hover:underline"
+                            >
+                              {run.name ?? run.framework ?? "Run"}
+                            </Link>
+                            <StatusBadge status={run.status} />
+                            {run.flaky > 0 ? (
+                              <StatusBadge status="flaky">{run.flaky}</StatusBadge>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-3 font-mono text-[11px] text-[var(--color-ink-muted)]">
+                            <span>{run.projectKey}</span>
+                            {run.branch ? <span>{run.branch}</span> : null}
+                            {shortSha(run.commitSha) ? (
+                              <span>{shortSha(run.commitSha)}</span>
+                            ) : null}
+                            <span>{formatDuration(run.durationMs)}</span>
+                            <span>{formatRelativeTime(run.startedAt)}</span>
+                          </div>
+                          {Object.keys(run.tags).length > 0 ? (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {Object.entries(run.tags)
+                                .slice(0, 4)
+                                .map(([key, value]) => (
+                                  <TagChip
+                                    key={key}
+                                    tagKey={key}
+                                    value={value}
+                                    href={`/runs?tag=${encodeURIComponent(`${key}:${value}`)}`}
+                                  />
+                                ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="w-32 shrink-0">
+                          <div className="text-right font-mono text-xs tabular-nums">
+                            <span
+                              className={
+                                failing > 0
+                                  ? "text-[var(--color-status-failed)]"
+                                  : "text-[var(--color-status-passed)]"
+                              }
+                            >
+                              {formatPercent(run.passRate)}
+                            </span>
+                          </div>
+                          <div className="mt-1.5">
+                            <ResultBar
+                              passed={run.passed}
+                              failed={failing}
+                              skipped={run.skipped}
+                              flaky={run.flaky}
+                              total={run.total}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+
+            <Card>
+              <CardHeader title="Projects" />
+              {projects.length === 0 ? (
+                <p className="px-5 py-4 text-xs text-[var(--color-ink-muted)]">No projects yet.</p>
+              ) : (
+                <ul className="divide-y divide-[var(--color-border-subtle)]">
+                  {projects.map((project) => (
+                    <li key={project.id} className="px-5 py-3">
+                      <Link
+                        href={`/runs?project=${project.key}`}
+                        className="text-sm font-medium hover:underline"
+                      >
+                        {project.name}
+                      </Link>
+                      <div className="mt-1 flex items-center justify-between font-mono text-[11px] text-[var(--color-ink-muted)]">
+                        <span>{project.key}</span>
+                        <span>
+                          {project.lastRunAt ? formatRelativeTime(project.lastRunAt) : "no runs"}
+                        </span>
+                      </div>
+                      {project.passRate7d !== null ? (
+                        <div className="mt-1 font-mono text-[11px] text-[var(--color-ink-muted)]">
+                          {project.runs7d} run{project.runs7d === 1 ? "" : "s"} · 7d avg{" "}
+                          {formatPercent(project.passRate7d)}
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+        </>
+      )}
     </main>
   );
 }
