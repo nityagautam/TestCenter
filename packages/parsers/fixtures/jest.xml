@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="3" failures="1" errors="0" time="2.145">
+  <testsuite name="src/lib/cart.test.ts" errors="0" failures="1" skipped="0" timestamp="2026-07-29T02:20:00" time="2.145" tests="3">
+    <testcase classname="cart applies a discount" name="cart applies a discount" time="0.501"/>
+    <testcase classname="cart rejects a negative quantity" name="cart rejects a negative quantity" time="1.402">
+      <failure>Error: expected function to throw
+    at Object.&lt;anonymous&gt; (/home/runner/work/shop/shop/src/lib/cart.test.ts:88:24)
+    at Promise.then.completed (/home/runner/work/shop/shop/node_modules/jest-circus/build/utils.js:298:28)</failure>
+    </testcase>
+    <testcase classname="cart handles an empty cart" name="cart handles an empty cart" time="0.242"/>
+  </testsuite>
+</testsuites>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="pytest" errors="0" failures="1" skipped="1" tests="4" time="3.512" timestamp="2026-07-29T02:00:00.123456" hostname="runner-01">
+    <testcase classname="tests.checkout.test_payment" name="test_declines_expired_card" file="tests/checkout/test_payment.py" line="42" time="1.204">
+      <failure message="assert 'Declined' == 'Approved'">tests/checkout/test_payment.py:48: in test_declines_expired_card
+    assert response.status == 'Approved'
+E   AssertionError: assert 'Declined' == 'Approved'
+E     - Approved
+E     + Declined</failure>
+    </testcase>
+    <testcase classname="tests.checkout.test_payment" name="test_accepts_visa" file="tests/checkout/test_payment.py" line="20" time="0.408"/>
+    <testcase classname="tests.checkout.test_payment" name="test_requires_login" file="tests/checkout/test_payment.py" line="60" time="0.001">
+      <skipped type="pytest.skip" message="needs staging credentials">tests/checkout/test_payment.py:61: needs staging credentials</skipped>
+    </testcase>
+    <testcase classname="tests.cart.test_totals" name="test_applies_discount[percent-10]" file="tests/cart/test_totals.py" line="15" time="1.899">
+      <system-out>computing totals for cart 88
+</system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

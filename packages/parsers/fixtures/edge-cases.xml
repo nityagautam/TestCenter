@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<testsuite name="minimal">
+  <testcase name="no time attribute"/>
+  <testcase name="explicit error" time="0.5">
+    <error message="setup failed" type="RuntimeError">RuntimeError: database unavailable
+  at conftest.py:12</error>
+  </testcase>
+  <testcase name="cdata failure" time="0.2">
+    <failure message="mismatch"><![CDATA[expected <a> got <b> & more]]></failure>
+  </testcase>
+  <testsuite name="nested-child" timestamp="2026-07-29T03:00:00">
+    <testcase name="inside nested suite" time="0.1"/>
+  </testsuite>
+</testsuite>
