@@ -9,7 +9,8 @@
     "start": "node dist/src/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "enqueue": "tsx scripts/enqueue.ts",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "seed-from-junit": "tsx scripts/seed-from-junit.ts"
   },
   "dependencies": {
     "@testcenter/adapters": "workspace:*",

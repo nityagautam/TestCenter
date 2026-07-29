@@ -309,6 +309,43 @@ single-project list is noise.
 
 ## Part B — outstanding
 
+### B13. Reports can carry credentials into the database *(found in real data)*
+
+The Cucumber reports used to seed `EXT API TEST` log a live bearer token in `system-out`
+on every scenario — `>>>>>> TOKEN::: oa-<40 hex>` and `PLATFORM CLIENT TOKEN` — so
+ingesting four reports put real credentials in 36 rows, and from there into the UI and any
+backup. `seed-from-junit` scrubs what it generates, but the product's own ingest path
+stores captured output exactly as CI sent it.
+
+Two separate things need deciding, which is why this is not a silent fix:
+
+- **Whether to redact at parse time**, and whether that is a per-project setting (default
+  on) or unconditional. Redacting changes what the product stores from what was sent,
+  which is the owner's call.
+- **The raw artifact** in object storage remains the source of truth and would still hold
+  the secret, so artifact retention has to be part of any answer.
+
+Worth saying separately: the token appearing in the report at all is a property of the
+test suite, not of Test Center. A dashboard that quietly makes it searchable does make it
+worse.
+
+### B14. Embedding the cluster in the scenario name fragments a test's history
+
+Not a defect in this product, but it shapes what the product can show. The real scenarios
+are named `On Cluster "SWADESHUAT", Positive Brand import with file "SWADESHUAT-…"`, so
+the same scenario on a second cluster is a *different* test as far as any dashboard is
+concerned — a separate fingerprint, a separate history, a separate flake score. Running
+four clusters turns 65 scenarios into 353 test cases, and no view can answer "does this
+scenario fail only on production?".
+
+The fix is on the suite's side: keep the cluster out of the scenario name and pass it as a
+Cucumber tag or a run-level parameter. Test Center already reads run tags and per-result
+parameters, so `cluster` becomes a filter across one shared history instead of a name
+prefix that splits it. `seed-from-junit` records `cluster` both ways — in the name, as the
+reports do, and in `parameters` — so the difference is visible in the product.
+
+
+
 Ordered by my view of value. None are known to be broken; they are absent or thin.
 
 ### B1. Platform admin area is minimal *(built, could go further)*

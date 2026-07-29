@@ -165,6 +165,7 @@ Health JSON: `curl localhost:3000/api/health?deep=1`.
 | `pnpm --filter @testcenter/db seed-test-org [days]` | seed the Test Organisation with believable history |
 | `pnpm --filter @testcenter/db seed-scenarios [org] [n]` | seed the awkward cases — every run state, layout-breaking content, an n-test run, an empty project |
 | `pnpm --filter @testcenter/db seed-users` | apply the account roster (idempotent) — see the [user guide](docs/user-guide.md) |
+| `pnpm --filter @testcenter/worker seed-from-junit <dir>` | build a corpus from real JUnit XML and extrapolate it into months of history |
 | `pnpm --filter @testcenter/db remove-org <slug> [--yes]` | delete an organisation and everything under it; dry-run by default |
 | `pnpm --filter @testcenter/worker enqueue partitions` | enqueue a real job to smoke-test the queue path |
 

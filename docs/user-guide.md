@@ -403,6 +403,37 @@ The script replaces its own projects rather than appending, so re-running is saf
 
 Two tests are left quarantined so the Quarantined filter and badge have subjects.
 
+### Seeding from your own reports
+
+`EXT API TEST` is populated from real Cucumber-JVM and Surefire reports rather than from
+invented data:
+
+```bash
+pnpm --filter @testcenter/worker seed-from-junit ~/Downloads/JUnitTestResults \
+  --project=ext_api_test --days=90 --runs-per-day=3 --seed=7 --replace
+```
+
+The reports are read as a **corpus** — every suite, feature, scenario name, duration,
+assertion type, failure message and stack trace comes from them verbatim — and then
+replayed across clusters, branches, environments and days. Four reports would otherwise be
+four runs, and almost nothing this product does is visible in four runs: flake scores need
+repetition, failure-mode grouping needs the same test failing differently over time, and
+the trend charts need a time axis.
+
+What the script synthesises, and does not pretend otherwise: which tests fail on which
+day, retry flakiness, regressions and their fixes, timeouts, the occasional skipped
+feature or failed import, and the CI metadata the reports do not carry.
+
+It is deterministic — the same directory and `--seed` produce the same history — so a UI
+change can be judged against a fixed dataset. `--replace` clears the project's runs first,
+including the test-case rows left with no results.
+
+**Captured output is scrubbed of credentials on the way in.** The source reports log a live
+bearer token on every scenario (`>>>>>> TOKEN::: oa-…`), and replaying them verbatim would
+have copied one real credential into thousands of rows. Note that this protects the
+*generated* data only: uploading a report through the API or the browser stores its output
+as sent, so a report containing a secret puts that secret in the database.
+
 ---
 
 ## 8. Troubleshooting
