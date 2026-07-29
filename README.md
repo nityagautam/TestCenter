@@ -144,7 +144,11 @@ pnpm db:migrate           # apply migrations, provision partitions, bootstrap or
 pnpm dev                  # web on http://localhost:3000, worker alongside
 ```
 
-Visit <http://localhost:3000> for the status board, or `curl localhost:3000/api/health?deep=1`.
+Visit <http://localhost:3000>. You will be sent to `/signin` — sign in with
+`admin@testcenter.dev` (email only, no password; see the
+[user guide](docs/user-guide.md) for why, and for the other roles).
+
+Health JSON: `curl localhost:3000/api/health?deep=1`.
 
 ## Commands
 
@@ -159,6 +163,7 @@ Visit <http://localhost:3000> for the status board, or `curl localhost:3000/api/
 | `pnpm --filter @testcenter/db mint-token <project>` | create a CI API token (shown once) |
 | `pnpm --filter @testcenter/db seed-perf [runs] [tests]` | seed history and assert read-path budgets |
 | `pnpm --filter @testcenter/db seed-test-org [days]` | seed the Test Organisation with believable history |
+| `pnpm --filter @testcenter/db seed-users` | apply the account roster (idempotent) — see the [user guide](docs/user-guide.md) |
 | `pnpm --filter @testcenter/worker enqueue partitions` | enqueue a real job to smoke-test the queue path |
 
 ## Things worth knowing before changing code

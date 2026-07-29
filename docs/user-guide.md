@@ -4,6 +4,33 @@ How to sign in, what each role can do, and how to work through the app.
 
 ---
 
+## Quick reference
+
+**Sign in at <http://localhost:3000/signin> — type the email, no password.**
+
+| Email | Role | What it can do |
+| --- | --- | --- |
+| `admin@testcenter.dev` | superadmin + owner | everything, plus Platform admin across all organisations |
+| `qalead@testcenter.dev` | maintainer | manage projects; **not** members or tokens |
+| `sdet@testcenter.dev` | member | upload results, edit tags, quarantine; **not** create projects |
+| `qa@testcenter.dev` | viewer | read everything; **nothing** else |
+| `future-hire@testcenter.dev` | member *(pending)* | never signed in — activates on first login |
+
+If nothing is running yet:
+
+```bash
+brew services start postgresql@17 && brew services start redis
+pnpm db:migrate
+pnpm --filter @testcenter/db seed-test-org 45   # history
+pnpm --filter @testcenter/db seed-users         # the accounts above
+pnpm dev
+```
+
+Use `pnpm dev`, **not** `pnpm start` — email sign-in is disabled in production builds by
+design. Details in §2.
+
+---
+
 ## 1. Start the app
 
 ```bash
@@ -133,8 +160,28 @@ control what you can *do*, and are ordered — each includes everything below it
 | Platform admin area | | | | | superadmin only |
 | Delete the organisation | | | | | ✓ |
 
-This table was verified by request against every account, not written from intent — each
-row reflects what the server actually returns.
+### Measured, not intended
+
+The table above describes capabilities. This one is the raw result of signing in as each
+account and requesting each path — useful when you want to know precisely where a role
+stops:
+
+| Path | owner | maintainer | member | viewer |
+| --- | :-: | :-: | :-: | :-: |
+| `/o/:org` (dashboard) | ✓ | ✓ | ✓ | ✓ |
+| `/o/:org/runs` | ✓ | ✓ | ✓ | ✓ |
+| `/o/:org/tests` | ✓ | ✓ | ✓ | ✓ |
+| `/o/:org/flaky` | ✓ | ✓ | ✓ | ✓ |
+| `/o/:org/projects` | ✓ | ✓ | ✓ | ✓ |
+| `/o/:org/projects/new` | ✓ | ✓ | refused | refused |
+| `/o/:org/p/:key/upload` | ✓ | ✓ | ✓ | **refused** |
+| `/o/:org/p/:key/settings` | ✓ | ✓ | refused | refused |
+| `/o/:org/settings/members` | ✓ | **refused** | refused | refused |
+| `/o/:org/settings/tokens` | ✓ | **refused** | refused | refused |
+| `/admin` | ✓ *(superadmin)* | refused | refused | refused |
+
+"refused" is a page explaining *"requires the admin role, yours is viewer"* — not a 500,
+and not a silent success. Reaching a forbidden URL directly is safe and self-explanatory.
 
 Two things worth knowing:
 
@@ -160,6 +207,48 @@ every organisation; pick one and grant access there. This works for organisation
 admin is not a member of.
 
 Access takes effect immediately. The recipient can just reload.
+
+### Changing someone's role
+
+Three routes, depending on what you have in front of you:
+
+**In the app, within one organisation** — Settings → Members, enter the *same* email with
+a different role and press Grant. A repeat grant is treated as a role change, not an
+error, which is what you actually want when promoting someone.
+
+**In the app, across organisations** — Platform admin → pick the organisation → grant with
+the new role. Works even for organisations you are not a member of.
+
+**In code, for the seeded roster** — edit `ROSTER` in
+`packages/db/scripts/seed-users.ts`, then:
+
+```bash
+pnpm --filter @testcenter/db seed-users
+```
+
+Prefer this for the standing test accounts: it is idempotent, survives `pnpm db:reset`,
+and the roster stays reviewable in the repository rather than living only in one database.
+
+### Adding a completely new person
+
+1. Settings → Members (or Platform admin) → type their email → pick a role → Grant.
+2. They sign in. If the account did not exist, it is created and the grant binds to it.
+
+There is nothing to send them beyond the URL. Until they sign in they show as `pending`;
+`future-hire@testcenter.dev` exists in the seed so you can watch this happen.
+
+### Making someone a superadmin
+
+Not doable from inside the app, on purpose. Add the address to
+`TESTCENTER_ADMIN_EMAILS` in `.env`, restart, and have them sign in again:
+
+```bash
+TESTCENTER_ADMIN_EMAILS=admin@testcenter.dev,someone.else@example.com
+```
+
+The list is re-read at **every** sign-in, so removing an address revokes the privilege at
+their next login. If it could be granted by a database write, then anyone who could write
+to the database — including a seed script or a compromised app — could mint one.
 
 ---
 
