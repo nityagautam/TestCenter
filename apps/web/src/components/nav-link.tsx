@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -84,7 +85,9 @@ export function NavLink({
           />
         ) : null}
 
-        {icon ? <NavGlyph icon={icon} /> : null}
+        {/* The icon slot doubles as the pending slot, so the row does not reflow when a
+            navigation starts — the glyph is replaced in place, not pushed aside. */}
+        <NavIndicator icon={icon} />
 
         {collapsed ? null : <span className="min-w-0 flex-1 truncate">{children}</span>}
 
@@ -103,6 +106,47 @@ export function NavLink({
         ) : null}
       </Link>
     </li>
+  );
+}
+
+/**
+ * Swaps the nav glyph for a spinner while this link's target is loading.
+ *
+ * `useLinkStatus` reports the pending state of the enclosing Link, which is the piece the
+ * page-level skeleton cannot provide: the skeleton says "something is loading", this says
+ * *which thing*. On a slow route that is the difference between "did my click register?"
+ * and "yes, Tests is on its way".
+ *
+ * It must be a child of the Link to read that context, which is also why it owns the icon
+ * rather than sitting beside it.
+ */
+function NavIndicator({ icon }: { icon?: NavIcon }) {
+  const { pending } = useLinkStatus();
+  if (pending) return <Spinner />;
+  return icon ? <NavGlyph icon={icon} /> : null;
+}
+
+function Spinner() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-3.5 shrink-0 animate-spin" aria-hidden>
+      <circle
+        cx="8"
+        cy="8"
+        r="6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeOpacity="0.25"
+      />
+      {/* A quarter arc, so the rotation is legible at 14px. */}
+      <path
+        d="M8 2 a6 6 0 0 1 6 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
