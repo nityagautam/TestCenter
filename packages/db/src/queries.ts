@@ -521,3 +521,22 @@ export async function updateRunTags(
   `;
   return (updated.count ?? 0) > 0;
 }
+
+/**
+ * Renames a run, or clears the name so it falls back to the framework label.
+ *
+ * Scoped by org_id like every other tenant-scoped write: a run id from another
+ * organisation updates nothing rather than the wrong row. An empty name is stored as
+ * NULL rather than "" so the read path's `run.name ?? run.framework` fallback keeps
+ * working instead of rendering a blank heading.
+ */
+export async function updateRunName(
+  sql: Sql,
+  input: { orgId: string; runId: string; name: string | null },
+): Promise<boolean> {
+  const updated = await sql`
+    UPDATE runs SET name = ${input.name}, updated_at = now()
+    WHERE id = ${input.runId} AND org_id = ${input.orgId}
+  `;
+  return (updated.count ?? 0) > 0;
+}

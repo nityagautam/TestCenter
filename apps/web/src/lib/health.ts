@@ -26,6 +26,21 @@ export const PASS_RATE_DEGRADED = 90;
 export type Tone = "passed" | "flaky" | "failed" | "neutral";
 
 /**
+ * The mark colour for a tone, for charts that paint by health rather than by series.
+ *
+ * Lives here rather than in each chart so a bar and a stat tile reading the same rate can
+ * never disagree about whether it is healthy. Status colour is legitimate here — these
+ * bands genuinely mean good/warning/bad — and it is never the only encoding: every bar
+ * that uses it is direct-labelled with its percentage.
+ */
+export const TONE_COLOR: Record<Tone, string> = {
+  passed: "var(--color-status-passed)",
+  flaky: "var(--color-status-flaky)",
+  failed: "var(--color-status-failed)",
+  neutral: "var(--color-status-skipped)",
+};
+
+/**
  * A null rate means no runs in the window, which is the absence of a measurement rather
  * than a bad one. Colouring it would assert something about a suite nobody has run.
  */

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normalizeTags, type Tags } from "@testcenter/core";
 import { findProjectByKey, listRuns, runFilterOptions, tagFacets } from "@testcenter/db";
+import { RunActions } from "@/components/run-actions";
+import { SearchBox } from "@/components/search-box";
 import { Button, Card, EmptyState, ResultBar, StatusBadge, TagChip } from "@/components/ui";
 import { formatDuration, formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
 import { getServices } from "@/lib/services";
@@ -93,6 +95,22 @@ function addTagHref(
   return `${base}?${params.toString()}`;
 }
 
+/**
+ * Every other filter is a single parameter that `buildHref(…, { key: null })` can drop,
+ * but tags are multi-valued (`?tag=suite:sanity&tag=env:uat`), so clearing them means
+ * dropping the whole repeated key rather than setting one to null.
+ */
+function clearTagsHref(base: string, current: RunListParams, scoped = false): string {
+  const params = new URLSearchParams();
+  for (const [paramKey, paramValue] of Object.entries(current)) {
+    if (paramKey === "tag" || paramKey === "cursor") continue;
+    if (scoped && paramKey === "project") continue;
+    if (typeof paramValue === "string" && paramValue) params.set(paramKey, paramValue);
+  }
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
+}
+
 function decodeCursor(value: string | undefined): { startedAt: Date; id: string } | null {
   if (!value) return null;
   try {
@@ -128,6 +146,9 @@ export async function RunList({
   const base = basePath;
   const scoped = scopedProjectKey !== null;
   const tags = parseTagParams(params.tag);
+  // Hoisted out of the row loop: the role does not change per run.
+  const canRename = can(context, "run:rename");
+  const canDelete = can(context, "run:delete");
 
   // A path-scoped project wins over ?project=, so a stray query parameter cannot widen a
   // view whose URL claims to be about one project.
@@ -234,6 +255,33 @@ export async function RunList({
             </Button>
           ) : null}
         </div>
+      </div>
+
+      {/*
+       * Search matches run name, branch and commit (see `runFilterConditions`).
+       *
+       * Every existing filter rides along as a hidden field, `cursor` deliberately
+       * excluded: a new query must start at the newest page rather than resuming from a
+       * keyset position that belonged to the previous result set.
+       */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <SearchBox
+          action={base}
+          name="search"
+          label="Search runs"
+          defaultValue={params.search ?? ""}
+          placeholder="Search run name, branch or commit…"
+          hidden={Object.fromEntries(
+            Object.entries(params).filter(
+              ([key, value]) =>
+                key !== "search" &&
+                key !== "cursor" &&
+                !(scoped && key === "project") &&
+                (Array.isArray(value) ? value.length > 0 : Boolean(value)),
+            ) as [string, string | string[]][],
+          )}
+          className="min-w-0 flex-1 basis-[16rem]"
+        />
       </div>
 
       {activeFilters.length > 0 ? (
@@ -354,6 +402,24 @@ export async function RunList({
                           {run.skipped > 0 ? `${run.skipped} skipped` : `${run.passed} passed`}
                         </div>
                       </div>
+
+                      {/* Last in the row, past the numbers, so the menu is never between
+                          the name and the result it describes. The panels it opens are
+                          wider than this column, hence min-w-0 on the wrapper. */}
+                      {canRename || canDelete ? (
+                        <div className="min-w-0 shrink-0">
+                          <RunActions
+                            runId={run.id}
+                            orgSlug={orgSlug}
+                            name={run.name}
+                            fallback={run.framework ?? "Run"}
+                            totalTests={run.total}
+                            canRename={canRename}
+                            canDelete={canDelete}
+                            deleteRedirectTo={base}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   </li>
                 );
@@ -375,8 +441,16 @@ export async function RunList({
         <aside className="space-y-4">
           {facets.length > 0 ? (
             <Card>
-              <div className="border-b border-[var(--color-border-subtle)] px-4 py-2.5">
+              <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-4 py-2.5">
                 <h2 className="text-xs font-medium tracking-wide uppercase">Tags</h2>
+                {Object.keys(tags).length > 0 ? (
+                  <Link
+                    href={clearTagsHref(base, params, scoped)}
+                    className="text-[11px] text-[var(--color-ink-muted)] underline"
+                  >
+                    clear
+                  </Link>
+                ) : null}
               </div>
               <ul className="max-h-80 overflow-y-auto p-2">
                 {facets.map((facet) => (

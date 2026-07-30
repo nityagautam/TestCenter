@@ -7,7 +7,7 @@ import {
   type CanonicalTestResult,
   type RunTotals,
 } from "@testcenter/core";
-import type { Database, Sql } from "./client.js";
+import type { Database, Queryable, Sql } from "./client.js";
 
 /**
  * Ingest persistence.
@@ -291,7 +291,7 @@ export async function resetRunTotals(sql: Sql, runId: string): Promise<void> {
 }
 
 /** Removes previously parsed results for a run. Used before a re-parse. */
-export async function deleteRunResults(sql: Sql, runId: string): Promise<number> {
+export async function deleteRunResults(sql: Queryable, runId: string): Promise<number> {
   const deleted = await sql`DELETE FROM test_results WHERE run_id = ${runId}`;
   return deleted.count ?? 0;
 }
@@ -304,7 +304,7 @@ export async function deleteRunResults(sql: Sql, runId: string): Promise<number>
  * dashboards then read one row per day instead of aggregating millions of results.
  */
 export async function rollupProjectDay(
-  sql: Sql,
+  sql: Queryable,
   input: { orgId: string; projectId: string; day: Date; branch: string | null },
 ): Promise<void> {
   const day = input.day.toISOString().slice(0, 10);
@@ -399,14 +399,33 @@ export async function rollupProjectDay(
 const FLAKE_PRIOR_RUNS = 4;
 
 export async function refreshTestCaseStats(
-  sql: Sql,
-  input: { projectId: string; runId: string; windowDays?: number },
+  sql: Queryable,
+  input: {
+    projectId: string;
+    /** Refresh the tests that appeared in this run. */
+    runId?: string;
+    /**
+     * Refresh these tests explicitly. Required when the rows have already been deleted —
+     * `runId` derives the set from `test_results`, which is empty by then, so a deletion
+     * path that used it would silently refresh nothing and leave the stats stale.
+     */
+    testCaseIds?: readonly number[];
+    windowDays?: number;
+  },
 ): Promise<number> {
   const windowDays = input.windowDays ?? 30;
+  if (!input.runId && !input.testCaseIds) {
+    throw new Error("refreshTestCaseStats needs either runId or testCaseIds");
+  }
+  if (input.testCaseIds && input.testCaseIds.length === 0) return 0;
 
   const updated = await sql`
     WITH touched AS (
-      SELECT DISTINCT test_case_id FROM test_results WHERE run_id = ${input.runId}
+      ${
+        input.testCaseIds
+          ? sql`SELECT unnest(${input.testCaseIds as number[]}::bigint[]) AS test_case_id`
+          : sql`SELECT DISTINCT test_case_id FROM test_results WHERE run_id = ${input.runId as string}`
+      }
     ),
     history AS (
       SELECT
@@ -463,6 +482,79 @@ export async function refreshTestCaseStats(
   `;
 
   return updated.count ?? 0;
+}
+
+export interface DeletedRun {
+  /** Blob keys the caller must now remove; the database cannot do it. */
+  storageKeys: string[];
+  results: number;
+}
+
+/**
+ * Deletes a run and everything derived from it, then repairs the rollups.
+ *
+ * `test_results`, `artifacts`, `attachments` and `ingest_jobs` cascade from `runs`, so
+ * the rows go on their own. The aggregates do not: `project_daily_stats` is keyed by
+ * (project, day, branch) and `test_cases` carries `runs_30d`, `failures_30d`,
+ * `fail_rate_30d`, `flake_score`, `last_status` and the duration percentiles. A bare
+ * `DELETE FROM runs` leaves every one of those counting a run that no longer exists —
+ * permanently, because nothing recomputes them on read. So this recomputes the day from
+ * the surviving runs and refreshes the affected tests by id.
+ *
+ * All of it in one transaction: a half-deleted run whose dashboards still count it is
+ * worse than either outcome on its own.
+ *
+ * Blobs are returned rather than deleted here, because object storage is not part of
+ * this transaction. Deleting them after the commit means a failure there leaves an
+ * orphaned artifact — wasted bytes — instead of a run whose report is gone but whose
+ * rows claim it exists.
+ */
+export async function deleteRun(
+  sql: Sql,
+  input: { orgId: string; runId: string },
+): Promise<DeletedRun | null> {
+  return sql.begin(async (tx) => {
+    const rows = (await tx`
+      SELECT id, org_id, project_id, started_at::date::text AS day, COALESCE(branch, '') AS branch
+      FROM runs
+      WHERE id = ${input.runId} AND org_id = ${input.orgId}
+    `) as unknown as {
+      id: string;
+      org_id: string;
+      project_id: string;
+      day: string;
+      branch: string;
+    }[];
+
+    const run = rows[0];
+    if (!run) return null;
+
+    const artifacts = (await tx`
+      SELECT storage_key FROM artifacts WHERE run_id = ${run.id}
+    `) as unknown as { storage_key: string }[];
+
+    // Captured before the delete: afterwards there is nothing left to derive them from.
+    const touched = (await tx`
+      SELECT DISTINCT test_case_id AS id FROM test_results WHERE run_id = ${run.id}
+    `) as unknown as { id: number }[];
+
+    const results = await deleteRunResults(tx, run.id);
+    await tx`DELETE FROM runs WHERE id = ${run.id} AND org_id = ${input.orgId}`;
+
+    await rollupProjectDay(tx, {
+      orgId: run.org_id,
+      projectId: run.project_id,
+      day: new Date(`${run.day}T00:00:00Z`),
+      branch: run.branch || null,
+    });
+
+    await refreshTestCaseStats(tx, {
+      projectId: run.project_id,
+      testCaseIds: touched.map((row) => row.id),
+    });
+
+    return { storageKeys: artifacts.map((row) => row.storage_key), results };
+  }) as Promise<DeletedRun | null>;
 }
 
 /** Marks a run finished and stamps its wall-clock duration. */

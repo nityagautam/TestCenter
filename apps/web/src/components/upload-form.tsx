@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { MAX_RUN_NAME_LENGTH } from "@testcenter/core";
 import { Button, Card, CardHeader } from "@/components/ui";
 
 /**
@@ -35,6 +36,7 @@ export function UploadForm({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [project, setProject] = useState(projects[0]?.key ?? "");
+  const [name, setName] = useState("");
   const [branch, setBranch] = useState(defaultBranch);
   const [environment, setEnvironment] = useState("");
   const [tagText, setTagText] = useState("");
@@ -65,8 +67,18 @@ export function UploadForm({
     ]);
   }
 
-  function buildQuery(): string {
+  /**
+   * `multiple` matters: every file here becomes its own run, so one name applied verbatim
+   * would produce three runs called "Nightly" that nothing but their timestamps tells
+   * apart. Suffixing with the file name keeps them identifiable, and a single upload —
+   * the common case — gets exactly the name that was typed.
+   */
+  function buildQuery(file: File, multiple: boolean): string {
     const params = new URLSearchParams({ project });
+    const trimmed = name.trim();
+    if (trimmed) {
+      params.set("name", multiple ? `${trimmed} — ${file.name}` : trimmed);
+    }
     if (branch.trim()) params.set("branch", branch.trim());
     if (environment.trim()) params.set("env", environment.trim());
     for (const entry of tagText.split(/[\s,]+/).filter(Boolean)) {
@@ -82,7 +94,7 @@ export function UploadForm({
     if (pending.length === 0 || !project) return;
 
     setBusy(true);
-    const query = buildQuery();
+    const multiple = pending.length > 1;
     let lastRunId: string | null = null;
 
     for (const { entry, index } of pending) {
@@ -93,7 +105,10 @@ export function UploadForm({
       try {
         const body = new FormData();
         body.append("report", entry.file);
-        const response = await fetch(`/api/v1/ingest?${query}`, { method: "POST", body });
+        const response = await fetch(`/api/v1/ingest?${buildQuery(entry.file, multiple)}`, {
+          method: "POST",
+          body,
+        });
         const payload = (await response.json().catch(() => null)) as {
           runId?: string;
           error?: { message?: string };
@@ -157,6 +172,21 @@ export function UploadForm({
                 </option>
               ))}
             </select>
+          </Field>
+          <Field
+            label="Run name"
+            hint={
+              queued > 1
+                ? "optional — file name appended per run"
+                : "optional, defaults to framework"
+            }
+          >
+            <TextInput
+              value={name}
+              onChange={setName}
+              placeholder="Nightly sanity — SearchNReco"
+              maxLength={MAX_RUN_NAME_LENGTH}
+            />
           </Field>
           <Field label="Branch">
             <TextInput value={branch} onChange={setBranch} placeholder="main" />
@@ -282,16 +312,19 @@ function TextInput({
   value,
   onChange,
   placeholder,
+  maxLength,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  maxLength?: number;
 }) {
   return (
     <input
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
+      maxLength={maxLength}
       className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-2 py-1.5 font-mono text-xs outline-none focus:border-[var(--color-ink-muted)]"
     />
   );

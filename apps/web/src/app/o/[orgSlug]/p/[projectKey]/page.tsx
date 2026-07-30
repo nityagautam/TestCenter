@@ -1,11 +1,18 @@
 import Link from "next/link";
 import {
   dailySeries,
+  branchPassRates,
+  failureConcentration,
+  flakeDistribution,
   flakyLeaderboard,
   listRuns,
   orgSummary,
+  slowestTests,
+  todaysRuns,
   topFailingTests,
 } from "@testcenter/db";
+import { ChartToggle } from "@/components/charts/chart-toggle";
+import { RankedBars } from "@/components/charts/ranked-bars";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { VolumeChart } from "@/components/charts/volume-chart";
 import { CiSnippet } from "@/components/ci-snippet";
@@ -18,8 +25,8 @@ import {
   StatTile,
   StatusBadge,
 } from "@/components/ui";
-import { passRateTone } from "@/lib/health";
-import { formatPercent, formatRelativeTime, formatInteger } from "@/lib/format";
+import { passRateTone, TONE_COLOR } from "@/lib/health";
+import { formatDuration, formatPercent, formatRelativeTime, formatInteger } from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext, requirePageProject } from "@/lib/viewer";
 
@@ -37,10 +44,26 @@ export default async function ProjectOverview({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string; projectKey: string }>;
-  searchParams: Promise<{ created?: string; token?: string; days?: string; ok?: string }>;
+  searchParams: Promise<{
+    created?: string;
+    token?: string;
+    days?: string;
+    ok?: string;
+    volume?: string;
+    rate?: string;
+    duration?: string;
+  }>;
 }) {
   const { orgSlug, projectKey } = await params;
-  const { created, token, days: daysParam, ok } = await searchParams;
+  const {
+    created,
+    token,
+    days: daysParam,
+    ok,
+    volume: volumeParam,
+    rate: rateParam,
+    duration: durationParam,
+  } = await searchParams;
   const context = await requirePageContext(orgSlug);
   const project = await requirePageProject(context, projectKey);
   const { sql } = getServices();
@@ -48,15 +71,42 @@ export default async function ProjectOverview({
   const days = Math.min(Math.max(Number(daysParam ?? 30), 7), 90);
   const scope = { orgId: context.org.id, projectId: project.id };
 
-  const [summary, series, recent, flaky, failing] = await Promise.all([
-    orgSummary(sql, scope),
-    dailySeries(sql, { ...scope, days }),
-    listRuns(sql, { orgId: context.org.id, projectId: project.id }, { limit: 8 }),
-    flakyLeaderboard(sql, { ...scope, limit: 5 }),
-    topFailingTests(sql, { ...scope, limit: 5 }),
-  ]);
+  // Same three view selections as the org dashboard, so the two pages behave alike.
+  const shareView = volumeParam === "share";
+  const branchView = rateParam === "branch";
+  const totalDurationView = durationParam === "total";
+
+  const [summary, series, recent, flaky, failing, slowest, concentration, flakeBands, todayRuns] =
+    await Promise.all([
+      orgSummary(sql, scope),
+      dailySeries(sql, { ...scope, days }),
+      listRuns(sql, { orgId: context.org.id, projectId: project.id }, { limit: 8 }),
+      flakyLeaderboard(sql, { ...scope, limit: 5 }),
+      topFailingTests(sql, { ...scope, limit: 5 }),
+      slowestTests(sql, { ...scope, limit: 6 }),
+      failureConcentration(sql, { ...scope, limit: 6 }),
+      flakeDistribution(sql, scope),
+      todaysRuns(sql, { ...scope, limit: 24 }),
+    ]);
+
+  const branchRates = branchView ? await branchPassRates(sql, { ...scope, days, limit: 8 }) : [];
 
   const base = `/o/${orgSlug}/p/${projectKey}`;
+
+  /** Preserves the other selections when one toggle changes. */
+  const viewHref = (changes: Record<string, string | null>): string => {
+    const next = new URLSearchParams();
+    if (daysParam) next.set("days", String(days));
+    if (volumeParam) next.set("volume", volumeParam);
+    if (rateParam) next.set("rate", rateParam);
+    if (durationParam) next.set("duration", durationParam);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === null) next.delete(key);
+      else next.set(key, value);
+    }
+    const query = next.toString();
+    return query ? `${base}?${query}` : base;
+  };
   const hasRuns = summary.runs30d > 0 || recent.runs.length > 0;
 
   return (
@@ -135,23 +185,93 @@ export default async function ProjectOverview({
             </div>
           </Card>
 
+          {/*
+           * Today, one column per run — placed above the 30-day charts on purpose.
+           *
+           * Someone watching a suite finish is asking "is this run worse than the last one?",
+           * and every chart below answers only "how has the month gone". A daily rollup cannot
+           * answer it at all: it averages today's runs together, so a single bad run hides
+           * inside the day's number until tomorrow.
+           */}
+          <Card className="mb-5 p-4">
+            <VolumeChart
+              title={`Today — ${todayRuns.length} run${todayRuns.length === 1 ? "" : "s"}, newest right`}
+              height={140}
+              mode={shareView ? "share" : "counts"}
+              days={todayRuns.map((run) => ({
+                label: run.label,
+                passed: run.passed,
+                failed: run.failed,
+                skipped: run.skipped,
+                flaky: run.flaky,
+                runs: 1,
+              }))}
+              action={
+                <ChartToggle
+                  label="Today view"
+                  options={[
+                    { label: "counts", href: viewHref({ volume: null }), active: !shareView },
+                    { label: "share", href: viewHref({ volume: "share" }), active: shareView },
+                  ]}
+                />
+              }
+            />
+          </Card>
+
           <div className="mb-5 grid gap-5 lg:grid-cols-3">
             <Card className="p-4">
-              <TrendChart
-                title="Pass rate"
-                points={series.map((point) => ({
-                  label: point.day,
-                  value: point.passRate,
-                  detail: point.runs > 0 ? `${point.runs} run(s)` : undefined,
-                }))}
-                unit="%"
-                yMax={100}
-                format="percent"
-              />
+              {branchView ? (
+                <RankedBars
+                  title="Pass rate by branch"
+                  domainMax={100}
+                  bars={branchRates.map((row) => ({
+                    label: row.branch,
+                    value: row.passRate ?? 0,
+                    display: formatPercent(row.passRate),
+                    detail: `${row.runs} run${row.runs === 1 ? "" : "s"} · ${row.failed} failing`,
+                    // Same bands as the headline stat tile, so a branch is not "degraded"
+                    // in one place and "healthy" in another.
+                    color: TONE_COLOR[passRateTone(row.passRate)],
+                  }))}
+                  emptyMessage="No runs in this period"
+                  footnote="Worst first. Bars share a fixed 0–100% axis, so a small gap is a small gap."
+                  action={
+                    <ChartToggle
+                      label="Pass rate view"
+                      options={[
+                        { label: "over time", href: viewHref({ rate: null }), active: false },
+                        { label: "by branch", href: viewHref({ rate: "branch" }), active: true },
+                      ]}
+                    />
+                  }
+                />
+              ) : (
+                <TrendChart
+                  title="Pass rate"
+                  points={series.map((point) => ({
+                    label: point.day,
+                    value: point.passRate,
+                    detail: point.runs > 0 ? `${point.runs} run(s)` : undefined,
+                  }))}
+                  unit="%"
+                  yMax={100}
+                  format="percent"
+                  action={
+                    <ChartToggle
+                      label="Pass rate view"
+                      options={[
+                        { label: "over time", href: viewHref({ rate: null }), active: true },
+                        { label: "by branch", href: viewHref({ rate: "branch" }), active: false },
+                      ]}
+                    />
+                  }
+                />
+              )}
             </Card>
             <Card className="p-4">
               <VolumeChart
                 title="Tests by outcome"
+                mode={shareView ? "share" : "counts"}
                 days={series.map((point) => ({
                   label: point.day,
                   passed: point.passed,
@@ -160,17 +280,90 @@ export default async function ProjectOverview({
                   flaky: point.flaky,
                   runs: point.runs,
                 }))}
+                action={
+                  <ChartToggle
+                    label="Outcome view"
+                    options={[
+                      { label: "counts", href: viewHref({ volume: null }), active: !shareView },
+                      { label: "share", href: viewHref({ volume: "share" }), active: shareView },
+                    ]}
+                  />
+                }
               />
             </Card>
             <Card className="p-4">
               <TrendChart
-                title="Average run duration"
+                title={totalDurationView ? "Total CI time" : "Average run duration"}
                 points={series.map((point) => ({
                   label: point.day,
-                  value: point.avgDurationMs,
+                  value: totalDurationView ? point.totalDurationMs : point.avgDurationMs,
                 }))}
                 color="var(--color-series-2)"
                 format="duration"
+                action={
+                  <ChartToggle
+                    label="Duration view"
+                    options={[
+                      {
+                        label: "average",
+                        href: viewHref({ duration: null }),
+                        active: !totalDurationView,
+                      },
+                      {
+                        label: "total",
+                        href: viewHref({ duration: "total" }),
+                        active: totalDurationView,
+                      },
+                    ]}
+                  />
+                }
+              />
+            </Card>
+          </div>
+
+          <div className="mb-5 grid gap-5 lg:grid-cols-3">
+            <Card className="p-4">
+              <RankedBars
+                title="Slowest tests (p95)"
+                bars={slowest.map((test) => ({
+                  label: test.name,
+                  value: test.p95DurationMs,
+                  display: formatDuration(test.p95DurationMs),
+                  detail: test.suite,
+                  href: `/o/${orgSlug}/tests/${test.id}`,
+                }))}
+                emptyMessage="No duration data yet."
+                footnote="p95, not average — a test that is usually fast and occasionally slow is the one worth finding."
+              />
+            </Card>
+            <Card className="p-4">
+              <RankedBars
+                title="Failure concentration"
+                color="var(--color-status-failed)"
+                bars={concentration.tests.map((test) => ({
+                  label: test.name,
+                  value: test.failures30d,
+                  display: `${test.failures30d} · ${Math.round(test.share)}%`,
+                  href: `/o/${orgSlug}/tests/${test.id}`,
+                }))}
+                emptyMessage="No failures in the retained history."
+                footnote={
+                  concentration.totalFailures > 0
+                    ? `${concentration.failingTests} test${concentration.failingTests === 1 ? "" : "s"} produced ${formatInteger(concentration.totalFailures)} failures.`
+                    : undefined
+                }
+              />
+            </Card>
+            <Card className="p-4">
+              <RankedBars
+                title="Flake score distribution"
+                bars={flakeBands.map((band) => ({
+                  label: band.label,
+                  value: band.tests,
+                  display: formatInteger(band.tests),
+                }))}
+                emptyMessage="No tests yet."
+                footnote="The dashboard counts a test as flaky at 20 and above."
               />
             </Card>
           </div>
@@ -190,6 +383,7 @@ export default async function ProjectOverview({
                   <li key={run.id} className="flex items-center gap-3 px-5 py-2.5">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
+                        {/* Glance widget — see the note on the org dashboard. */}
                         <Link
                           href={`/o/${orgSlug}/runs/${run.id}`}
                           className="truncate text-xs font-medium hover:underline"

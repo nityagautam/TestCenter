@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { artifactKey, ciProviderSchema, normalizeTags, tagsSchema } from "@testcenter/core";
+import {
+  artifactKey,
+  ciProviderSchema,
+  MAX_RUN_NAME_LENGTH,
+  normalizeTags,
+  tagsSchema,
+} from "@testcenter/core";
 import { findProjectByKey, listRuns, schema } from "@testcenter/db";
 import {
   ApiError,
@@ -30,7 +36,7 @@ export const dynamic = "force-dynamic";
 const createRunSchema = z.object({
   /** Project key, e.g. "checkout-web". */
   project: z.string().min(1).max(128),
-  name: z.string().max(255).optional(),
+  name: z.string().max(MAX_RUN_NAME_LENGTH).optional(),
   framework: z.string().max(64).optional(),
   environment: z.string().max(128).optional(),
   branch: z.string().max(255).optional(),

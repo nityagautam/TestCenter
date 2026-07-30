@@ -38,10 +38,21 @@ export function VolumeChart({
   days,
   title,
   height = 160,
+  mode = "counts",
+  action,
 }: {
   days: VolumeDay[];
   title: string;
   height?: number;
+  /** Rendered opposite the caption — the view toggle, where there is one. */
+  action?: React.ReactNode;
+  /**
+   * `counts` answers "how much did we run"; `share` normalises every column to 100% and
+   * answers "what proportion failed", which is the question volume otherwise hides — a
+   * day with twice the tests and the same failure rate looks worse in counts and
+   * identical in share. Two questions, not two drawings of one.
+   */
+  mode?: "counts" | "share";
 }) {
   const [hover, setHover] = useState<number | null>(null);
 
@@ -51,7 +62,11 @@ export function VolumeChart({
   if (days.length === 0) {
     return (
       <figure>
-        <figcaption className="mb-2 text-xs font-medium">{title}</figcaption>
+        {/* See the note on TrendChart: the toggle outlives the data. */}
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <figcaption className="text-xs font-medium">{title}</figcaption>
+          {action}
+        </div>
         <div
           className="flex items-center justify-center rounded-md border border-[var(--color-border-subtle)] text-[11px] text-[var(--color-ink-muted)]"
           style={{ height }}
@@ -70,9 +85,12 @@ export function VolumeChart({
   return (
     <figure className="min-w-0">
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <figcaption className="text-xs font-medium">{title}</figcaption>
-        <span className="font-mono text-xs text-[var(--color-ink-muted)] tabular-nums">
-          {formatInteger(totals.reduce((sum, value) => sum + value, 0))} tests
+        <figcaption className="min-w-0 truncate text-xs font-medium">{title}</figcaption>
+        {action}
+        <span className="ml-auto font-mono text-xs text-[var(--color-ink-muted)] tabular-nums">
+          {mode === "share"
+            ? "0–100%"
+            : `${formatInteger(totals.reduce((sum, value) => sum + value, 0))} tests`}
         </span>
       </div>
 
@@ -101,7 +119,14 @@ export function VolumeChart({
             >
               <span
                 className="flex w-full flex-col-reverse justify-start"
-                style={{ height: `${(total / max) * 100}%`, maxWidth: 24, margin: "0 auto" }}
+                style={{
+                  // In share mode every column is full height, so the segments read as
+                  // proportions of that day rather than of the busiest day.
+                  height:
+                    total === 0 ? "0%" : mode === "share" ? "100%" : `${(total / max) * 100}%`,
+                  maxWidth: 24,
+                  margin: "0 auto",
+                }}
               >
                 {stack.map((segment, segmentIndex) => {
                   if (segment.value <= 0) return null;

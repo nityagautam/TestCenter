@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { flakyLeaderboard, listProjects } from "@testcenter/db";
+import { TestActions } from "@/components/test-actions";
 import { Card, CardHeader, EmptyState } from "@/components/ui";
 import { notFound } from "next/navigation";
 import {
@@ -10,7 +11,7 @@ import {
   truncateMiddle,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
-import { requirePageContext } from "@/lib/viewer";
+import { can, requirePageContext } from "@/lib/viewer";
 
 /**
  * Flaky test leaderboard, rendered at two scopes.
@@ -44,6 +45,8 @@ export async function FlakyLeaderboard({
   query: FlakyParams;
 }) {
   const context = await requirePageContext(orgSlug);
+  // Hoisted: the role does not change per row.
+  const canEdit = can(context, "run:edit");
   const { sql } = getServices();
 
   const projects = await listProjects(sql, context.org.id);
@@ -156,6 +159,9 @@ export async function FlakyLeaderboard({
                   <th className="w-[5.5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
                     CI time
                   </th>
+                  {/* Unlabelled on purpose: a header reading "Actions" over a column of ⋯
+                      triggers says nothing the triggers do not already say. */}
+                  {canEdit ? <th className="w-10 px-2 py-2" /> : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-border-subtle)]">
@@ -213,6 +219,16 @@ export async function FlakyLeaderboard({
                       <td className="px-3 py-2 text-right font-mono whitespace-nowrap text-[var(--color-ink-muted)] tabular-nums">
                         {formatDuration(test.wastedMs)}
                       </td>
+                      {canEdit ? (
+                        <td className="px-2 py-2 text-right align-top">
+                          <TestActions
+                            testId={test.id}
+                            orgSlug={orgSlug}
+                            testName={test.name}
+                            quarantined={test.quarantined}
+                          />
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 })}

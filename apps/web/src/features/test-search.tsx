@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { listProjects, listSuites, searchTests } from "@testcenter/db";
-import { Card, EmptyState, StatusBadge } from "@/components/ui";
+import { listProjects, listSuites, recentOutcomes, searchTests } from "@testcenter/db";
+import { OutcomeStrip } from "@/components/charts/outcome-strip";
+import { TestActions } from "@/components/test-actions";
+import { Card, EmptyState } from "@/components/ui";
 import { FilterMenu } from "@/components/filter-menu";
 import { SearchBox } from "@/components/search-box";
 import {
@@ -16,7 +18,7 @@ import {
   truncateMiddle,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
-import { requirePageContext } from "@/lib/viewer";
+import { can, requirePageContext } from "@/lib/viewer";
 
 /**
  * Test search, rendered at two scopes.
@@ -79,6 +81,8 @@ export async function TestSearch({
   query: TestSearchParams;
 }) {
   const context = await requirePageContext(orgSlug);
+  // Hoisted: the role does not change per row.
+  const canEdit = can(context, "run:edit");
   const { sql } = getServices();
 
   const projects = await listProjects(sql, context.org.id);
@@ -109,6 +113,19 @@ export async function TestSearch({
     ),
     listSuites(sql, { orgId: context.org.id, projectId: project?.id, limit: 25 }),
   ]);
+
+  /*
+   * Recent outcomes for the rows on screen, in one query rather than one per row.
+   *
+   * This is what makes the strip affordable in a list: the page already knows which 50
+   * tests it is rendering, so the outcomes come back in a single index-backed pass
+   * keyed by test. It runs after the search because it needs those ids.
+   */
+  const outcomes = await recentOutcomes(sql, {
+    orgId: context.org.id,
+    testCaseIds: results.tests.map((test) => test.id),
+    perTest: 8,
+  });
 
   const buildHref = (changes: Record<string, string | null>): string => {
     const next = new URLSearchParams();
@@ -194,6 +211,7 @@ export async function TestSearch({
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox
             action={basePath}
+            label="Search tests"
             defaultValue={query.q ?? ""}
             hidden={Object.fromEntries(
               Object.entries(query).filter(
@@ -291,7 +309,16 @@ export async function TestSearch({
                 <thead className="tc-sticky border-b border-[var(--color-border-subtle)] text-[10px] tracking-wide text-[var(--color-ink-muted)] uppercase">
                   <tr>
                     <th className="px-4 py-2 font-medium">Test</th>
-                    <th className="w-[6.5rem] px-3 py-2 font-medium whitespace-nowrap">Last</th>
+                    {/* Replaces a single "Last" status badge. The newest cell says what
+                        that badge said, so the trend costs no extra column — and the
+                        column header labels the strip once instead of fifty times. */}
+                    {/* 8.5rem, not 7.5: eight 12px marks plus seven 2px gaps is 110px, and
+                        px-3 spends 24px of the cell, so a 7.5rem column leaves 96px and the
+                        strip overflows. Table-fixed will not grow the column to rescue it. */}
+                    <th className="w-[8.5rem] px-3 py-2 font-medium whitespace-nowrap">
+                      Recent
+                      <span className="ml-1 font-normal normal-case opacity-60">→ now</span>
+                    </th>
                     <th className="w-[5.5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
                       Fail rate
                     </th>
@@ -304,6 +331,8 @@ export async function TestSearch({
                     <th className="w-[5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
                       Seen
                     </th>
+                    {/* Unlabelled — see the note on the flaky leaderboard. */}
+                    {canEdit ? <th className="w-10 px-2 py-2" /> : null}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border-subtle)]">
@@ -359,7 +388,11 @@ export async function TestSearch({
                           ) : null}
                         </td>
                         <td className="px-3 py-2">
-                          {test.lastStatus ? <StatusBadge status={test.lastStatus} /> : "—"}
+                          <OutcomeStrip
+                            cells={outcomes.get(test.id) ?? []}
+                            href={`/o/${orgSlug}/tests/${test.id}`}
+                            testName={test.name}
+                          />
                         </td>
                         <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">
                           {/* A rate of zero is the good case and does not need saying twice.
@@ -392,6 +425,16 @@ export async function TestSearch({
                         <td className="px-3 py-2 text-right font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
                           {formatRelativeTime(test.lastSeenAt)}
                         </td>
+                        {canEdit ? (
+                          <td className="px-2 py-2 text-right align-top">
+                            <TestActions
+                              testId={test.id}
+                              orgSlug={orgSlug}
+                              testName={test.name}
+                              quarantined={test.quarantined}
+                            />
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })}
