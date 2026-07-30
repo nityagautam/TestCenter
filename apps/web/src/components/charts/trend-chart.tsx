@@ -31,9 +31,12 @@ export function TrendChart({
   yMax,
   yMin = 0,
   format = "number",
+  action,
 }: {
   points: TrendPoint[];
   title: string;
+  /** Rendered opposite the caption — the view toggle, where there is one. */
+  action?: React.ReactNode;
   unit?: string;
   height?: number;
   color?: string;
@@ -64,7 +67,12 @@ export function TrendChart({
   if (present.length < 2) {
     return (
       <figure className="min-w-0">
-        <figcaption className="mb-2 text-xs font-medium">{title}</figcaption>
+        {/* The action stays rendered when there is no data: switching into an empty view
+            must not remove the control that switches back out of it. */}
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <figcaption className="text-xs font-medium">{title}</figcaption>
+          {action}
+        </div>
         <div
           className="flex items-center justify-center rounded-md border border-[var(--color-border-subtle)] text-[11px] text-[var(--color-ink-muted)]"
           style={{ height }}
@@ -114,8 +122,9 @@ export function TrendChart({
   return (
     <figure className="min-w-0">
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <figcaption className="text-xs font-medium">{title}</figcaption>
-        <span className="font-mono text-xs text-[var(--color-ink-muted)] tabular-nums">
+        <figcaption className="min-w-0 truncate text-xs font-medium">{title}</figcaption>
+        {action}
+        <span className="ml-auto font-mono text-xs text-[var(--color-ink-muted)] tabular-nums">
           {hovered?.point.value != null
             ? formatted(hovered.point.value)
             : last?.point.value != null

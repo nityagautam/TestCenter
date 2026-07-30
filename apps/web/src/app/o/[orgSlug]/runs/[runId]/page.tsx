@@ -9,7 +9,7 @@ import {
 } from "@testcenter/db";
 import { Card, CardHeader, EmptyState, ResultBar, StatTile, StatusBadge } from "@/components/ui";
 import { OutcomeStrip } from "@/components/charts/outcome-strip";
-import { RunNameEditor } from "@/components/run-name-editor";
+import { RunActions } from "@/components/run-actions";
 import { RunProgress } from "@/components/run-progress";
 import { TagEditor } from "@/components/tag-editor";
 import {
@@ -125,19 +125,9 @@ export default async function RunPage({
 
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
-          {/* Admins get an inline rename; everyone else gets the same heading, unadorned. */}
-          {can(context, "run:rename") ? (
-            <RunNameEditor
-              runId={runId}
-              orgSlug={orgSlug}
-              name={run.name}
-              fallback={run.framework ?? "Run"}
-            />
-          ) : (
-            <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
-              {run.name ?? run.framework ?? "Run"}
-            </h1>
-          )}
+          <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
+            {run.name ?? run.framework ?? "Run"}
+          </h1>
           <StatusBadge status={run.status} />
           {run.shardTotal ? (
             <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
@@ -149,6 +139,21 @@ export default async function RunPage({
               attempt {run.attempt}
             </span>
           ) : null}
+
+          {/* ml-auto so the trigger sits at the far edge of the title row regardless of
+              how many badges precede it. Renders nothing when the viewer can do neither. */}
+          <div className="ml-auto">
+            <RunActions
+              runId={runId}
+              orgSlug={orgSlug}
+              name={run.name}
+              fallback={run.framework ?? "Run"}
+              totalTests={run.total}
+              canRename={can(context, "run:rename")}
+              canDelete={can(context, "run:delete")}
+              deleteRedirectTo={`/o/${orgSlug}/p/${run.projectKey}/runs`}
+            />
+          </div>
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-[var(--color-ink-muted)]">
@@ -172,6 +177,9 @@ export default async function RunPage({
           ) : null}
         </div>
 
+        {/* Tags keep their own visible editor rather than moving into the ⋯ menu: it is
+            already discoverable, members can use it where the menu's actions are
+            admin-only, and the chips have to be on screen to be worth editing. */}
         <div className="mt-3">
           <TagEditor runId={runId} initialTags={run.tags} />
         </div>

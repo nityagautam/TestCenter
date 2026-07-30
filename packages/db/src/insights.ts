@@ -24,6 +24,8 @@ export interface DailyPoint {
   flaky: number;
   passRate: number | null;
   avgDurationMs: number | null;
+  /** Summed run duration for the day — CI spend, as opposed to per-run speed. */
+  totalDurationMs: number | null;
 }
 
 /**
@@ -38,7 +40,11 @@ export async function dailySeries(
 ): Promise<DailyPoint[]> {
   const days = Math.min(Math.max(input.days ?? 30, 1), 365);
 
-  return sql<DailyPoint[]>`
+  const rows = await sql<
+    (Omit<DailyPoint, "totalDurationMs"> & {
+      totalDurationMs: string | number | null;
+    })[]
+  >`
     WITH calendar AS (
       SELECT generate_series(
         (now() - (${days - 1} || ' days')::interval)::date,
@@ -61,7 +67,8 @@ export async function dailySeries(
         END AS pass_rate,
         -- Mean of run durations, not per-test durations: project_daily_stats stores
         -- AVG(runs.duration_ms). Labelled as run duration in the UI to match.
-        AVG(avg_duration_ms)::int AS avg_duration_ms
+        AVG(avg_duration_ms)::int AS avg_duration_ms,
+        sum(total_duration_ms)::bigint AS total_duration_ms
       FROM project_daily_stats
       WHERE org_id = ${input.orgId}
         ${input.projectId ? sql`AND project_id = ${input.projectId}` : sql``}
@@ -77,10 +84,377 @@ export async function dailySeries(
       COALESCE(stats.skipped, 0)               AS skipped,
       COALESCE(stats.flaky, 0)                 AS flaky,
       stats.pass_rate                          AS "passRate",
-      stats.avg_duration_ms                    AS "avgDurationMs"
+      stats.avg_duration_ms                    AS "avgDurationMs",
+      stats.total_duration_ms                  AS "totalDurationMs"
     FROM calendar
     LEFT JOIN stats ON stats.day = calendar.day
     ORDER BY calendar.day ASC
+  `;
+
+  /*
+   * `total_duration_ms` is summed from a bigint column, and postgres.js hands int8 back
+   * as a *string* rather than silently narrowing it to a JS number. Returned raw it would
+   * satisfy the `number` in DailyPoint at compile time and be a string at runtime, so
+   * `formatDuration` would receive "2687693" and any arithmetic on it would concatenate.
+   * Coerced here so callers get the type this function advertises — the same reason
+   * `upsertTestCases` coerces the ids it returns.
+   */
+  return rows.map((row) => ({
+    ...row,
+    totalDurationMs: row.totalDurationMs === null ? null : Number(row.totalDurationMs),
+  }));
+}
+
+export interface BranchSeries {
+  branch: string;
+  points: { day: string; passRate: number | null; runs: number }[];
+}
+
+/**
+ * Daily pass rate split by branch.
+ *
+ * `dailySeries` sums across branches, which answers "is the aggregate healthy?" — a
+ * different question from "is main healthy?", and one that a busy feature branch can
+ * quietly dominate. `project_daily_stats` is already keyed by (project, day, branch),
+ * so the split costs nothing extra; it is only that the existing query collapses it.
+ *
+ * Capped at `maxBranches` by run volume, with the remainder folded into one "other"
+ * series. The cap is not cosmetic: the design system ships three categorical hues, and
+ * generating a fourth would produce a colour indistinguishable from an existing one
+ * under deuteranopia. Folding is the correct answer to too many series; inventing hues
+ * is not.
+ */
+export async function dailySeriesByBranch(
+  sql: Sql,
+  input: {
+    orgId: string;
+    projectId?: string | undefined;
+    days?: number;
+    maxBranches?: number;
+  },
+): Promise<BranchSeries[]> {
+  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
+  const maxBranches = Math.min(Math.max(input.maxBranches ?? 3, 1), 6);
+
+  const rows = await sql<{ branch: string; day: string; passRate: number | null; runs: number }[]>`
+    WITH scoped AS (
+      SELECT
+        COALESCE(NULLIF(branch, ''), '(no branch)') AS branch,
+        day, runs, passed, failed
+      FROM project_daily_stats
+      WHERE org_id = ${input.orgId}
+        ${input.projectId ? sql`AND project_id = ${input.projectId}` : sql``}
+        AND day >= (now() - (${days - 1} || ' days')::interval)::date
+    ),
+    ranked AS (
+      SELECT branch, sum(runs) AS total_runs,
+             row_number() OVER (ORDER BY sum(runs) DESC, branch ASC) AS rn
+      FROM scoped GROUP BY branch
+    ),
+    labelled AS (
+      SELECT
+        CASE WHEN r.rn <= ${maxBranches} THEN s.branch ELSE 'other branches' END AS branch,
+        s.day, s.runs, s.passed, s.failed
+      FROM scoped s
+      JOIN ranked r ON r.branch = s.branch
+    ),
+    calendar AS (
+      SELECT generate_series(
+        (now() - (${days - 1} || ' days')::interval)::date,
+        now()::date,
+        '1 day'
+      )::date AS day
+    ),
+    /*
+     * Every branch crossed with every day, so each series spans the whole window.
+     *
+     * Without this the series contains only the days that happen to have rows, which
+     * compresses the x-axis: a branch with one day of history and a branch with thirty
+     * would be drawn across the same width and read as directly comparable, and a single
+     * point would land mid-plot instead of on its date. dailySeries fills its calendar
+     * for exactly this reason. (No backticks in this comment: it lives inside a template
+     * literal, and one would terminate the SQL string.)
+     */
+    grid AS (
+      SELECT b.branch, c.day
+      FROM (SELECT DISTINCT branch FROM labelled) b
+      CROSS JOIN calendar c
+    ),
+    per_day AS (
+      SELECT branch, day, sum(runs) AS runs, sum(passed) AS passed, sum(failed) AS failed
+      FROM labelled GROUP BY branch, day
+    )
+    SELECT
+      grid.branch,
+      to_char(grid.day, 'Mon DD') AS day,
+      COALESCE(per_day.runs, 0)::int AS runs,
+      CASE
+        WHEN COALESCE(per_day.passed + per_day.failed, 0) = 0 THEN NULL
+        ELSE ROUND(per_day.passed::numeric * 100 / (per_day.passed + per_day.failed), 2)
+      END AS "passRate"
+    FROM grid
+    LEFT JOIN per_day ON per_day.branch = grid.branch AND per_day.day = grid.day
+    ORDER BY grid.branch, grid.day ASC
+  `;
+
+  const byBranch = new Map<string, BranchSeries>();
+  for (const row of rows) {
+    const existing = byBranch.get(row.branch);
+    const point = { day: row.day, passRate: row.passRate, runs: row.runs };
+    if (existing) existing.points.push(point);
+    else byBranch.set(row.branch, { branch: row.branch, points: [point] });
+  }
+  // Busiest branch first, so the series that matters most gets the first hue.
+  return [...byBranch.values()].sort(
+    (a, b) =>
+      b.points.reduce((sum, p) => sum + p.runs, 0) - a.points.reduce((sum, p) => sum + p.runs, 0),
+  );
+}
+
+export interface BranchPassRate {
+  branch: string;
+  passRate: number | null;
+  runs: number;
+  tests: number;
+  failed: number;
+}
+
+/**
+ * Pass rate per branch over the window, one row per branch.
+ *
+ * A bar per branch, not a line per branch. The question is "which branch is healthy?",
+ * which is a comparison of magnitude across a handful of named categories — bars answer
+ * that at a glance and stay readable with a single day of history, where a multi-line
+ * trend degenerates into one dot per series floating in an empty plot.
+ *
+ * Not a pie either: these are independent ratios, not parts of a whole. Two branches at
+ * 96% and 90% would occupy slices summing to 186%, which a pie cannot express without
+ * lying about what the slices mean.
+ *
+ * Ordered worst-first, because the branch that needs attention is the answer.
+ */
+export async function branchPassRates(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; days?: number; limit?: number },
+): Promise<BranchPassRate[]> {
+  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
+  const limit = Math.min(Math.max(input.limit ?? 8, 1), 30);
+
+  return sql<BranchPassRate[]>`
+    SELECT
+      COALESCE(NULLIF(branch, ''), '(no branch)') AS branch,
+      sum(runs)::int  AS runs,
+      sum(tests)::int AS tests,
+      sum(failed)::int AS failed,
+      CASE
+        WHEN sum(passed + failed) = 0 THEN NULL
+        ELSE ROUND(sum(passed)::numeric * 100 / sum(passed + failed), 2)
+      END AS "passRate"
+    FROM project_daily_stats
+    WHERE org_id = ${input.orgId}
+      ${input.projectId ? sql`AND project_id = ${input.projectId}` : sql``}
+      AND day >= (now() - (${days - 1} || ' days')::interval)::date
+    GROUP BY 1
+    HAVING sum(runs) > 0
+    -- Worst pass rate first; ties broken by volume so the busier branch leads.
+    ORDER BY "passRate" ASC NULLS LAST, sum(runs) DESC
+    LIMIT ${limit}
+  `;
+}
+
+export interface TodayRun {
+  id: string;
+  label: string;
+  name: string | null;
+  branch: string | null;
+  status: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  flaky: number;
+  passRate: number | null;
+}
+
+/**
+ * Today's runs, oldest first, one row per run.
+ *
+ * Every other chart here is keyed by *day*, which is the wrong axis for the question
+ * someone actually has while a suite is running: "is the run that just finished worse
+ * than the one before it?" A daily rollup answers that only tomorrow, and by then it has
+ * averaged the two together.
+ *
+ * So this reads `runs` directly rather than `project_daily_stats` — the point of the
+ * rollup is to avoid scanning results for long windows, and a single day of runs is a
+ * handful of rows on the (org, started_at) path. Ordered ascending so the newest run is
+ * the rightmost column, matching every other time axis in the app.
+ */
+export async function todaysRuns(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; limit?: number },
+): Promise<TodayRun[]> {
+  const limit = Math.min(Math.max(input.limit ?? 24, 1), 100);
+
+  const rows = await sql<TodayRun[]>`
+    SELECT * FROM (
+      SELECT
+        r.id,
+        to_char(r.started_at, 'HH24:MI') AS label,
+        r.name, r.branch, r.status,
+        r.total, r.passed, r.skipped, r.flaky,
+        (r.failed + r.errored) AS failed,
+        CASE
+          WHEN (r.passed + r.failed + r.errored) = 0 THEN NULL
+          ELSE ROUND(r.passed::numeric * 100 / (r.passed + r.failed + r.errored), 2)
+        END AS "passRate"
+      FROM runs r
+      WHERE r.org_id = ${input.orgId}
+        ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+        AND r.started_at >= date_trunc('day', now())
+      -- Newest first for the LIMIT, so a busy day keeps the *latest* runs, not the
+      -- first few of the morning.
+      ORDER BY r.started_at DESC
+      LIMIT ${limit}
+    ) recent
+    ORDER BY label ASC
+  `;
+
+  return rows;
+}
+
+export interface SlowTest {
+  id: number;
+  name: string;
+  suite: string | null;
+  projectKey: string;
+  p95DurationMs: number;
+  avgDurationMs: number | null;
+  runs30d: number;
+}
+
+/**
+ * The slowest tests by p95, which is where CI time actually goes.
+ *
+ * p95 rather than average: a test that is usually fast and occasionally takes a minute
+ * is the one worth finding, and the mean hides exactly that. Reads the per-test rollup,
+ * so it costs one indexed scan of `test_cases` rather than touching results.
+ */
+export async function slowestTests(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; limit?: number },
+): Promise<SlowTest[]> {
+  const limit = Math.min(Math.max(input.limit ?? 8, 1), 50);
+
+  return sql<SlowTest[]>`
+    SELECT
+      tc.id, tc.name, tc.suite,
+      p.key AS "projectKey",
+      tc.p95_duration_ms AS "p95DurationMs",
+      tc.avg_duration_ms AS "avgDurationMs",
+      tc.runs_30d        AS "runs30d"
+    FROM test_cases tc
+    JOIN projects p ON p.id = tc.project_id
+    WHERE tc.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
+      AND tc.p95_duration_ms IS NOT NULL
+      AND NOT tc.quarantined
+    ORDER BY tc.p95_duration_ms DESC
+    LIMIT ${limit}
+  `;
+}
+
+export interface FailureConcentration {
+  tests: { id: number; name: string; failures30d: number; share: number }[];
+  /** Failures across every test in scope, so the listed share means something. */
+  totalFailures: number;
+  /** How many distinct tests failed at all. */
+  failingTests: number;
+}
+
+/**
+ * How concentrated failures are in a few tests.
+ *
+ * The question this answers is "one bad test, or systemic?", and it is the first thing
+ * worth knowing about a red dashboard. A count of failures alone cannot answer it: 200
+ * failures from one test and 200 from ninety tests are the same number and completely
+ * different problems.
+ */
+export async function failureConcentration(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; limit?: number },
+): Promise<FailureConcentration> {
+  const limit = Math.min(Math.max(input.limit ?? 6, 1), 20);
+
+  const rows = await sql<{ id: number; name: string; failures30d: number }[]>`
+    SELECT tc.id, tc.name, tc.failures_30d AS "failures30d"
+    FROM test_cases tc
+    WHERE tc.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
+      AND tc.failures_30d > 0
+    ORDER BY tc.failures_30d DESC
+    LIMIT ${limit}
+  `;
+
+  const totals = await sql<{ total: number; failing: number }[]>`
+    SELECT
+      COALESCE(sum(tc.failures_30d), 0)::int AS total,
+      count(*)::int AS failing
+    FROM test_cases tc
+    WHERE tc.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
+      AND tc.failures_30d > 0
+  `;
+
+  const totalFailures = totals[0]?.total ?? 0;
+  return {
+    tests: rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      failures30d: row.failures30d,
+      share: totalFailures === 0 ? 0 : (row.failures30d * 100) / totalFailures,
+    })),
+    totalFailures,
+    failingTests: totals[0]?.failing ?? 0,
+  };
+}
+
+export interface FlakeBucket {
+  label: string;
+  tests: number;
+}
+
+/**
+ * Flake scores grouped into bands.
+ *
+ * Bands rather than a raw histogram because the score is calibrated, not linear: the
+ * dashboard's own threshold is 20, so "under 20" and "20–49" are the distinction that
+ * changes what you do. Buckets are generated from a fixed list so an empty band still
+ * appears — a missing bar reads as "no data" when it means "none in this band".
+ */
+export async function flakeDistribution(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined },
+): Promise<FlakeBucket[]> {
+  return sql<FlakeBucket[]>`
+    WITH bands(label, lo, hi, ord) AS (
+      VALUES
+        ('stable (0)',      0,   0.001, 1),
+        ('low (1–19)',      0.001, 20,  2),
+        ('flaky (20–49)',   20,  50,    3),
+        ('bad (50–79)',     50,  80,    4),
+        ('severe (80+)',    80,  1000,  5)
+    )
+    SELECT
+      b.label,
+      count(tc.id)::int AS tests
+    FROM bands b
+    LEFT JOIN test_cases tc
+      ON tc.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
+      AND tc.flake_score >= b.lo
+      AND tc.flake_score < b.hi
+    GROUP BY b.label, b.ord
+    ORDER BY b.ord
   `;
 }
 

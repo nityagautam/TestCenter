@@ -40,7 +40,16 @@ export const CAPABILITIES = {
    * has already shared, so changing it rewrites shared history rather than annotating it.
    */
   "run:rename": "admin",
-  "run:delete": "maintainer",
+  /**
+   * Deleting a run, with every result and artifact under it. Admin, not maintainer.
+   *
+   * Raised deliberately. A run is evidence: it is what "when did this start failing"
+   * and every trend is computed from, and unlike archiving a project there is no
+   * undo — the raw report goes with it. That puts it alongside the other admin powers
+   * rather than with editing a project. Nothing referenced this capability before, so
+   * raising it took no permission away from anyone.
+   */
+  "run:delete": "admin",
   "project:create": "maintainer",
   "project:edit": "maintainer",
   /** Archive and restore. Reversible, so it sits with the other admin powers. */

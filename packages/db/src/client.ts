@@ -25,6 +25,17 @@ export interface DbConfig {
 export type Sql = ReturnType<typeof postgres>;
 export type Database = ReturnType<typeof drizzle<typeof schema>>;
 
+/**
+ * Anything a query can run on: the pool, or a transaction inside `sql.begin()`.
+ *
+ * postgres.js hands the `begin` callback a `TransactionSql`, which is deliberately
+ * *not* assignable to `Sql` — it lacks the pool-level members (END, CLOSE, options)
+ * that would be wrong to call mid-transaction. Every query form is identical, so a
+ * helper that needs to participate in a caller's transaction takes this instead of
+ * `Sql`, rather than the caller casting and losing the distinction.
+ */
+export type Queryable = Sql | postgres.TransactionSql<Record<string, never>>;
+
 let cached: { sql: Sql; db: Database } | null = null;
 
 /**

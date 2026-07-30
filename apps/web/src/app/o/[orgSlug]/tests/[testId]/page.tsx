@@ -9,7 +9,7 @@ import {
 } from "@testcenter/db";
 import { HistoryStrip } from "@/components/charts/history-strip";
 import { TrendChart } from "@/components/charts/trend-chart";
-import { QuarantineToggle } from "@/components/quarantine-toggle";
+import { TestActions } from "@/components/test-actions";
 import { Card, CardHeader, StatTile, StatusBadge } from "@/components/ui";
 import {
   formatAbsoluteTime,
@@ -130,18 +130,32 @@ export default async function TestDetailPage({
             ) : null}
           </div>
 
-          {can(context, "run:edit") ? (
-            <QuarantineToggle
-              orgSlug={orgSlug}
-              testId={test.id}
-              quarantined={test.quarantined}
-              reason={test.quarantineReason}
-            />
-          ) : test.quarantined ? (
-            <span className="rounded bg-[var(--color-status-skipped)]/15 px-2 py-1 text-[11px]">
-              quarantined
-            </span>
-          ) : null}
+          {/* The state is shown to everyone; only the action is gated. The reason is worth
+              the space here in a way it is not in a list row — it is the whole point of
+              having quarantined the test. */}
+          <div className="flex shrink-0 items-start gap-2">
+            {test.quarantined ? (
+              <div className="text-right">
+                <span className="inline-flex items-center gap-1.5 rounded bg-[var(--color-status-skipped)]/15 px-2 py-1 text-[11px]">
+                  <span className="inline-block size-2 rounded-full bg-[var(--color-status-skipped)]" />
+                  Quarantined
+                </span>
+                {test.quarantineReason ? (
+                  <p className="mt-1 max-w-56 text-[10px] text-[var(--color-ink-muted)]">
+                    {test.quarantineReason}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {can(context, "run:edit") ? (
+              <TestActions
+                testId={test.id}
+                orgSlug={orgSlug}
+                testName={test.name}
+                quarantined={test.quarantined}
+              />
+            ) : null}
+          </div>
         </div>
       </header>
 

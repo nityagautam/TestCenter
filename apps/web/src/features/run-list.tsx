@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normalizeTags, type Tags } from "@testcenter/core";
 import { findProjectByKey, listRuns, runFilterOptions, tagFacets } from "@testcenter/db";
-import { RunNameEditor } from "@/components/run-name-editor";
+import { RunActions } from "@/components/run-actions";
+import { SearchBox } from "@/components/search-box";
 import { Button, Card, EmptyState, ResultBar, StatusBadge, TagChip } from "@/components/ui";
 import { formatDuration, formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
 import { getServices } from "@/lib/services";
@@ -147,6 +148,7 @@ export async function RunList({
   const tags = parseTagParams(params.tag);
   // Hoisted out of the row loop: the role does not change per run.
   const canRename = can(context, "run:rename");
+  const canDelete = can(context, "run:delete");
 
   // A path-scoped project wins over ?project=, so a stray query parameter cannot widen a
   // view whose URL claims to be about one project.
@@ -255,6 +257,33 @@ export async function RunList({
         </div>
       </div>
 
+      {/*
+       * Search matches run name, branch and commit (see `runFilterConditions`).
+       *
+       * Every existing filter rides along as a hidden field, `cursor` deliberately
+       * excluded: a new query must start at the newest page rather than resuming from a
+       * keyset position that belonged to the previous result set.
+       */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <SearchBox
+          action={base}
+          name="search"
+          label="Search runs"
+          defaultValue={params.search ?? ""}
+          placeholder="Search run name, branch or commit…"
+          hidden={Object.fromEntries(
+            Object.entries(params).filter(
+              ([key, value]) =>
+                key !== "search" &&
+                key !== "cursor" &&
+                !(scoped && key === "project") &&
+                (Array.isArray(value) ? value.length > 0 : Boolean(value)),
+            ) as [string, string | string[]][],
+          )}
+          className="min-w-0 flex-1 basis-[16rem]"
+        />
+      </div>
+
       {activeFilters.length > 0 ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <span className="text-xs text-[var(--color-ink-muted)]">Filters:</span>
@@ -301,26 +330,12 @@ export async function RunList({
                     <div className="flex items-start gap-4">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          {/* Admin-only, so for everyone else this row is unchanged text —
-                              which is what keeps a per-row control from becoming the kind
-                              of repeated noise a dense list cannot afford. */}
-                          {canRename ? (
-                            <RunNameEditor
-                              runId={run.id}
-                              orgSlug={orgSlug}
-                              name={run.name}
-                              fallback={run.framework ?? "Run"}
-                              variant="inline"
-                              href={`/o/${orgSlug}/runs/${run.id}`}
-                            />
-                          ) : (
-                            <Link
-                              href={`/o/${orgSlug}/runs/${run.id}`}
-                              className="text-sm font-medium hover:underline"
-                            >
-                              {run.name ?? run.framework ?? "Run"}
-                            </Link>
-                          )}
+                          <Link
+                            href={`/o/${orgSlug}/runs/${run.id}`}
+                            className="text-sm font-medium hover:underline"
+                          >
+                            {run.name ?? run.framework ?? "Run"}
+                          </Link>
                           <StatusBadge status={run.status} />
                           {run.flaky > 0 ? (
                             <StatusBadge status="flaky">{run.flaky} flaky</StatusBadge>
@@ -387,6 +402,24 @@ export async function RunList({
                           {run.skipped > 0 ? `${run.skipped} skipped` : `${run.passed} passed`}
                         </div>
                       </div>
+
+                      {/* Last in the row, past the numbers, so the menu is never between
+                          the name and the result it describes. The panels it opens are
+                          wider than this column, hence min-w-0 on the wrapper. */}
+                      {canRename || canDelete ? (
+                        <div className="min-w-0 shrink-0">
+                          <RunActions
+                            runId={run.id}
+                            orgSlug={orgSlug}
+                            name={run.name}
+                            fallback={run.framework ?? "Run"}
+                            totalTests={run.total}
+                            canRename={canRename}
+                            canDelete={canDelete}
+                            deleteRedirectTo={base}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   </li>
                 );

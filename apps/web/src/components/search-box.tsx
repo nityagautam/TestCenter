@@ -15,11 +15,27 @@ export function SearchBox({
   hidden = {},
   placeholder = "Search…",
   className = "flex-1",
+  name = "q",
+  label = "Search",
 }: {
   action: string;
   defaultValue: string;
-  hidden?: Record<string, string>;
+  /**
+   * Filters to carry through the search. Arrays render one hidden input each, because
+   * the run list's tag filter is a repeated `?tag=` — flattening it to a single value
+   * would drop every tag but one, silently narrowing the search differently than the
+   * page it was submitted from.
+   */
+  hidden?: Record<string, string | string[]>;
   placeholder?: string;
+  /**
+   * Query parameter to submit under. Test search reads `?q=`, the run list reads
+   * `?search=` — the field has to match whatever the page already parses, or the
+   * search silently does nothing.
+   */
+  name?: string;
+  /** Accessible name. "Search" alone is not enough when a page has one of these. */
+  label?: string;
   /**
    * Width, decided by the caller.
    *
@@ -33,17 +49,19 @@ export function SearchBox({
 
   return (
     <form action={action} method="get" className={`flex gap-2 ${className}`}>
-      {Object.entries(hidden).map(([key, value]) => (
-        <input key={key} type="hidden" name={key} value={value} />
-      ))}
+      {Object.entries(hidden).flatMap(([key, value]) =>
+        (Array.isArray(value) ? value : [value]).map((entry, index) => (
+          <input key={`${key}-${index}`} type="hidden" name={key} value={entry} />
+        )),
+      )}
 
       <div className="relative flex-1">
         <input
           ref={inputRef}
-          name="q"
+          name={name}
           defaultValue={defaultValue}
           placeholder={placeholder}
-          aria-label="Search tests"
+          aria-label={label}
           className={`h-9 w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-3 text-xs outline-none focus:border-[var(--color-ink-muted)] ${
             // Room for the clear button, but only when there is one to make room for.
             defaultValue ? "pr-12" : ""

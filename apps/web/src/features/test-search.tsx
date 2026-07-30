@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { listProjects, listSuites, recentOutcomes, searchTests } from "@testcenter/db";
 import { OutcomeStrip } from "@/components/charts/outcome-strip";
+import { TestActions } from "@/components/test-actions";
 import { Card, EmptyState } from "@/components/ui";
 import { FilterMenu } from "@/components/filter-menu";
 import { SearchBox } from "@/components/search-box";
@@ -17,7 +18,7 @@ import {
   truncateMiddle,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
-import { requirePageContext } from "@/lib/viewer";
+import { can, requirePageContext } from "@/lib/viewer";
 
 /**
  * Test search, rendered at two scopes.
@@ -80,6 +81,8 @@ export async function TestSearch({
   query: TestSearchParams;
 }) {
   const context = await requirePageContext(orgSlug);
+  // Hoisted: the role does not change per row.
+  const canEdit = can(context, "run:edit");
   const { sql } = getServices();
 
   const projects = await listProjects(sql, context.org.id);
@@ -208,6 +211,7 @@ export async function TestSearch({
         <div className="flex flex-wrap items-center gap-2">
           <SearchBox
             action={basePath}
+            label="Search tests"
             defaultValue={query.q ?? ""}
             hidden={Object.fromEntries(
               Object.entries(query).filter(
@@ -327,6 +331,8 @@ export async function TestSearch({
                     <th className="w-[5rem] px-3 py-2 text-right font-medium whitespace-nowrap">
                       Seen
                     </th>
+                    {/* Unlabelled — see the note on the flaky leaderboard. */}
+                    {canEdit ? <th className="w-10 px-2 py-2" /> : null}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border-subtle)]">
@@ -419,6 +425,16 @@ export async function TestSearch({
                         <td className="px-3 py-2 text-right font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
                           {formatRelativeTime(test.lastSeenAt)}
                         </td>
+                        {canEdit ? (
+                          <td className="px-2 py-2 text-right align-top">
+                            <TestActions
+                              testId={test.id}
+                              orgSlug={orgSlug}
+                              testName={test.name}
+                              quarantined={test.quarantined}
+                            />
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })}
