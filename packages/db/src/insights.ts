@@ -439,26 +439,49 @@ export async function testExecutions(
   `;
 }
 
-export interface FailureDetail extends TestExecution {
+export interface ExecutionDetail extends TestExecution {
   stackTrace: string | null;
   stdout: string | null;
   stderr: string | null;
   message: string | null;
+  /** True when `stdout` was cut short by `maxOutputChars`, so the UI can say so. */
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
 }
 
+/** @deprecated Kept for callers written before passed executions were included. */
+export type FailureDetail = ExecutionDetail;
+
+/** The parser caps one row's captured output at 64k chars; never read more than that. */
+const MAX_OUTPUT_CHARS = 64_000;
+
 /**
- * Full detail for a test's failures, including stack traces and captured output.
+ * Full detail for a test's executions, including stack traces and captured output.
  *
  * Separate from `testExecutions` because these columns are large: loading them for
  * every execution of a long-lived test would move megabytes to render a timeline.
+ *
+ * `statuses` defaults to failures because that is the triage path, but passing all
+ * statuses is what powers "show me the steps of a run that passed" — Cucumber and
+ * friends write their step log to `<system-out>` on success too, and that log is the
+ * only record of what a green test actually did. Cap `maxOutputChars` when widening
+ * the status filter: 20 rows × the parser's 64k ceiling is 1.3 MB of text otherwise.
  */
-export async function testFailureDetails(
+export async function testExecutionDetails(
   sql: Sql,
-  input: { orgId: string; testCaseId: number; limit?: number },
-): Promise<FailureDetail[]> {
+  input: {
+    orgId: string;
+    testCaseId: number;
+    limit?: number;
+    statuses?: readonly string[];
+    maxOutputChars?: number;
+  },
+): Promise<ExecutionDetail[]> {
   const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+  const statuses = input.statuses ?? ["failed", "error"];
+  const cap = Math.min(Math.max(input.maxOutputChars ?? MAX_OUTPUT_CHARS, 200), MAX_OUTPUT_CHARS);
 
-  return sql<FailureDetail[]>`
+  return sql<ExecutionDetail[]>`
     SELECT
       r.id             AS "resultId",
       r.run_id         AS "runId",
@@ -475,15 +498,28 @@ export async function testFailureDetails(
       r.failure_message AS "failureMessage",
       encode(r.failure_signature, 'hex') AS "failureSignatureHex",
       r.stack_trace    AS "stackTrace",
-      r.stdout, r.stderr, r.message
+      left(r.stdout, ${cap}) AS stdout,
+      left(r.stderr, ${cap}) AS stderr,
+      r.message,
+      -- length() is NULL for a NULL column, which would make the flag NULL, not false.
+      COALESCE(length(r.stdout) > ${cap}, false) AS "stdoutTruncated",
+      COALESCE(length(r.stderr) > ${cap}, false) AS "stderrTruncated"
     FROM test_results r
     JOIN runs run ON run.id = r.run_id
     WHERE r.test_case_id = ${input.testCaseId}
       AND r.org_id = ${input.orgId}
-      AND r.status IN ('failed', 'error')
+      AND r.status = ANY(${statuses as string[]}::text[])
     ORDER BY r.started_at DESC
     LIMIT ${limit}
   `;
+}
+
+/** Failures only — the default triage list. See `testExecutionDetails`. */
+export async function testFailureDetails(
+  sql: Sql,
+  input: { orgId: string; testCaseId: number; limit?: number },
+): Promise<ExecutionDetail[]> {
+  return testExecutionDetails(sql, input);
 }
 
 export interface FailureMode {

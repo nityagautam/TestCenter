@@ -3,8 +3,8 @@ import { notFound } from "next/navigation";
 import {
   getTestCase,
   testDurationHistory,
+  testExecutionDetails,
   testExecutions,
-  testFailureDetails,
   testFailureModes,
 } from "@testcenter/db";
 import { HistoryStrip } from "@/components/charts/history-strip";
@@ -33,6 +33,10 @@ import { can, requirePageContext } from "@/lib/viewer";
  * Grouping comes before the flat list on purpose. Three failures with one shared
  * signature is a single problem; three different signatures is three problems, and
  * that distinction changes what you do next.
+ *
+ * The flat list defaults to failures for that reason, but `?show=all` widens it to
+ * every execution: BDD runners write their step log to `<system-out>` on success as
+ * well, and for a passing test that log is the only record of what it actually did.
  */
 export const dynamic = "force-dynamic";
 
@@ -41,10 +45,10 @@ export default async function TestDetailPage({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string; testId: string }>;
-  searchParams: Promise<{ mode?: string; expand?: string }>;
+  searchParams: Promise<{ mode?: string; expand?: string; show?: string }>;
 }) {
   const { orgSlug, testId } = await params;
-  const { mode } = await searchParams;
+  const { mode, show } = await searchParams;
   const context = await requirePageContext(orgSlug);
   const { sql } = getServices();
 
@@ -54,10 +58,24 @@ export default async function TestDetailPage({
   const test = await getTestCase(sql, { orgId: context.org.id, testCaseId: numericId });
   if (!test) notFound();
 
-  const [executions, failureModes, failures, durations] = await Promise.all([
+  // `?show=all` widens the bottom list to every execution, so a passed run's captured
+  // output (for Cucumber, its step log) is readable — not just failures. A signature
+  // filter is inherently about failures, so `mode` wins over it.
+  const showAll = show === "all" && !mode;
+
+  const [executions, failureModes, details, durations] = await Promise.all([
     testExecutions(sql, { orgId: context.org.id, testCaseId: numericId, limit: 60 }),
     testFailureModes(sql, { orgId: context.org.id, testCaseId: numericId }),
-    testFailureDetails(sql, { orgId: context.org.id, testCaseId: numericId, limit: 20 }),
+    testExecutionDetails(sql, {
+      orgId: context.org.id,
+      testCaseId: numericId,
+      limit: 20,
+      // Output is capped per row here but not in the failures-only view: 20 rows at
+      // the parser's 64k ceiling would be 1.3 MB of text on a page nobody scrolls.
+      ...(showAll
+        ? { statuses: ["passed", "failed", "error", "skipped", "blocked"], maxOutputChars: 8_000 }
+        : {}),
+    }),
     testDurationHistory(sql, { orgId: context.org.id, testCaseId: numericId, limit: 40 }),
   ]);
 
@@ -68,9 +86,9 @@ export default async function TestDetailPage({
 
   // Filtering by mode is what makes the grouping actionable: pick a signature, see
   // only the failures caused by it.
-  const visibleFailures = mode
-    ? failures.filter((failure) => (failure.failureSignatureHex ?? "none") === mode)
-    : failures;
+  const visibleDetails = mode
+    ? details.filter((detail) => (detail.failureSignatureHex ?? "none") === mode)
+    : details;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-6">
@@ -262,56 +280,76 @@ export default async function TestDetailPage({
         <CardHeader
           title={
             mode
-              ? `Failures in this mode (${visibleFailures.length})`
-              : `Failure history (${visibleFailures.length})`
+              ? `Failures in this mode (${visibleDetails.length})`
+              : showAll
+                ? `Execution history (${visibleDetails.length})`
+                : `Failure history (${visibleDetails.length})`
           }
-          action={<span className="text-[11px] text-[var(--color-ink-muted)]">newest first</span>}
+          action={
+            <span className="flex items-center gap-3 text-[11px] text-[var(--color-ink-muted)]">
+              {mode ? null : (
+                <Link
+                  href={
+                    showAll
+                      ? `/o/${orgSlug}/tests/${test.id}`
+                      : `/o/${orgSlug}/tests/${test.id}?show=all`
+                  }
+                  className="underline"
+                >
+                  {showAll ? "failures only" : "show all executions"}
+                </Link>
+              )}
+              <span>newest first</span>
+            </span>
+          }
         />
-        {visibleFailures.length === 0 ? (
+        {visibleDetails.length === 0 ? (
           <p className="px-5 py-8 text-center text-xs text-[var(--color-ink-muted)]">
-            This test has never failed in the retained history.
+            {showAll
+              ? "This test has no executions in the retained history."
+              : "This test has never failed in the retained history."}
           </p>
         ) : (
           <ul className="divide-y divide-[var(--color-border-subtle)]">
-            {visibleFailures.map((failure) => (
-              <li key={failure.resultId} className="px-5 py-4">
+            {visibleDetails.map((detail) => (
+              <li key={detail.resultId} className="px-5 py-4">
                 <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <StatusBadge status={failure.status} />
+                  <StatusBadge status={detail.status} />
                   <Link
-                    href={`/o/${orgSlug}/runs/${failure.runId}?result=${failure.resultId}`}
+                    href={`/o/${orgSlug}/runs/${detail.runId}?result=${detail.resultId}`}
                     className="text-xs font-medium hover:underline"
                   >
-                    {failure.runName ?? "Run"}
+                    {detail.runName ?? "Run"}
                   </Link>
                   <span
                     className="font-mono text-[10px] text-[var(--color-ink-muted)]"
-                    title={formatAbsoluteTime(failure.startedAt)}
+                    title={formatAbsoluteTime(detail.startedAt)}
                   >
-                    {formatRelativeTime(failure.startedAt)}
+                    {formatRelativeTime(detail.startedAt)}
                   </span>
-                  {failure.branch ? (
+                  {detail.branch ? (
                     <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {failure.branch}
+                      {detail.branch}
                     </span>
                   ) : null}
-                  {shortSha(failure.commitSha) ? (
+                  {shortSha(detail.commitSha) ? (
                     <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {shortSha(failure.commitSha)}
+                      {shortSha(detail.commitSha)}
                     </span>
                   ) : null}
-                  {failure.durationMs != null ? (
+                  {detail.durationMs != null ? (
                     <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {formatDuration(failure.durationMs)}
+                      {formatDuration(detail.durationMs)}
                     </span>
                   ) : null}
-                  {failure.retryCount > 0 ? (
+                  {detail.retryCount > 0 ? (
                     <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {failure.retryCount + 1} attempts
+                      {detail.retryCount + 1} attempts
                     </span>
                   ) : null}
-                  {failure.ciJobUrl ? (
+                  {detail.ciJobUrl ? (
                     <a
-                      href={failure.ciJobUrl}
+                      href={detail.ciJobUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="text-[10px] underline"
@@ -321,18 +359,34 @@ export default async function TestDetailPage({
                   ) : null}
                 </div>
 
-                {failure.failureMessage ? (
+                {detail.failureMessage ? (
                   <Block
-                    title={failure.failureType ?? "Failure"}
-                    body={failure.failureMessage}
+                    title={detail.failureType ?? "Failure"}
+                    body={detail.failureMessage}
                     tone="failed"
                   />
                 ) : null}
-                {failure.stackTrace ? (
-                  <Block title="Stack trace" body={failure.stackTrace} />
+                {detail.stackTrace ? <Block title="Stack trace" body={detail.stackTrace} /> : null}
+                {detail.stderr ? (
+                  <Block title="stderr" body={detail.stderr} truncated={detail.stderrTruncated} />
                 ) : null}
-                {failure.stderr ? <Block title="stderr" body={failure.stderr} /> : null}
-                {failure.stdout ? <Block title="stdout" body={failure.stdout} /> : null}
+                {detail.stdout ? (
+                  <Block
+                    title="stdout (system-out)"
+                    body={detail.stdout}
+                    truncated={detail.stdoutTruncated}
+                  />
+                ) : null}
+                {/* A green test with nothing captured is worth stating outright, so an
+                    empty panel does not read as a rendering bug. */}
+                {!detail.failureMessage &&
+                !detail.stackTrace &&
+                !detail.stdout &&
+                !detail.stderr ? (
+                  <p className="mt-1 text-[11px] text-[var(--color-ink-muted)]">
+                    No captured output for this execution.
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -346,10 +400,12 @@ function Block({
   title,
   body,
   tone = "neutral",
+  truncated = false,
 }: {
   title: string;
   body: string;
   tone?: "neutral" | "failed";
+  truncated?: boolean;
 }) {
   return (
     <details className="mt-2" open={tone === "failed"}>
@@ -359,6 +415,7 @@ function Block({
         }`}
       >
         {title}
+        {truncated ? " · truncated for this view — open the run for the full output" : null}
       </summary>
       <pre className="mt-1 max-h-64 overflow-auto rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
         {body}
