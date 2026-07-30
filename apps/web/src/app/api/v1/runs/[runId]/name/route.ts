@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { MAX_RUN_NAME_LENGTH } from "@testcenter/core";
 import { requireCapability, requireOrgAccess, updateRunName } from "@testcenter/db";
 import { ApiError, apiErrorResponse } from "@/lib/api-auth";
 import { getServices } from "@/lib/services";
@@ -17,9 +18,6 @@ import { currentViewer } from "@/lib/viewer";
  * nothing rather than the wrong row.
  */
 export const dynamic = "force-dynamic";
-
-/** Long enough for "nightly regression — shard 3/8", short enough to render in a list. */
-const MAX_NAME_LENGTH = 200;
 
 export async function POST(
   request: Request,
@@ -45,11 +43,11 @@ export async function POST(
     const trimmed = typeof body.name === "string" ? body.name.trim() : "";
     const name = trimmed.length > 0 ? trimmed : null;
 
-    if (name && name.length > MAX_NAME_LENGTH) {
+    if (name && name.length > MAX_RUN_NAME_LENGTH) {
       throw new ApiError(
         422,
         "name_too_long",
-        `name must be ${MAX_NAME_LENGTH} characters or fewer`,
+        `name must be ${MAX_RUN_NAME_LENGTH} characters or fewer`,
       );
     }
 

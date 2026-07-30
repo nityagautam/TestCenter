@@ -134,10 +134,20 @@ export const shardSchema = z.object({
 });
 export type Shard = z.infer<typeof shardSchema>;
 
+/**
+ * Cap on a run's display name, shared by every path that can set one.
+ *
+ * `runs.name` is an unbounded `text` column, so without this the single-shot ingest
+ * endpoint — which takes the name from a query parameter — would store whatever it was
+ * given. Exported so the presigned create, single-shot ingest and rename endpoints agree
+ * rather than each picking a number.
+ */
+export const MAX_RUN_NAME_LENGTH = 255;
+
 export const runMetadataSchema = z.object({
   /** Project key, e.g. "checkout-web". Resolved to a project id at ingest. */
   project: z.string().min(1).max(128),
-  name: z.string().max(255).optional(),
+  name: z.string().max(MAX_RUN_NAME_LENGTH).optional(),
   framework: z.string().max(64).optional(),
   frameworkVersion: z.string().max(64).optional(),
   startedAt: z.coerce.date().optional(),

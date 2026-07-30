@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   artifactKey,
+  MAX_RUN_NAME_LENGTH,
   normalizeTags,
   parseTagArgs,
   QUEUES,
@@ -85,12 +86,29 @@ export async function POST(request: Request): Promise<NextResponse> {
     const startedAtParam = url.searchParams.get("startedAt");
     const startedAt = startedAtParam ? new Date(startedAtParam) : new Date();
 
+    /*
+     * `?name=` names the run at upload time, so CI does not have to rename it afterwards.
+     *
+     * Trimmed, and empty becomes null so the read path's `name ?? framework` fallback
+     * applies rather than a blank heading. Over-long is rejected rather than truncated:
+     * `runs.name` is unbounded `text`, and silently storing a clipped name would leave CI
+     * believing it set something it did not.
+     */
+    const nameParam = url.searchParams.get("name")?.trim();
+    if (nameParam && nameParam.length > MAX_RUN_NAME_LENGTH) {
+      throw new ApiError(
+        422,
+        "name_too_long",
+        `name must be ${MAX_RUN_NAME_LENGTH} characters or fewer`,
+      );
+    }
+
     const inserted = await db
       .insert(schema.runs)
       .values({
         orgId: principal.orgId,
         projectId: project.id,
-        name: url.searchParams.get("name"),
+        name: nameParam || null,
         framework: url.searchParams.get("framework"),
         status: "parsing",
         startedAt: Number.isNaN(startedAt.getTime()) ? new Date() : startedAt,
