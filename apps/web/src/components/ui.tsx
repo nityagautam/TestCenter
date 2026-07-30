@@ -117,11 +117,22 @@ export function Card({
   );
 }
 
+/**
+ * `min-w-0` on the title and `shrink-0` on the action are load-bearing.
+ *
+ * A flex item defaults to `min-width: auto`, so it refuses to shrink below its
+ * min-content width — for a title holding a 151-character test name with unbroken
+ * tokens like `"<CASE_LABEL>"` that was 1130px inside an 884px card, which pushed the
+ * action links clean outside the card and gave the whole page 341px of horizontal
+ * scroll. A `truncate` inside the title cannot help while this is unset, because it has
+ * no bound to resolve against: it measured scrollWidth === clientWidth and never
+ * ellipsised. Same root cause as the `minmax(0,1fr)` note on the test detail page.
+ */
 export function CardHeader({ title, action }: { title: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-[var(--color-border-subtle)] px-5 py-3">
-      <h2 className="text-sm font-medium">{title}</h2>
-      {action}
+      <h2 className="min-w-0 text-sm font-medium">{title}</h2>
+      {action ? <div className="shrink-0">{action}</div> : null}
     </div>
   );
 }

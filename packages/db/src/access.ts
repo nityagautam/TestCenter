@@ -32,6 +32,14 @@ export const CAPABILITIES = {
   "run:read": "viewer",
   "run:upload": "member",
   "run:edit": "member",
+  /**
+   * Renaming a run, which is deliberately stricter than `run:edit`.
+   *
+   * Tags and quarantine are per-slice annotations that any member should be able to
+   * correct. A run's name is how it is identified in every list, link and report anyone
+   * has already shared, so changing it rewrites shared history rather than annotating it.
+   */
+  "run:rename": "admin",
   "run:delete": "maintainer",
   "project:create": "maintainer",
   "project:edit": "maintainer",

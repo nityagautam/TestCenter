@@ -1,7 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getRun, getRunResult, listRunResults, summarizeRunSuites } from "@testcenter/db";
+import {
+  getRun,
+  getRunResult,
+  listRunResults,
+  recentOutcomes,
+  summarizeRunSuites,
+} from "@testcenter/db";
 import { Card, CardHeader, EmptyState, ResultBar, StatTile, StatusBadge } from "@/components/ui";
+import { OutcomeStrip } from "@/components/charts/outcome-strip";
+import { RunNameEditor } from "@/components/run-name-editor";
 import { RunProgress } from "@/components/run-progress";
 import { TagEditor } from "@/components/tag-editor";
 import {
@@ -13,7 +21,7 @@ import {
   truncateStart,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
-import { requirePageContext } from "@/lib/viewer";
+import { can, requirePageContext } from "@/lib/viewer";
 
 /**
  * Run detail.
@@ -67,6 +75,19 @@ export default async function RunPage({
     query.result ? getRunResult(sql, { runId, resultId: Number(query.result) }) : null,
   ]);
 
+  /*
+   * Prior outcomes for the tests on screen, so each row can show how this test has been
+   * behaving rather than only how it did here. One batched query keyed by test; it runs
+   * after the list because it needs those ids. `limit` reaches 500, hence 6 marks per
+   * row rather than the list view's 8 — the query is index-backed either way, but there
+   * is no reason to fetch more marks than a dense table can show.
+   */
+  const outcomes = await recentOutcomes(sql, {
+    orgId,
+    testCaseIds: resultPage.results.map((result) => result.testCaseId),
+    perTest: 6,
+  });
+
   const failing = run.failed + run.errored;
   const base = `/o/${orgSlug}/runs/${runId}`;
 
@@ -104,9 +125,19 @@ export default async function RunPage({
 
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold tracking-tight">
-            {run.name ?? run.framework ?? "Run"}
-          </h1>
+          {/* Admins get an inline rename; everyone else gets the same heading, unadorned. */}
+          {can(context, "run:rename") ? (
+            <RunNameEditor
+              runId={runId}
+              orgSlug={orgSlug}
+              name={run.name}
+              fallback={run.framework ?? "Run"}
+            />
+          ) : (
+            <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
+              {run.name ?? run.framework ?? "Run"}
+            </h1>
+          )}
           <StatusBadge status={run.status} />
           {run.shardTotal ? (
             <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
@@ -191,11 +222,225 @@ export default async function RunPage({
         </div>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+      {/* Filters on the right, matching the runs list and test search. This page was the
+          only one with them on the left, so the sidebar jumped sides as you navigated
+          between a list and a run.
+
+          minmax(0,1fr) rather than 1fr for the content track: `1fr` means
+          minmax(auto,1fr) and `auto` bottoms out at min-content, so one unbroken
+          stack-trace line or 151-character test name would widen the track and squeeze
+          the sidebar. Same reason it is spelled this way on the other two pages.
+
+          The content also comes first in the DOM, not just visually — reversing them with
+          `order` would leave a keyboard user tabbing into the filters before the results
+          they sit beside. */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="min-w-0 space-y-6">
+          {selected ? (
+            <Card>
+              <CardHeader
+                title={
+                  // min-w-0 again on this inner flex, and shrink-0 on the badge: without
+                  // both, the name's min-content width propagates straight back up and
+                  // CardHeader's bound is undone one level down.
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0">
+                      <StatusBadge status={selected.status} />
+                    </span>
+                    <span className="min-w-0 truncate" title={selected.name}>
+                      {selected.name}
+                    </span>
+                  </span>
+                }
+                action={
+                  <span className="flex items-center gap-3 text-xs">
+                    {/* The panel has room for a real labelled control, which the table row
+                        did not — so the one place history is spelled out in words is the
+                        one place a word fits. */}
+                    <Link
+                      href={`/o/${orgSlug}/tests/${selected.testCaseId}`}
+                      className="font-medium underline hover:no-underline"
+                    >
+                      Full history →
+                    </Link>
+                    <Link
+                      href={withParam({ result: null })}
+                      className="text-[var(--color-ink-muted)] hover:underline"
+                    >
+                      close
+                    </Link>
+                  </span>
+                }
+              />
+              <div className="space-y-4 px-5 py-4">
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-2 font-mono text-[11px] sm:grid-cols-4">
+                  <Detail label="suite" value={selected.suite ?? "—"} />
+                  <Detail label="class" value={selected.classname ?? "—"} />
+                  <Detail label="duration" value={formatDuration(selected.durationMs)} />
+                  <Detail
+                    label="attempts"
+                    value={selected.retryCount > 0 ? `${selected.retryCount + 1}` : "1"}
+                  />
+                </dl>
+
+                {selected.failureMessage ? (
+                  <Block
+                    title={selected.failureType ?? "Failure"}
+                    body={selected.failureMessage}
+                    tone="failed"
+                  />
+                ) : null}
+                {selected.stackTrace ? (
+                  <Block title="Stack trace" body={selected.stackTrace} />
+                ) : null}
+                {selected.message ? <Block title="Message" body={selected.message} /> : null}
+                {selected.stdout ? <Block title="stdout" body={selected.stdout} /> : null}
+                {selected.stderr ? <Block title="stderr" body={selected.stderr} /> : null}
+                {!selected.failureMessage &&
+                !selected.stackTrace &&
+                !selected.stdout &&
+                !selected.stderr ? (
+                  <p className="text-xs text-[var(--color-ink-muted)]">
+                    This test recorded no failure detail or captured output.
+                  </p>
+                ) : null}
+              </div>
+            </Card>
+          ) : null}
+
+          <Card className="overflow-hidden">
+            <CardHeader
+              title={`Results (${resultPage.results.length}${resultPage.nextCursor ? "+" : ""})`}
+              action={
+                <span className="text-[11px] text-[var(--color-ink-muted)]">failures first</span>
+              }
+            />
+            {resultPage.results.length === 0 ? (
+              <EmptyState
+                title="No results match"
+                description={
+                  run.total === 0
+                    ? "This run has no parsed results yet. If it is still parsing, the page will show progress above."
+                    : "Try a different filter, or clear the suite selection."
+                }
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                {/* table-fixed with proportioned columns. Auto layout sizes columns to
+                    their content, so one 200-character test name or stack-trace line decided
+                    the whole table's geometry — and a max-width on a <td> is ignored outright.
+                    Capping the children fixed the truncation but not the width: an absolute
+                    maximum cannot know how much room the sidebar left, so the last columns were
+                    pushed past the right edge. Fixed layout settles both, because every column
+                    then has a definite width for `truncate` to resolve against. */}
+                <table className="w-full table-fixed text-left text-xs">
+                  <thead className="tc-sticky border-b border-[var(--color-border-subtle)] text-[11px] tracking-wide text-[var(--color-ink-muted)] uppercase">
+                    <tr>
+                      <th className="w-[7rem] px-4 py-2 font-medium">Status</th>
+                      <th className="px-4 py-2 font-medium">Test</th>
+                      {/* Was a 10px "history" word crammed beside every test name. As a
+                          labelled column it is named once, carries the trend, and gives
+                          the link a full-height hit target instead of a 7px one.
+                          7.5rem: six 12px marks + five 2px gaps = 82px, and px-4 spends
+                          32px of the cell — 7rem would leave 80px and clip the strip. */}
+                      <th className="w-[7.5rem] px-4 py-2 font-medium">Recent</th>
+                      <th className="w-[24%] px-4 py-2 font-medium">Suite</th>
+                      <th className="w-[5.5rem] px-4 py-2 text-right font-medium">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--color-border-subtle)]">
+                    {resultPage.results.map((result) => (
+                      <tr
+                        key={result.id}
+                        className={`hover:bg-[var(--color-surface)]/60 ${
+                          String(result.id) === query.result ? "bg-[var(--color-surface)]" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-2 align-top">
+                          <div className="flex items-center gap-1.5">
+                            <StatusBadge status={result.status} />
+                            {result.wasFlaky ? (
+                              <StatusBadge status="flaky">flaky</StatusBadge>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 align-top">
+                          {/* Bound on the child, not the cell — see the note in tests/page.tsx.
+                              The name is now the only link here; history moved to its own
+                              column, so a long name has no second link to collide with. */}
+                          <Link
+                            href={withParam({ result: String(result.id) })}
+                            className="block truncate font-medium hover:underline"
+                            title={result.name}
+                          >
+                            {result.name}
+                          </Link>
+                          {result.failureMessage ? (
+                            <div
+                              className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-status-failed)]"
+                              title={result.failureMessage}
+                            >
+                              {result.failureMessage}
+                            </div>
+                          ) : null}
+                          {result.classname ? (
+                            <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-ink-muted)]">
+                              {result.classname}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-2 align-top">
+                          <OutcomeStrip
+                            cells={outcomes.get(result.testCaseId) ?? []}
+                            href={`/o/${orgSlug}/tests/${result.testCaseId}`}
+                            testName={result.name}
+                          />
+                        </td>
+                        <td className="px-4 py-2 align-top">
+                          <span
+                            className="block truncate font-mono text-[11px] text-[var(--color-ink-muted)]"
+                            title={result.suite ?? ""}
+                          >
+                            {truncateStart(result.suite ?? "—", 34)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-right align-top font-mono text-[11px] whitespace-nowrap text-[var(--color-ink-muted)] tabular-nums">
+                          {formatDuration(result.durationMs)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {resultPage.nextCursor ? (
+              <div className="border-t border-[var(--color-border-subtle)] px-5 py-3">
+                <Link
+                  href={withParam({ limit: String(Math.min(limit + 200, 500)) })}
+                  className="text-xs underline"
+                >
+                  Show more results
+                </Link>
+              </div>
+            ) : null}
+          </Card>
+        </div>
+
         <aside className="space-y-4">
           <Card>
-            <div className="border-b border-[var(--color-border-subtle)] px-4 py-2.5">
+            {/* Same header shape as Suites and the runs-list facets: the way out of a
+                filter sits in the card that applied it, and appears only once there is
+                something to clear. */}
+            <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-4 py-2.5">
               <h2 className="text-xs font-medium tracking-wide uppercase">Filter</h2>
+              {query.status || query.flaky === "true" ? (
+                <Link
+                  href={withParam({ status: null, flaky: null })}
+                  className="text-[11px] text-[var(--color-ink-muted)] underline"
+                >
+                  clear
+                </Link>
+              ) : null}
             </div>
             <ul className="p-2 text-xs">
               {[
@@ -282,175 +527,6 @@ export default async function RunPage({
             </Card>
           ) : null}
         </aside>
-
-        <div className="min-w-0 space-y-6">
-          {selected ? (
-            <Card>
-              <CardHeader
-                title={
-                  <span className="flex items-center gap-2">
-                    <StatusBadge status={selected.status} />
-                    <span className="truncate">{selected.name}</span>
-                  </span>
-                }
-                action={
-                  <Link
-                    href={withParam({ result: null })}
-                    className="text-xs text-[var(--color-ink-muted)] hover:underline"
-                  >
-                    close
-                  </Link>
-                }
-              />
-              <div className="space-y-4 px-5 py-4">
-                <dl className="grid grid-cols-2 gap-x-6 gap-y-2 font-mono text-[11px] sm:grid-cols-4">
-                  <Detail label="suite" value={selected.suite ?? "—"} />
-                  <Detail label="class" value={selected.classname ?? "—"} />
-                  <Detail label="duration" value={formatDuration(selected.durationMs)} />
-                  <Detail
-                    label="attempts"
-                    value={selected.retryCount > 0 ? `${selected.retryCount + 1}` : "1"}
-                  />
-                </dl>
-
-                {selected.failureMessage ? (
-                  <Block
-                    title={selected.failureType ?? "Failure"}
-                    body={selected.failureMessage}
-                    tone="failed"
-                  />
-                ) : null}
-                {selected.stackTrace ? (
-                  <Block title="Stack trace" body={selected.stackTrace} />
-                ) : null}
-                {selected.message ? <Block title="Message" body={selected.message} /> : null}
-                {selected.stdout ? <Block title="stdout" body={selected.stdout} /> : null}
-                {selected.stderr ? <Block title="stderr" body={selected.stderr} /> : null}
-                {!selected.failureMessage &&
-                !selected.stackTrace &&
-                !selected.stdout &&
-                !selected.stderr ? (
-                  <p className="text-xs text-[var(--color-ink-muted)]">
-                    This test recorded no failure detail or captured output.
-                  </p>
-                ) : null}
-              </div>
-            </Card>
-          ) : null}
-
-          <Card className="overflow-hidden">
-            <CardHeader
-              title={`Results (${resultPage.results.length}${resultPage.nextCursor ? "+" : ""})`}
-              action={
-                <span className="text-[11px] text-[var(--color-ink-muted)]">failures first</span>
-              }
-            />
-            {resultPage.results.length === 0 ? (
-              <EmptyState
-                title="No results match"
-                description={
-                  run.total === 0
-                    ? "This run has no parsed results yet. If it is still parsing, the page will show progress above."
-                    : "Try a different filter, or clear the suite selection."
-                }
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                {/* table-fixed with proportioned columns. Auto layout sizes columns to
-                    their content, so one 200-character test name or stack-trace line decided
-                    the whole table's geometry — and a max-width on a <td> is ignored outright.
-                    Capping the children fixed the truncation but not the width: an absolute
-                    maximum cannot know how much room the sidebar left, so the last columns were
-                    pushed past the right edge. Fixed layout settles both, because every column
-                    then has a definite width for `truncate` to resolve against. */}
-                <table className="w-full table-fixed text-left text-xs">
-                  <thead className="tc-sticky border-b border-[var(--color-border-subtle)] text-[11px] tracking-wide text-[var(--color-ink-muted)] uppercase">
-                    <tr>
-                      <th className="w-[7rem] px-4 py-2 font-medium">Status</th>
-                      <th className="px-4 py-2 font-medium">Test</th>
-                      <th className="w-[30%] px-4 py-2 font-medium">Suite</th>
-                      <th className="w-[5.5rem] px-4 py-2 text-right font-medium">Time</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--color-border-subtle)]">
-                    {resultPage.results.map((result) => (
-                      <tr
-                        key={result.id}
-                        className={`hover:bg-[var(--color-surface)]/60 ${
-                          String(result.id) === query.result ? "bg-[var(--color-surface)]" : ""
-                        }`}
-                      >
-                        <td className="px-4 py-2 align-top">
-                          <div className="flex items-center gap-1.5">
-                            <StatusBadge status={result.status} />
-                            {result.wasFlaky ? (
-                              <StatusBadge status="flaky">flaky</StatusBadge>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 align-top">
-                          {/* Bound on the child, not the cell — see the note in tests/page.tsx.
-                              The name and the history link share a row so the link stays put
-                              instead of being pushed off-screen by a long name. */}
-                          <div className="flex items-baseline gap-2">
-                            <Link
-                              href={withParam({ result: String(result.id) })}
-                              className="truncate font-medium hover:underline"
-                              title={result.name}
-                            >
-                              {result.name}
-                            </Link>
-                            <Link
-                              href={`/o/${orgSlug}/tests/${result.testCaseId}`}
-                              className="shrink-0 text-[10px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
-                              title="Full history for this test"
-                            >
-                              history
-                            </Link>
-                          </div>
-                          {result.failureMessage ? (
-                            <div
-                              className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-status-failed)]"
-                              title={result.failureMessage}
-                            >
-                              {result.failureMessage}
-                            </div>
-                          ) : null}
-                          {result.classname ? (
-                            <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-ink-muted)]">
-                              {result.classname}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-2 align-top">
-                          <span
-                            className="block truncate font-mono text-[11px] text-[var(--color-ink-muted)]"
-                            title={result.suite ?? ""}
-                          >
-                            {truncateStart(result.suite ?? "—", 34)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2 text-right align-top font-mono text-[11px] whitespace-nowrap text-[var(--color-ink-muted)] tabular-nums">
-                          {formatDuration(result.durationMs)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {resultPage.nextCursor ? (
-              <div className="border-t border-[var(--color-border-subtle)] px-5 py-3">
-                <Link
-                  href={withParam({ limit: String(Math.min(limit + 200, 500)) })}
-                  className="text-xs underline"
-                >
-                  Show more results
-                </Link>
-              </div>
-            ) : null}
-          </Card>
-        </div>
       </div>
     </main>
   );

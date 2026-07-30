@@ -21,6 +21,7 @@ import {
 import { passRateTone } from "@/lib/health";
 import { formatPercent, formatRelativeTime, shortSha, formatInteger } from "@/lib/format";
 import { getServices } from "@/lib/services";
+import { RunNameEditor } from "@/components/run-name-editor";
 import { can, requirePageContext } from "@/lib/viewer";
 
 /**
@@ -43,6 +44,8 @@ export default async function OrgDashboard({
   const { orgSlug } = await params;
   const { days: daysParam } = await searchParams;
   const context = await requirePageContext(orgSlug);
+  // Hoisted: the role does not change per run row.
+  const canRename = can(context, "run:rename");
   const { sql } = getServices();
 
   const days = Math.min(Math.max(Number(daysParam ?? 30), 7), 90);
@@ -314,12 +317,24 @@ export default async function OrgDashboard({
                 <li key={run.id} className="flex items-center gap-4 px-5 py-2.5">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        href={`/o/${orgSlug}/runs/${run.id}`}
-                        className="truncate text-xs font-medium hover:underline"
-                      >
-                        {run.name ?? run.framework ?? "Run"}
-                      </Link>
+                      {canRename ? (
+                        <RunNameEditor
+                          runId={run.id}
+                          orgSlug={orgSlug}
+                          name={run.name}
+                          fallback={run.framework ?? "Run"}
+                          variant="inline"
+                          href={`/o/${orgSlug}/runs/${run.id}`}
+                          textClass="text-xs"
+                        />
+                      ) : (
+                        <Link
+                          href={`/o/${orgSlug}/runs/${run.id}`}
+                          className="truncate text-xs font-medium hover:underline"
+                        >
+                          {run.name ?? run.framework ?? "Run"}
+                        </Link>
+                      )}
                       <StatusBadge status={run.status} />
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] text-[var(--color-ink-muted)]">

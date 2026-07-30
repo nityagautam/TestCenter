@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normalizeTags, type Tags } from "@testcenter/core";
 import { findProjectByKey, listRuns, runFilterOptions, tagFacets } from "@testcenter/db";
+import { RunNameEditor } from "@/components/run-name-editor";
 import { Button, Card, EmptyState, ResultBar, StatusBadge, TagChip } from "@/components/ui";
 import { formatDuration, formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
 import { getServices } from "@/lib/services";
@@ -93,6 +94,22 @@ function addTagHref(
   return `${base}?${params.toString()}`;
 }
 
+/**
+ * Every other filter is a single parameter that `buildHref(…, { key: null })` can drop,
+ * but tags are multi-valued (`?tag=suite:sanity&tag=env:uat`), so clearing them means
+ * dropping the whole repeated key rather than setting one to null.
+ */
+function clearTagsHref(base: string, current: RunListParams, scoped = false): string {
+  const params = new URLSearchParams();
+  for (const [paramKey, paramValue] of Object.entries(current)) {
+    if (paramKey === "tag" || paramKey === "cursor") continue;
+    if (scoped && paramKey === "project") continue;
+    if (typeof paramValue === "string" && paramValue) params.set(paramKey, paramValue);
+  }
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
+}
+
 function decodeCursor(value: string | undefined): { startedAt: Date; id: string } | null {
   if (!value) return null;
   try {
@@ -128,6 +145,8 @@ export async function RunList({
   const base = basePath;
   const scoped = scopedProjectKey !== null;
   const tags = parseTagParams(params.tag);
+  // Hoisted out of the row loop: the role does not change per run.
+  const canRename = can(context, "run:rename");
 
   // A path-scoped project wins over ?project=, so a stray query parameter cannot widen a
   // view whose URL claims to be about one project.
@@ -282,12 +301,26 @@ export async function RunList({
                     <div className="flex items-start gap-4">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            href={`/o/${orgSlug}/runs/${run.id}`}
-                            className="text-sm font-medium hover:underline"
-                          >
-                            {run.name ?? run.framework ?? "Run"}
-                          </Link>
+                          {/* Admin-only, so for everyone else this row is unchanged text —
+                              which is what keeps a per-row control from becoming the kind
+                              of repeated noise a dense list cannot afford. */}
+                          {canRename ? (
+                            <RunNameEditor
+                              runId={run.id}
+                              orgSlug={orgSlug}
+                              name={run.name}
+                              fallback={run.framework ?? "Run"}
+                              variant="inline"
+                              href={`/o/${orgSlug}/runs/${run.id}`}
+                            />
+                          ) : (
+                            <Link
+                              href={`/o/${orgSlug}/runs/${run.id}`}
+                              className="text-sm font-medium hover:underline"
+                            >
+                              {run.name ?? run.framework ?? "Run"}
+                            </Link>
+                          )}
                           <StatusBadge status={run.status} />
                           {run.flaky > 0 ? (
                             <StatusBadge status="flaky">{run.flaky} flaky</StatusBadge>
@@ -375,8 +408,16 @@ export async function RunList({
         <aside className="space-y-4">
           {facets.length > 0 ? (
             <Card>
-              <div className="border-b border-[var(--color-border-subtle)] px-4 py-2.5">
+              <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] px-4 py-2.5">
                 <h2 className="text-xs font-medium tracking-wide uppercase">Tags</h2>
+                {Object.keys(tags).length > 0 ? (
+                  <Link
+                    href={clearTagsHref(base, params, scoped)}
+                    className="text-[11px] text-[var(--color-ink-muted)] underline"
+                  >
+                    clear
+                  </Link>
+                ) : null}
               </div>
               <ul className="max-h-80 overflow-y-auto p-2">
                 {facets.map((facet) => (

@@ -392,6 +392,70 @@ export interface TestExecution {
   failureSignatureHex: string | null;
 }
 
+export interface RecentOutcome {
+  testCaseId: number;
+  resultId: number;
+  runId: string;
+  status: string;
+  wasFlaky: boolean;
+  startedAt: Date;
+}
+
+/**
+ * The last N outcomes for each of many tests, oldest first within each test.
+ *
+ * One query for a whole page of rows rather than N queries: a list view that fired a
+ * query per row would put fifty round trips behind one page.
+ *
+ * LATERAL with a per-test LIMIT, not `row_number() … WHERE rn <= n`. The window form
+ * reads *every* retained row for every test on the page and discards all but the last
+ * few — for 200 tests with a year of history that is ~100k rows scanned and sorted to
+ * return 1,600. The LATERAL form walks the (test_case_id, started_at DESC) index
+ * backwards and stops after N, so the work is bounded by what is displayed rather than
+ * by how much history exists. Only the small result set is sorted, to put each test's
+ * marks in oldest → newest order for rendering.
+ *
+ * Returned as a Map because the caller is rendering rows in its own order and wants a
+ * lookup, not a list to group itself.
+ */
+export async function recentOutcomes(
+  sql: Sql,
+  input: { orgId: string; testCaseIds: readonly number[]; perTest?: number },
+): Promise<Map<number, RecentOutcome[]>> {
+  const byTest = new Map<number, RecentOutcome[]>();
+  if (input.testCaseIds.length === 0) return byTest;
+
+  const perTest = Math.min(Math.max(input.perTest ?? 8, 1), 30);
+
+  const rows = await sql<RecentOutcome[]>`
+    SELECT
+      ids.test_case_id AS "testCaseId",
+      recent.id        AS "resultId",
+      recent.run_id    AS "runId",
+      recent.status,
+      recent.was_flaky AS "wasFlaky",
+      recent.started_at AS "startedAt"
+    FROM unnest(${input.testCaseIds as number[]}::bigint[]) AS ids(test_case_id)
+    CROSS JOIN LATERAL (
+      SELECT r.id, r.run_id, r.status, r.was_flaky, r.started_at
+      FROM test_results r
+      WHERE r.test_case_id = ids.test_case_id
+        AND r.org_id = ${input.orgId}
+      ORDER BY r.started_at DESC
+      LIMIT ${perTest}
+    ) recent
+    -- Ascending, so the caller renders oldest → newest without reversing per row.
+    ORDER BY "testCaseId", "startedAt" ASC
+  `;
+
+  for (const row of rows) {
+    const existing = byTest.get(row.testCaseId);
+    if (existing) existing.push(row);
+    else byTest.set(row.testCaseId, [row]);
+  }
+  return byTest;
+}
+
 /**
  * Every execution of one test, newest first.
  *
