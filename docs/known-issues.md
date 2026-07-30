@@ -412,6 +412,70 @@ indistinguishable-from-deletion action with a reassuring name.
 
 Found because two projects in the development organisation were already archived and stuck.
 
+### A24. insights.ts had no tests, and every id it returned was a string
+
+`insights.ts` is the read path behind every dashboard tile, every chart, the test history
+page, the flaky leaderboard and test search — around 1,100 lines, of which 496 had just been
+added. No test file imported it.
+
+That is the same exposure that produced A-register entries already: these queries are built
+by string composition, so a syntax or semantics error appears only when the query runs.
+`runFilterOptions` shipped with a bare `ORDER BY` inside a `UNION` branch and took the run
+list down with a 500; `queries.test.ts` exists to stop that recurring, and covered
+`queries.ts` only.
+
+`insights.test.ts` now covers all nineteen exported functions against a real Postgres, with a
+fixture of a known shape — a steady test, a consistently broken one, a genuinely flaky one, a
+test with two distinct failure signatures, a permanently skipped one and a duration outlier —
+so the assertions check arithmetic rather than merely that nothing threw. Pass-rate
+denominators exclude skips, the broken test scores zero for flakiness and stays off the flaky
+list, two signatures group as two modes, and every function is exercised against an empty
+project because that is the state a new project is in.
+
+Writing it surfaced a latent defect immediately: **ten fields declared `number` were strings
+at runtime.** postgres.js decodes `int8` as a string, and every id in this module is a
+bigserial. Nothing was visibly broken because both sides were consistently wrong —
+`searchTests` returned string ids and `recentOutcomes` keyed its map by string, so the
+lookups matched. That is a trap rather than a bug: the types lie, so TypeScript cannot catch
+the first caller who does `Number(id)` and then silently misses every lookup, and the
+test-detail page already calls `Number(testId)` on its route param.
+
+Fixed once, in `client.ts`, by parsing `int8` to a number where values are decoded rather
+than asking nineteen queries to remember to coerce. Casting to `int4` in SQL would have been
+the cheaper-looking fix and is wrong — that ceiling is 2.1 billion results, which a busy
+install could reach; the JS number limit of 2^53 needs quadrillions.
+
+### A25. The db suite deadlocked on itself about one run in eight
+
+Captured after ten attempts:
+
+```
+delete from "organizations" where "organizations"."slug" = $1
+PostgresError: deadlock detected (40P01)
+Process 60709 waits for RowExclusiveLock on relation 16740; blocked by process 60714
+```
+
+Each suite tears down by deleting its throwaway organisation, which cascades through runs,
+test_results across every monthly partition, test_cases, memberships and api_tokens. Vitest
+runs test files in parallel, so two of those cascades overlapped, took the same partition
+locks in different orders, and Postgres broke the tie. It had been rare enough to look like
+noise; adding a fourth test file made it frequent enough to catch.
+
+Two changes, both narrowing what a test can reach beyond itself:
+
+- `packages/db/vitest.config.ts` sets `fileParallelism: false`. This is a property of sharing
+  one database, not of any single test, so it belongs in the runner rather than in a retry
+  wrapped around each teardown. Cost is about 3.5s parallel against 6s serial.
+- `failStalledRuns` takes an optional `orgId`. Unscoped it reaps every stalled run in the
+  database — correct for the scheduled janitor, and a sharp edge for a test, which was
+  sweeping runs belonging to other files. The reaper test now scopes to its own organisation.
+
+The reaper test also used to `ALTER TABLE runs DISABLE TRIGGER`, which takes ACCESS EXCLUSIVE
+on `runs` and blocks every other file writing runs. The trigger is BEFORE UPDATE only, so the
+test now backdates `updated_at` in its INSERT and nothing needs suspending.
+
+Verified by running the suite twelve consecutive times: no failures, no skips.
+
 ---
 
 ## Part B — outstanding

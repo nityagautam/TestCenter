@@ -303,22 +303,30 @@ describeIfDb("read-path queries", () => {
       // A worker killed mid-ingest (deploy, OOM, evicted pod) leaves its run in
       // "parsing" with no job to finish it, and the UI shows a spinner forever —
       // which reads as a broken product rather than a failed import.
-      const inserted = await db
-        .insert(schema.runs)
-        .values({ orgId, projectId, framework: "junit", status: "parsing" })
-        .returning({ id: schema.runs.id });
+      /*
+       * Backdated by the INSERT itself, rather than by suspending the trigger.
+       *
+       * This used to `ALTER TABLE runs DISABLE TRIGGER runs_updated_at`, UPDATE, then
+       * re-enable — because `runs_updated_at` is BEFORE UPDATE and would otherwise stamp
+       * `updated_at` back to now(), which is exactly the behaviour the reaper depends on in
+       * production. The problem was the lock: ALTER TABLE takes ACCESS EXCLUSIVE on `runs`,
+       * blocking every other test file that writes runs against the same database, and
+       * vitest runs those files in parallel.
+       *
+       * Since the trigger fires only on UPDATE, an INSERT may simply carry the timestamp it
+       * wants. No lock, no suspension, and the trigger keeps guarding the path that matters.
+       */
+      const inserted = await sql<{ id: string }[]>`
+        INSERT INTO runs (org_id, project_id, framework, status, updated_at)
+        VALUES (${orgId}, ${projectId}, 'junit', 'parsing', now() - INTERVAL '2 hours')
+        RETURNING id
+      `;
       const stalledId = inserted[0]?.id as string;
       runIds.push(stalledId);
 
-      // Backdate so the age threshold applies without waiting. The
-      // runs_updated_at BEFORE UPDATE trigger would otherwise stamp updated_at
-      // back to now() — which is exactly the behaviour the reaper relies on in
-      // production, so it is suspended only for this statement.
-      await sql`ALTER TABLE runs DISABLE TRIGGER runs_updated_at`;
-      await sql`UPDATE runs SET updated_at = now() - INTERVAL '2 hours' WHERE id = ${stalledId}`;
-      await sql`ALTER TABLE runs ENABLE TRIGGER runs_updated_at`;
-
-      const reaped = await failStalledRuns(sql, { olderThanMinutes: 30 });
+      // Scoped to this suite's own organisation, so a parallel test file's runs are not
+      // swept as collateral.
+      const reaped = await failStalledRuns(sql, { olderThanMinutes: 30, orgId });
       expect(reaped.map((entry) => entry.runId)).toContain(stalledId);
 
       const run = await getRun(sql, { orgId, runId: stalledId });
@@ -326,7 +334,7 @@ describeIfDb("read-path queries", () => {
       expect(run?.warnings.map((warning) => warning.code)).toContain("ingest_stalled");
 
       // Idempotent: a second pass must not touch it again.
-      const second = await failStalledRuns(sql, { olderThanMinutes: 30 });
+      const second = await failStalledRuns(sql, { olderThanMinutes: 30, orgId });
       expect(second.map((entry) => entry.runId)).not.toContain(stalledId);
     });
 
@@ -338,7 +346,7 @@ describeIfDb("read-path queries", () => {
       const freshId = inserted[0]?.id as string;
       runIds.push(freshId);
 
-      const reaped = await failStalledRuns(sql, { olderThanMinutes: 30 });
+      const reaped = await failStalledRuns(sql, { olderThanMinutes: 30, orgId });
       expect(reaped.map((entry) => entry.runId)).not.toContain(freshId);
       expect((await getRun(sql, { orgId, runId: freshId }))?.status).toBe("parsing");
     });

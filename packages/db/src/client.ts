@@ -52,6 +52,9 @@ let cached: { sql: Sql; db: Database } | null = null;
  * keep both paths correct; the cost is a handful of extra connections, which is
  * nothing next to a category of write bug that only appears at runtime.
  */
+/** Postgres OID for `int8` / `bigint`. */
+const INT8_OID = 20;
+
 function connect(config: DbConfig, max: number, role: string): Sql {
   return postgres(config.databaseUrl, {
     max,
@@ -64,6 +67,34 @@ function connect(config: DbConfig, max: number, role: string): Sql {
     },
     onnotice: () => {},
     transform: { undefined: null },
+    /*
+     * `bigint` arrives as a JS number rather than a string.
+     *
+     * postgres.js decodes int8 as a string by default, and correctly so in general: int8
+     * spans further than a JS number can represent exactly. The cost of that default here
+     * was that every id crossing this boundary was a string while every interface declaring
+     * it said `number` — ten fields across insights.ts alone. Nothing was visibly broken,
+     * because both sides were consistently wrong: `searchTests` returned string ids and
+     * `recentOutcomes` keyed its map by string, so the lookups matched. That is a trap
+     * rather than a bug. The types lie, so TypeScript cannot catch the first caller who
+     * does `Number(id)` and then silently misses every lookup — and the test-detail page
+     * already calls `Number(testId)` on its route param.
+     *
+     * Parsing to a number makes the declared types true at the one place values are
+     * decoded, instead of asking eighteen queries to remember to coerce. The precision
+     * limit is 2^53: every int8 column here is a bigserial id or a duration sum, so
+     * reaching it would take quadrillions of rows. Casting to int4 in SQL would have been
+     * the cheaper-looking fix and is the wrong one — that ceiling is 2.1 billion results,
+     * which a busy install could actually hit.
+     */
+    types: {
+      bigint: {
+        to: INT8_OID,
+        from: [INT8_OID],
+        serialize: (value: number | bigint) => value.toString(),
+        parse: (value: string) => Number(value),
+      },
+    },
   });
 }
 

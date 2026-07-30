@@ -599,16 +599,27 @@ export async function finalizeRun(
  */
 export async function failStalledRuns(
   sql: Sql,
-  options: { olderThanMinutes?: number } = {},
+  options: { olderThanMinutes?: number; orgId?: string | undefined } = {},
 ): Promise<{ runId: string }[]> {
   const olderThanMinutes = options.olderThanMinutes ?? 30;
 
+  /*
+   * `orgId` narrows the sweep. The scheduled maintenance job leaves it unset and reaps
+   * everything, which is what a platform-wide janitor should do.
+   *
+   * It exists because the unscoped form is a sharp edge for any *other* caller: this
+   * statement reaps every stalled run in the database, so a test exercising the reaper
+   * silently swept runs belonging to other test files running in parallel against the same
+   * Postgres. That is the leading suspect for an intermittent failure in this suite, and the
+   * coupling is worth removing whether or not it was the cause.
+   */
   return sql<{ runId: string }[]>`
     WITH stalled AS (
       SELECT r.id
       FROM runs r
       WHERE r.status IN ('pending', 'parsing')
         AND r.updated_at < now() - (${olderThanMinutes} || ' minutes')::interval
+        ${options.orgId ? sql`AND r.org_id = ${options.orgId}` : sql``}
         -- Leave runs alone while a job is still actively working on them.
         AND NOT EXISTS (
           SELECT 1 FROM ingest_jobs j
