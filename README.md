@@ -3,7 +3,8 @@
 Test intelligence for every framework. Ingest test results from pytest, Playwright, JUnit,
 TestNG, Cypress, Jest and others — via direct upload or API/CI — then triage and trend them.
 
-**Docs:** [user guide — login, roles, walkthrough](docs/user-guide.md) ·
+**Docs:** [developer architecture reference](docs/architecture.md) ·
+[user guide — login, roles, walkthrough](docs/user-guide.md) ·
 [bug register and backlog](docs/known-issues.md) ·
 [architecture and phase plan](docs/test-center-plan.md)
 
@@ -17,11 +18,11 @@ for project-scoped ones — so every link is shareable and unambiguous.
 
 | Page | What it does |
 | --- | --- |
-| `/o/:org` | Dashboard: pass-rate and duration trends, outcome volume, flakiest and most-failing tests |
-| `/o/:org/runs` | Filterable run list — branch, env, framework, tag facets, keyset pagination |
-| `/o/:org/runs/:id` | Summary tiles, suite tree, failures-first result table, stack traces, tag editing |
+| `/o/:org` | Dashboard: today's runs, pass-rate/outcome/duration trends, slowest tests, failure concentration, flake distribution, leaderboards |
+| `/o/:org/runs` | Filterable run list — search, branch/env/framework/tag facets, keyset pagination |
+| `/o/:org/runs/:id` | Metadata strip, summary tiles, verdict log, suite tree, failures-first results, captured output |
 | `/o/:org/tests` | Search by name fragment; filter by failing / flaky / slow / quarantined |
-| `/o/:org/tests/:id` | **Test history** — outcome strip, distinct failure modes, every failure in full |
+| `/o/:org/tests/:id` | **Test history** — outcome strip, distinct failure modes, every failure in full (`?show=all` for passed output too) |
 | `/o/:org/flaky` | Flaky leaderboard with the CI time each flake has burned |
 | `/o/:org/projects` | Projects, and creating one (mints a CI token and shows the recipe) |
 | `/o/:org/settings/members` | Grant access by email, set roles, revoke |
@@ -40,7 +41,7 @@ send mail.
 | viewer | read results |
 | member | upload results, edit tags, quarantine tests |
 | maintainer | create and edit projects |
-| admin | manage members and API tokens; archive and restore projects |
+| admin | manage members and API tokens; archive and restore projects; rename, delete and record verdicts on runs |
 | owner | everything, including deleting a project or the organisation |
 
 Platform admins (`TESTCENTER_ADMIN_EMAILS`) see and can grant access to every
@@ -85,6 +86,13 @@ For large reports, bytes go straight to object storage and never through the API
 POST /api/v1/runs              → { runId, uploads: [{ uploadUrl }] }
 PUT  <uploadUrl>               → the report bytes
 POST /api/v1/runs/:id/complete → queues parsing
+```
+
+Name the run at upload time with `&name=`, so nobody has to rename it afterwards:
+
+```bash
+curl -X POST "$TESTCENTER_URL/api/v1/ingest?project=demo&branch=main&name=Nightly%20regression" \
+  -H "Authorization: Bearer $TESTCENTER_TOKEN" -F "report=@reports/junit.xml"
 ```
 
 Mint a token with `pnpm --filter @testcenter/db mint-token <project-key>`.
@@ -140,9 +148,23 @@ special case that hides bugs until deploy.
 ### Then
 
 ```bash
+pnpm build                # REQUIRED before the first dev run — see below
 pnpm db:migrate           # apply migrations, provision partitions
 pnpm dev                  # web on http://localhost:3000, worker alongside
 ```
+
+`pnpm build` is not optional the first time. Workspace packages resolve to `./dist`, so
+without it `pnpm dev` fails with `Module not found: Can't resolve '@testcenter/adapters'`.
+
+Two things that bite on a fresh macOS setup:
+
+- **`.env` does not run shell substitution.** Writing
+  `DATABASE_URL=postgresql://$(whoami)@localhost:5432/testcenter` stores the literal
+  `$(whoami)` and migrations fail with `role "$(whoami)" does not exist`. Put your username
+  in literally.
+- **Homebrew's `redis.conf` may reference modules it did not install.** If `brew services`
+  reports redis as `error`, check `/opt/homebrew/var/log/redis.log` for
+  `Can't load module from ./modules/…` and comment out those `loadmodule` lines.
 
 Visit <http://localhost:3000>. You will be sent to `/signin` — sign in with
 `admin@testcenter.dev` (email only, no password; see the
@@ -198,6 +220,28 @@ scalar. Nothing errors on insert — but `tags @> ...` silently stops matching a
 `jsonb_array_length()` fails outright. Migration `0003` repairs such rows and a test pins
 the encoding.
 
+**A verdict is the one thing the product cannot compute.** "96%, 2 failing" cannot
+distinguish a regression from a UAT cluster being down, and that distinction decides who
+gets handed the problem — so admins record one of `pass` / `product-bug` / `infra` /
+`flaky` / `investigating` against a run, with an optional note. The table is append-only: a
+correction is a new row, because "who called this infra, and when?" has to stay answerable
+after someone changes their mind. A run with no verdict renders **TODO**, derived rather
+than stored — writing a machine row would put a NULL author in an audit trail and make
+"nobody looked" indistinguishable from `investigating`, which means someone did look.
+Verdicts are inert with respect to every metric, so no chart changes meaning when a run is
+labelled.
+
+**Rollups are maintained at write time and nothing recomputes them on read.** A bare
+`DELETE FROM runs` therefore leaves `project_daily_stats` and the `test_cases` aggregates
+counting a run that no longer exists — permanently. `deleteRun` recomputes the affected day
+and refreshes the affected tests in the same transaction; any new deletion path must do the
+same.
+
+**`int8` comes back from postgres.js as a string.** It will not silently narrow to a JS
+number, so a summed `bigint` column typed as `number` is a lie at runtime:
+`formatDuration("2687693")` renders nonsense and `+` concatenates. Coerce at the query
+boundary, as `dailySeries` and `upsertTestCases` do.
+
 **drizzle and raw SQL need separate connection pools.** `drizzle(sql)` mutates the
 postgres.js instance it is given, and afterwards the raw template path can no longer bind a
 `Date`. `createClient` therefore opens one pool per access style; the ingest hot path uses
@@ -227,6 +271,12 @@ unavoidable domain convention for tests, so pass/fail is never carried by colour
 every status is paired with a label or glyph, stacked segments keep a fixed order
 separated by 2px surface gaps, and counts appear as text beside every chart. Removing
 any of those breaks the charts for those readers.
+
+**`min-w-0` is load-bearing on flex children that truncate.** A flex item defaults to
+`min-width: auto` and will not shrink below its min-content width, so a 150-character test
+name pushes its siblings out of the container and the `truncate` beside it never engages —
+it has no bound to resolve against. The same applies to grid tracks, which need
+`minmax(0,1fr)` rather than `1fr`. Both have caused visible layout escapes here.
 
 **Functions cannot be passed from a server component to a client one.** Both chart
 components originally took a `formatValue`/`hrefFor` callback and failed at runtime with
