@@ -10,10 +10,11 @@ import {
   listRuns,
   orgSummary,
   slowestTests,
-  todaysRuns,
   topFailingTests,
 } from "@testcenter/db";
+import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { ChartToggle } from "@/components/charts/chart-toggle";
+import { OutcomeDonut } from "@/components/charts/outcome-donut";
 import { RankedBars } from "@/components/charts/ranked-bars";
 import { TimeRangeNav } from "@/components/time-range-nav";
 import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
@@ -84,29 +85,18 @@ export default async function OrgDashboard({
   const branchView = rateParam === "branch";
   const totalDurationView = durationParam === "total";
 
-  const [
-    summary,
-    series,
-    projects,
-    recent,
-    flaky,
-    failing,
-    slowest,
-    concentration,
-    flakeBands,
-    todayRuns,
-  ] = await Promise.all([
-    orgSummary(sql, { orgId }),
-    dailySeries(sql, { orgId, days }),
-    listProjects(sql, orgId),
-    listRuns(sql, { orgId }, { limit: 6 }),
-    flakyLeaderboard(sql, { orgId, limit: 6 }),
-    topFailingTests(sql, { orgId, limit: 6 }),
-    slowestTests(sql, { orgId, limit: 6 }),
-    failureConcentration(sql, { orgId, limit: 6 }),
-    flakeDistribution(sql, { orgId }),
-    todaysRuns(sql, { orgId, limit: 24 }),
-  ]);
+  const [summary, series, projects, recent, flaky, failing, slowest, concentration, flakeBands] =
+    await Promise.all([
+      orgSummary(sql, { orgId }),
+      dailySeries(sql, { orgId, days }),
+      listProjects(sql, orgId),
+      listRuns(sql, { orgId }, { limit: 6 }),
+      flakyLeaderboard(sql, { orgId, limit: 6 }),
+      topFailingTests(sql, { orgId, limit: 6 }),
+      slowestTests(sql, { orgId, limit: 6 }),
+      failureConcentration(sql, { orgId, limit: 6 }),
+      flakeDistribution(sql, { orgId }),
+    ]);
 
   // Batched after the list, which is where the run ids come from.
   const recentVerdicts = await latestRunVerdicts(sql, {
@@ -158,6 +148,9 @@ export default async function OrgDashboard({
   }
 
   const hasHistory = series.some((point) => point.runs > 0);
+  // Newest first, so the head of the list the "Recent runs" card already fetched is also
+  // the run the donut is about. No extra query.
+  const lastRun = recent.runs[0] ?? null;
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-6">
@@ -214,39 +207,59 @@ export default async function OrgDashboard({
       {hasHistory ? (
         <>
           {/*
-           * Today, one column per run — placed above the 30-day charts on purpose.
+           * Two thirds to the window's outcomes, one third to its rhythm.
            *
-           * Someone watching a suite finish is asking "is this run worse than the last
-           * one?", and every chart below answers only "how has the month gone". A daily
-           * rollup cannot answer it at all: it averages today's runs together, so a single
-           * bad run hides inside the day's number until tomorrow.
+           * They are the same days asked two different questions, which is why they lead the
+           * page together: the stacked columns read along time and answer "how much, and how
+           * much of it was red"; the heatmap folds those same days into weeks and answers
+           * "when does this actually run". The split is not cosmetic — the columns carry one
+           * mark per day over a 90-day window and need the width, while the heatmap is a
+           * fixed 7×N lattice that gains nothing from it.
            */}
-          <Card className="mb-5 p-4">
-            <VolumeChart
-              title={`Today — ${todayRuns.length} run${todayRuns.length === 1 ? "" : "s"}, newest right`}
-              height={140}
-              mode={shareView ? "share" : "counts"}
-              days={todayRuns.map((run) => ({
-                label: run.label,
-                passed: run.passed,
-                failed: run.failed,
-                skipped: run.skipped,
-                flaky: run.flaky,
-                runs: 1,
-              }))}
-              action={
-                <ChartToggle
-                  label="Today view"
-                  options={[
-                    { label: "counts", href: viewHref({ volume: null }), active: !shareView },
-                    { label: "share", href: viewHref({ volume: "share" }), active: shareView },
-                  ]}
-                />
-              }
-            />
-          </Card>
-
           <div className="mb-5 grid gap-5 lg:grid-cols-3">
+            <Card className="p-4 lg:col-span-2">
+              <VolumeChart
+                title="Tests by outcome"
+                shape="area"
+                mode={shareView ? "share" : "counts"}
+                days={series.map((point) => ({
+                  label: point.day,
+                  passed: point.passed,
+                  failed: point.failed,
+                  skipped: point.skipped,
+                  flaky: point.flaky,
+                  runs: point.runs,
+                }))}
+                action={
+                  <ChartToggle
+                    label="Outcome view"
+                    options={[
+                      { label: "counts", href: viewHref({ volume: null }), active: !shareView },
+                      { label: "share", href: viewHref({ volume: "share" }), active: shareView },
+                    ]}
+                  />
+                }
+              />
+            </Card>
+
+            <Card className="p-4">
+              <ActivityHeatmap
+                title="When runs happen"
+                days={series.map((point) => ({ day: point.day, value: point.runs }))}
+                unit="run"
+                action={
+                  <span className="text-[11px] text-[var(--color-ink-muted)]">
+                    last {days} days
+                  </span>
+                }
+              />
+            </Card>
+          </div>
+
+          {/* Four across at 2xl, two at lg. The donut sits beside the pass-rate trend
+              because the pair answers "how are we doing" and "how did the last one go" —
+              the two questions people arrive with, in that order. */}
+          <div className="mb-5 grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
             <Card className="p-4">
               {branchView ? (
                 <RankedBars
@@ -299,27 +312,40 @@ export default async function OrgDashboard({
               )}
             </Card>
             <Card className="p-4">
-              <VolumeChart
-                title="Tests by outcome"
-                mode={shareView ? "share" : "counts"}
-                days={series.map((point) => ({
-                  label: point.day,
-                  passed: point.passed,
-                  failed: point.failed,
-                  skipped: point.skipped,
-                  flaky: point.flaky,
-                  runs: point.runs,
-                }))}
-                action={
-                  <ChartToggle
-                    label="Outcome view"
-                    options={[
-                      { label: "counts", href: viewHref({ volume: null }), active: !shareView },
-                      { label: "share", href: viewHref({ volume: "share" }), active: shareView },
-                    ]}
-                  />
-                }
-              />
+              {/*
+               * The most recent run, not an aggregate of the window.
+               *
+               * `recent.runs` is ordered newest first and is not restricted to today, which
+               * matters on a Monday morning: a card reading "no runs" because nothing has
+               * started yet is worse than one showing Friday's last run. The hint states how
+               * many have run today so the two are never confused.
+               */}
+              {lastRun ? (
+                <OutcomeDonut
+                  title="Last run"
+                  passed={lastRun.passed}
+                  failed={lastRun.failed + lastRun.errored}
+                  skipped={lastRun.skipped}
+                  flaky={lastRun.flaky}
+                  action={
+                    <Link
+                      href={`/o/${orgSlug}/runs/${lastRun.id}`}
+                      className="text-[11px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+                    >
+                      {summary.runsToday} today
+                    </Link>
+                  }
+                  footnote={`${lastRun.name ?? lastRun.framework ?? "Run"} · ${lastRun.projectKey} · ${formatRelativeTime(lastRun.startedAt)}`}
+                />
+              ) : (
+                <OutcomeDonut
+                  title="Last run"
+                  passed={0}
+                  failed={0}
+                  skipped={0}
+                  emptyMessage="No runs yet."
+                />
+              )}
             </Card>
             <Card className="p-4">
               {/* Separate chart, never a second axis on the pass-rate plot: aligning two

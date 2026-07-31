@@ -32,6 +32,7 @@ for project-scoped ones — so every link is shareable and unambiguous.
 | `/o/:org/flaky` | Flaky leaderboard with the CI time each flake has burned |
 | `/o/:org/projects` | Projects, and creating one (mints a CI token and shows the recipe) |
 | `/o/:org/settings/members` | Grant access by email, set roles, revoke |
+| `/o/:org/reports` | **Reports** — pick a question with blanks (*"which tests failed most in the last __ days on __?"*), get a finished answer with chart, table and caveat. Print for PDF. Also per project at `/o/:org/p/:project/reports` |
 | `/o/:org/settings/tokens` | Create and revoke CI tokens |
 | `/help` | The narrative guide — no sign-in needed. `?` from anywhere in the app |
 

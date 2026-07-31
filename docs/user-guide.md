@@ -327,7 +327,10 @@ Scope is in the URL, so every link is shareable and unambiguous:
 /o/test-organisation/tests               test search (all projects)
 /o/test-organisation/tests/412070        one test's full history
 /o/test-organisation/flaky               flaky leaderboard
+/o/test-organisation/reports             reports — a question with blanks, answered
 /o/test-organisation/p/checkout-web      one project's dashboard
+/o/test-organisation/p/checkout-web/reports   the same questions, one project
+/help                                    the in-app guide (no sign-in needed)
 ```
 
 Pasting a link into Slack lands the recipient on exactly what you were looking at,

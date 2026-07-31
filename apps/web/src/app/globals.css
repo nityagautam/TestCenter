@@ -40,6 +40,31 @@
   --color-grid: #ecebe7;
 
   /*
+   * Sequential ramp — magnitude of one measure, never identity.
+   *
+   * The first non-categorical scale in the app, added for the activity heatmap. Five steps
+   * of the series-1 hue, terminating exactly on `--color-series-1` so the densest cell and
+   * the trend lines are the same blue rather than two blues that nearly match.
+   *
+   * Blue, and specifically not red, even though heatmaps are conventionally warm. Every
+   * warm hue here is a reserved status token, so a red heatmap of *upload activity* would
+   * read as a map of failures — the single most expensive misreading this dashboard could
+   * offer. Blue is already the app's "identity, not state" colour (it is why the unreviewed
+   * verdict badge is blue), which is what this measures: how much, not how bad.
+   *
+   * Steps are spaced by lightness rather than by mixing toward white at even intervals, so
+   * the middle of the ramp does not collapse into one indistinguishable band. Colour is
+   * still never the only encoding — every cell states its count in its tooltip and the
+   * figure states its peak as text, which is what makes the ramp safe rather than the
+   * spacing alone.
+   */
+  --color-scale-1: #dce8f8;
+  --color-scale-2: #b3cff0;
+  --color-scale-3: #7fb0e6;
+  --color-scale-4: #4a8ed8;
+  --color-scale-5: #2a78d6;
+
+  /*
    * Application chrome — the header band.
    *
    * Deliberately outside the data-colour space. Run this indigo through the palette
@@ -89,6 +114,15 @@
 
     --color-grid: #2b2b28;
 
+    /* Dark steps are chosen against the dark surface, not inverted from the light
+       ramp — an inversion puts the densest cell at near-white and inverts the whole
+       reading of the scale. Terminates on the dark --color-series-1 for the same reason. */
+    --color-scale-1: #1e3350;
+    --color-scale-2: #26456e;
+    --color-scale-3: #2e5b93;
+    --color-scale-4: #3372bd;
+    --color-scale-5: #3987e5;
+
     --color-chrome: #2b3252;
     --color-chrome-raised: #39416b;
     --color-chrome-border: #424a7a;
@@ -116,6 +150,14 @@
   --color-series-3: #199e70;
 
   --color-grid: #2b2b28;
+
+  /* Kept in step with the prefers-colour-scheme block above — an explicit dark choice must
+     not be a different dark from the system one. */
+  --color-scale-1: #1e3350;
+  --color-scale-2: #26456e;
+  --color-scale-3: #2e5b93;
+  --color-scale-4: #3372bd;
+  --color-scale-5: #3987e5;
 
   --color-chrome: #2b3252;
   --color-chrome-raised: #39416b;
@@ -465,5 +507,15 @@ thead.tc-sticky th {
   a {
     text-decoration: underline;
     color: inherit;
+  }
+
+  /*
+   * The trend line's drop shadow is a screen affordance — it lifts the line off its own
+   * gradient fill. On paper it prints as grey fuzz around a 2px line, which is the one
+   * place a soft shadow costs legibility instead of adding it. `!important` because the
+   * filter is an inline style, and only an important declaration outranks one.
+   */
+  .tc-line-shadow {
+    filter: none !important;
   }
 }

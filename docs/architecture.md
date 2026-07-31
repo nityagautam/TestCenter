@@ -300,7 +300,8 @@ project-scoped ones — so every link is shareable and unambiguous.
 | `/o/:org/flaky` | flaky leaderboard with CI time burned |
 | `/o/:org/projects`, `/projects/new` | projects; creation mints a CI token and shows the recipe |
 | `/o/:org/settings/members`, `/settings/tokens` | access and tokens |
-| `/o/:org/p/:project/*` | project-scoped dashboard, runs, tests, flaky, upload, settings |
+| `/o/:org/reports` | a catalog of 12 vetted questions with blanks (`?q=` plus one parameter per blank: `days`, `branch`, `environment`, `suite`, `project`, `topN`, `verdict`), answered as panels; print for PDF |
+| `/o/:org/p/:project/*` | project-scoped dashboard, runs, tests, flaky, reports, upload, settings |
 | `/help` | the narrative guide — five acts, illustrated with the app's own components. Outside `/o/:org` because that layout is the authorisation gate; unauthenticated and reads no tenant data, so it works in an invitation mail and during an outage |
 
 `/o/:org/p/:key/runs` and `/o/:org/runs?project=` render the *same* component
@@ -308,7 +309,18 @@ project-scoped ones — so every link is shareable and unambiguous.
 `?project=`, which kept one implementation but threw the URL out of the `/p/:key/` path —
 and the shell derives the selected project from the path, so the header dropdown reset and
 the project nav vanished. Rendering the same component under both paths keeps one
-implementation *and* the scope.
+implementation *and* the scope. `/reports` is rendered by `features/reports.tsx` under both
+paths for the same reason.
+
+**The report panel contract** (`packages/core/src/reports.ts`) is the seam that lets a
+question catalog ship now and a chart builder arrive later without a rewrite. A panel is a
+*finished answer* — a title, the data, and one of five closed kinds (`stat`, `trend`,
+`ranked`, `volume`, `table`) — and nothing downstream knows whether the spec came from a
+curated question or anything else, so print, page breaks and empty states are solved once
+rather than per question. It lives in `core` because both `db` (which produces panels) and
+the web app (which renders them) depend on it. The chart form is chosen by the question's
+author, who knows what the data means, never by the reader. Everything is in the URL, so
+there is no saved-report table: the report *is* the link.
 
 ---
 
@@ -326,6 +338,9 @@ implementation *and* the scope.
 | `verdict-badge` | verdict or derived TODO; `awaitsVerdict()` gates on run status |
 | `tag-editor` | tag chips + add/remove (`showChips`, `startOpen`) |
 | `time-range-nav` | page-level day-range selector |
+| `report-panels` | renders any `ReportPanel` — one renderer for every question, so print, page breaks and empty states are solved once |
+| `print-button` | hands the page to the browser's own print pipeline, which is the PDF exporter |
+| `help-illustrations` | `/help` artwork: two CSS/SVG loops and three concept diagrams, no screenshots |
 | `search-box` | GET-form search; `name`/`label` configurable, multi-valued hidden fields |
 | `upload-form` | drag-and-drop; one request per file, each its own run |
 | `run-progress` | SSE parse progress |

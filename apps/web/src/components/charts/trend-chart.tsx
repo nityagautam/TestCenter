@@ -142,9 +142,12 @@ export function TrendChart({
           aria-label={`${title}. ${present.length} points from ${points[0]?.label} to ${points.at(-1)?.label}.`}
         >
           <defs>
+            {/* Deep enough at the line to read as an area chart, gone by the baseline so
+                the fill never competes with the line that carries the actual values. */}
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity="0.14" />
-              <stop offset="100%" stopColor={color} stopOpacity="0.01" />
+              <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+              <stop offset="55%" stopColor={color} stopOpacity="0.12" />
+              <stop offset="100%" stopColor={color} stopOpacity="0.02" />
             </linearGradient>
           </defs>
 
@@ -174,6 +177,18 @@ export function TrendChart({
               strokeLinecap="round"
               strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
+              className="tc-line-shadow"
+              /*
+               * A CSS filter, not an SVG one.
+               *
+               * `feDropShadow` blurs in user space, and this viewBox is stretched by
+               * `preserveAspectRatio="none"` — a round blur becomes a horizontal smear at
+               * whatever the container's aspect ratio happens to be. CSS filters run after
+               * layout, in device pixels, so the shadow stays the same soft shadow at every
+               * width. Neutral rather than tinted, and barely there: it lifts the line off
+               * its own fill, which is all it is for.
+               */
+              style={{ filter: "drop-shadow(0 2px 3px rgb(0 0 0 / 0.22))" }}
             />
           ))}
 

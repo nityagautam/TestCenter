@@ -2,7 +2,7 @@
 
 import { formatInteger } from "@/lib/format";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 
 /**
  * Daily test volume by outcome, as stacked columns.
@@ -39,6 +39,7 @@ export function VolumeChart({
   title,
   height = 160,
   mode = "counts",
+  shape = "columns",
   action,
 }: {
   days: VolumeDay[];
@@ -53,8 +54,22 @@ export function VolumeChart({
    * identical in share. Two questions, not two drawings of one.
    */
   mode?: "counts" | "share";
+  /**
+   * `columns` for discrete buckets you compare one against the next; `area` for a long
+   * window read as a continuous shape.
+   *
+   * The trade is real rather than stylistic. Columns keep the 2px surface gap between
+   * segments, which is one of the three encodings that carry status without hue — an area
+   * chart physically cannot have gaps, because the bands share an edge. The area form
+   * replaces that encoding with a solid boundary stroke in each band's own colour, so the
+   * boundaries stay visible under deuteranopia; the fixed order and the legend totals are
+   * unchanged. Below about thirty points columns are still the better answer, since
+   * individual days are what you are comparing.
+   */
+  shape?: "columns" | "area";
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const gradientId = useId();
 
   const totals = days.map((day) => day.passed + day.failed + day.skipped);
   const max = Math.max(...totals, 1);
@@ -94,66 +109,92 @@ export function VolumeChart({
         </span>
       </div>
 
-      <div className="relative flex items-end gap-[2px]" style={{ height }}>
-        {days.map((day, index) => {
-          const total = day.passed + day.failed + day.skipped;
-          // Flaky tests also passed, so they are drawn as a slice of the passed block
-          // rather than added on top — otherwise the column would exceed the real total.
-          const stack = [
-            { key: "failed" as const, value: day.failed },
-            { key: "flaky" as const, value: Math.min(day.flaky, day.passed) },
-            { key: "passed" as const, value: Math.max(day.passed - day.flaky, 0) },
-            { key: "skipped" as const, value: day.skipped },
-          ];
+      <div className="relative" style={{ height }}>
+        {/* An area needs two points to be an area. One day falls back to a column rather
+            than drawing a degenerate sliver. */}
+        {shape === "area" && days.length > 1 ? (
+          <StackedArea
+            days={days}
+            max={max}
+            mode={mode}
+            hover={hover}
+            gradientId={gradientId}
+            onHover={setHover}
+          />
+        ) : (
+          <div className="flex h-full items-end gap-[2px]">
+            {days.map((day, index) => {
+              const total = day.passed + day.failed + day.skipped;
+              // Flaky tests also passed, so they are drawn as a slice of the passed block
+              // rather than added on top — otherwise the column would exceed the real total.
+              const stack = [
+                { key: "failed" as const, value: day.failed },
+                { key: "flaky" as const, value: Math.min(day.flaky, day.passed) },
+                { key: "passed" as const, value: Math.max(day.passed - day.flaky, 0) },
+                { key: "skipped" as const, value: day.skipped },
+              ];
 
-          return (
-            <button
-              key={day.label}
-              type="button"
-              className="group relative flex h-full min-w-0 flex-1 cursor-default flex-col justify-end"
-              onMouseEnter={() => setHover(index)}
-              onFocus={() => setHover(index)}
-              onMouseLeave={() => setHover(null)}
-              onBlur={() => setHover(null)}
-              aria-label={`${day.label}: ${total} tests, ${day.failed} failed, ${day.passed} passed, ${day.skipped} skipped across ${day.runs} runs`}
-            >
-              <span
-                className="flex w-full flex-col-reverse justify-start"
-                style={{
-                  // In share mode every column is full height, so the segments read as
-                  // proportions of that day rather than of the busiest day.
-                  height:
-                    total === 0 ? "0%" : mode === "share" ? "100%" : `${(total / max) * 100}%`,
-                  maxWidth: 24,
-                  margin: "0 auto",
-                }}
-              >
-                {stack.map((segment, segmentIndex) => {
-                  if (segment.value <= 0) return null;
-                  const spec = SEGMENTS.find((entry) => entry.key === segment.key)!;
-                  const isTop = stack.slice(segmentIndex + 1).every((rest) => rest.value <= 0);
-                  return (
-                    <span
-                      key={segment.key}
-                      data-chart-segment
-                      className="w-full"
-                      style={{
-                        height: `${(segment.value / total) * 100}%`,
-                        background: spec.color,
-                        // 4px rounded data-end, square at the baseline.
-                        borderTopLeftRadius: isTop ? 4 : 0,
-                        borderTopRightRadius: isTop ? 4 : 0,
-                        // The 2px surface gap is what separates segments — never a stroke.
-                        marginTop: segmentIndex === 0 ? 0 : 2,
-                        opacity: hover === null || hover === index ? 1 : 0.45,
-                      }}
-                    />
-                  );
-                })}
-              </span>
-            </button>
-          );
-        })}
+              return (
+                <button
+                  /*
+                   * Keyed by position, not by label.
+                   *
+                   * The label is not unique and was never guaranteed to be. On the daily series
+                   * it happens to be a date, so it looked like an id; on the "Today" chart it is
+                   * a clock time, and two runs finishing in the same minute produce two columns
+                   * called "08:08" — React then warns and is free to drop one of them, silently
+                   * losing a run from the chart. Position *is* the identity here: `days` is an
+                   * ordered series where the nth column is the nth interval, and reordering it
+                   * would mean a different chart rather than the same columns rearranged.
+                   */
+                  key={index}
+                  type="button"
+                  className="group relative flex h-full min-w-0 flex-1 cursor-default flex-col justify-end"
+                  onMouseEnter={() => setHover(index)}
+                  onFocus={() => setHover(index)}
+                  onMouseLeave={() => setHover(null)}
+                  onBlur={() => setHover(null)}
+                  aria-label={`${day.label}: ${total} tests, ${day.failed} failed, ${day.passed} passed, ${day.skipped} skipped across ${day.runs} runs`}
+                >
+                  <span
+                    className="flex w-full flex-col-reverse justify-start"
+                    style={{
+                      // In share mode every column is full height, so the segments read as
+                      // proportions of that day rather than of the busiest day.
+                      height:
+                        total === 0 ? "0%" : mode === "share" ? "100%" : `${(total / max) * 100}%`,
+                      maxWidth: 24,
+                      margin: "0 auto",
+                    }}
+                  >
+                    {stack.map((segment, segmentIndex) => {
+                      if (segment.value <= 0) return null;
+                      const spec = SEGMENTS.find((entry) => entry.key === segment.key)!;
+                      const isTop = stack.slice(segmentIndex + 1).every((rest) => rest.value <= 0);
+                      return (
+                        <span
+                          key={segment.key}
+                          data-chart-segment
+                          className="w-full"
+                          style={{
+                            height: `${(segment.value / total) * 100}%`,
+                            background: spec.color,
+                            // 4px rounded data-end, square at the baseline.
+                            borderTopLeftRadius: isTop ? 4 : 0,
+                            borderTopRightRadius: isTop ? 4 : 0,
+                            // The 2px surface gap is what separates segments — never a stroke.
+                            marginTop: segmentIndex === 0 ? 0 : 2,
+                            opacity: hover === null || hover === index ? 1 : 0.45,
+                          }}
+                        />
+                      );
+                    })}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {hover !== null && days[hover] ? (
           <div
@@ -205,5 +246,166 @@ export function VolumeChart({
         ))}
       </ul>
     </figure>
+  );
+}
+
+/**
+ * The same stack, drawn as bands instead of columns.
+ *
+ * Bottom-to-top order is the fixed one, so a reader who learned the columns reads this
+ * identically: failed sits on the baseline, skipped on top. Each band is filled with a
+ * vertical gradient — solid at its own upper boundary, fading toward the band below — which
+ * is what gives the chart depth without inventing a second encoding. The gradient is
+ * decoration; the boundary stroke above it is not.
+ *
+ * `preserveAspectRatio="none"` stretches the 100×100 viewBox to the container, so every
+ * stroke here is `vectorEffect="non-scaling-stroke"`. Without it a 1px line is drawn 1px
+ * tall and four pixels wide, and the boundaries look like they were painted with a roller.
+ */
+function StackedArea({
+  days,
+  max,
+  mode,
+  hover,
+  gradientId,
+  onHover,
+}: {
+  days: VolumeDay[];
+  max: number;
+  mode: "counts" | "share";
+  hover: number | null;
+  gradientId: string;
+  onHover: (index: number | null) => void;
+}) {
+  const step = 100 / (days.length - 1);
+
+  /*
+   * Cumulative boundaries, computed once per band.
+   *
+   * In share mode each day is divided by its own total rather than by the window's maximum,
+   * so every column reaches the top and the bands read as proportions of that day. A day
+   * with no results at all divides by 1 and collapses to the baseline, which is honest: it
+   * has no proportions to show.
+   */
+  const bands = SEGMENTS.map((segment, segmentIndex) => {
+    const upper: string[] = [];
+    const lower: string[] = [];
+
+    days.forEach((day, index) => {
+      const total = day.passed + day.failed + day.skipped;
+      const stack = [
+        day.failed,
+        Math.min(day.flaky, day.passed),
+        Math.max(day.passed - day.flaky, 0),
+        day.skipped,
+      ];
+      const denominator = mode === "share" ? total || 1 : max;
+      const below = stack.slice(0, segmentIndex).reduce((sum, value) => sum + value, 0);
+      const through = below + (stack[segmentIndex] ?? 0);
+      const x = index * step;
+      upper.push(`${index === 0 ? "M" : "L"}${x},${100 - (through / denominator) * 100}`);
+      lower.push(`L${x},${100 - (below / denominator) * 100}`);
+    });
+
+    return {
+      ...segment,
+      // Out along the top of the band, back along the bottom of it.
+      fill: `${upper.join(" ")} ${lower.reverse().join(" ")} Z`,
+      edge: upper.join(" "),
+    };
+  });
+
+  return (
+    <>
+      <svg
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        className="size-full"
+        role="img"
+        aria-label={`Tests by outcome across ${days.length} days, stacked: failed, flaky, passed, skipped. Totals are listed in the legend below.`}
+      >
+        <defs>
+          {bands.map((band) => (
+            <linearGradient
+              key={band.key}
+              id={`${gradientId}-${band.key}`}
+              x1="0"
+              y1="0"
+              x2="0"
+              y2="1"
+            >
+              <stop offset="0%" stopColor={band.color} stopOpacity="0.75" />
+              <stop offset="100%" stopColor={band.color} stopOpacity="0.25" />
+            </linearGradient>
+          ))}
+        </defs>
+
+        {[0, 50, 100].map((y) => (
+          <line
+            key={y}
+            x1="0"
+            y1={y}
+            x2="100"
+            y2={y}
+            stroke="var(--color-grid)"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
+        {bands.map((band) => (
+          <path key={band.key} d={band.fill} fill={`url(#${gradientId}-${band.key})`} />
+        ))}
+
+        {/*
+         * The boundary strokes, in each band's own colour.
+         *
+         * This is the encoding that replaces the columns' 2px surface gap. Bands in a
+         * stacked area share an edge, so without a stroke the only thing separating passed
+         * from failed is a hue difference of 4.1 ΔE under deuteranopia — which is to say,
+         * nothing. Drawn after every fill so no band's gradient covers the edge below it.
+         */}
+        {bands.map((band) => (
+          <path
+            key={band.key}
+            d={band.edge}
+            fill="none"
+            stroke={band.color}
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
+        {hover !== null ? (
+          <line
+            x1={hover * step}
+            y1="0"
+            x2={hover * step}
+            y2="100"
+            stroke="var(--color-ink-muted)"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+      </svg>
+
+      {/* Hit targets are separate from the marks, because a band four pixels tall on a quiet
+          day is impossible to hover and every day must stay reachable. */}
+      <div className="absolute inset-0 flex">
+        {days.map((day, index) => (
+          <button
+            key={index}
+            type="button"
+            className="h-full flex-1 cursor-default"
+            onMouseEnter={() => onHover(index)}
+            onFocus={() => onHover(index)}
+            onMouseLeave={() => onHover(null)}
+            onBlur={() => onHover(null)}
+            aria-label={`${day.label}: ${day.passed + day.failed + day.skipped} tests, ${day.failed} failed, ${day.passed} passed, ${day.skipped} skipped across ${day.runs} runs`}
+          />
+        ))}
+      </div>
+    </>
   );
 }
