@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getTestCase,
+  latestRunVerdicts,
   testDurationHistory,
   testExecutionDetails,
   testExecutions,
@@ -10,6 +11,7 @@ import {
 import { HistoryStrip } from "@/components/charts/history-strip";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { TestActions } from "@/components/test-actions";
+import { VerdictBadge } from "@/components/verdict-badge";
 import { Card, CardHeader, StatTile, StatusBadge } from "@/components/ui";
 import {
   formatAbsoluteTime,
@@ -89,6 +91,17 @@ export default async function TestDetailPage({
   const visibleDetails = mode
     ? details.filter((detail) => (detail.failureSignatureHex ?? "none") === mode)
     : details;
+  /*
+   * Verdicts for the runs behind the executions listed below.
+   *
+   * Worth the extra batched query: "this failure was in a run somebody already marked
+   * infra" is the difference between investigating a regression and not. Without it a
+   * developer re-diagnoses a failure that has already been explained.
+   */
+  const verdicts = await latestRunVerdicts(sql, {
+    orgId: context.org.id,
+    runIds: [...new Set(visibleDetails.map((detail) => detail.runId))],
+  });
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-6">
@@ -335,6 +348,9 @@ export default async function TestDetailPage({
                   >
                     {detail.runName ?? "Run"}
                   </Link>
+                  {verdicts.get(detail.runId) ? (
+                    <VerdictBadge verdict={verdicts.get(detail.runId)!.verdict} size="sm" />
+                  ) : null}
                   <span
                     className="font-mono text-[10px] text-[var(--color-ink-muted)]"
                     title={formatAbsoluteTime(detail.startedAt)}

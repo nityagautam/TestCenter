@@ -5,13 +5,14 @@ import {
   getRunResult,
   listRunResults,
   recentOutcomes,
+  runVerdictHistory,
   summarizeRunSuites,
 } from "@testcenter/db";
 import { Card, CardHeader, EmptyState, ResultBar, StatTile, StatusBadge } from "@/components/ui";
 import { OutcomeStrip } from "@/components/charts/outcome-strip";
 import { RunActions } from "@/components/run-actions";
+import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import { RunProgress } from "@/components/run-progress";
-import { TagEditor } from "@/components/tag-editor";
 import {
   formatAbsoluteTime,
   formatDuration,
@@ -59,7 +60,7 @@ export default async function RunPage({
   if (!run) notFound();
 
   const limit = Math.min(Math.max(Number(query.limit ?? 200), 25), 500);
-  const [resultPage, suites, selected] = await Promise.all([
+  const [resultPage, suites, selected, verdicts] = await Promise.all([
     listRunResults(
       sql,
       {
@@ -73,6 +74,7 @@ export default async function RunPage({
     ),
     summarizeRunSuites(sql, runId),
     query.result ? getRunResult(sql, { runId, resultId: Number(query.result) }) : null,
+    runVerdictHistory(sql, { orgId, runId, limit: 10 }),
   ]);
 
   /*
@@ -88,8 +90,74 @@ export default async function RunPage({
     perTest: 6,
   });
 
+  // Newest first from the query, so the head is the standing verdict.
+  const latestVerdict = verdicts[0] ?? null;
+
   const failing = run.failed + run.errored;
   const base = `/o/${orgSlug}/runs/${runId}`;
+
+  /*
+   * The run's identity, as cells rather than a sentence.
+   *
+   * Two classes of field, treated differently when the uploader did not send one:
+   *
+   *   Core identity — branch, commit, environment, framework. Always shown, and shown as
+   *   "not reported" when absent, because the absence is itself the finding. A run with no
+   *   branch cannot be compared against another branch and lands under "(no branch)" in
+   *   the pass-rate-by-branch chart; a run with no commit cannot be tied to the code that
+   *   produced it. Silently omitting the cell hides a fixable CI misconfiguration, and the
+   *   fix is a query parameter the uploader forgot.
+   *
+   *   Circumstantial — pull request, CI job link, shard. Omitted entirely when absent,
+   *   because most runs legitimately have none and a row of "not reported" for things that
+   *   were never expected is noise that trains people to ignore the real ones.
+   *
+   * Tags are absent from both lists: they have their own editor directly below, and
+   * duplicating them would give two places to read the same thing and one to change it.
+   */
+  const missingHint =
+    "Not sent by the uploader. CI can supply it as a query parameter on /api/v1/ingest.";
+
+  const tagEntries = Object.entries(run.tags).sort(([a], [b]) => a.localeCompare(b));
+
+  const metaCells: {
+    label: string;
+    value: string;
+    title?: string;
+    href?: string;
+    missing?: boolean;
+  }[] = [
+    run.branch
+      ? { label: "Branch", value: run.branch }
+      : { label: "Branch", value: "not reported", title: missingHint, missing: true },
+    shortSha(run.commitSha)
+      ? {
+          label: "Commit",
+          value: shortSha(run.commitSha) as string,
+          // The short form is what anyone reads; the full one is what gets pasted into a
+          // git command, so it lives on hover rather than in the cell.
+          title: run.commitSha ?? undefined,
+        }
+      : { label: "Commit", value: "not reported", title: missingHint, missing: true },
+    run.environment
+      ? { label: "Environment", value: run.environment }
+      : { label: "Environment", value: "not reported", title: missingHint, missing: true },
+    run.framework
+      ? { label: "Framework", value: run.framework }
+      : { label: "Framework", value: "not detected", title: missingHint, missing: true },
+    {
+      label: "Started",
+      value: formatRelativeTime(run.startedAt),
+      title: formatAbsoluteTime(run.startedAt),
+    },
+    run.durationMs
+      ? { label: "Duration", value: formatDuration(run.durationMs) }
+      : // Absent while a run is still parsing, which is expected rather than missing.
+        { label: "Duration", value: "—", title: "Not finished yet", missing: true },
+    // Circumstantial from here down: shown only when present.
+    ...(run.prNumber ? [{ label: "Pull request", value: `#${run.prNumber}` }] : []),
+    ...(run.ciJobUrl ? [{ label: "CI", value: "View job", href: run.ciJobUrl }] : []),
+  ];
 
   const withParam = (changes: Record<string, string | null>): string => {
     const next = new URLSearchParams();
@@ -124,25 +192,34 @@ export default async function RunPage({
       </nav>
 
       <header className="mb-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
-            {run.name ?? run.framework ?? "Run"}
-          </h1>
-          <StatusBadge status={run.status} />
-          {run.shardTotal ? (
-            <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
-              shard {(run.shardIndex ?? 0) + 1}/{run.shardTotal}
-            </span>
-          ) : null}
-          {run.attempt > 1 ? (
-            <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
-              attempt {run.attempt}
-            </span>
-          ) : null}
+        {/* items-start, and the title grouped with its badges: the ⋯ actions expand into
+            panels tall enough that a centred row would leave the heading floating at its
+            middle. The group keeps title and badges aligned to each other regardless. */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
+              {run.name ?? run.framework ?? "Run"}
+            </h1>
+            <StatusBadge status={run.status} />
+            {/* Always shown once the run has finished — TODO when nobody has judged it, so
+              an unreviewed run is visibly unreviewed rather than silently blank. */}
+            {awaitsVerdict(run.status) ? (
+              <VerdictBadge verdict={latestVerdict?.verdict ?? null} />
+            ) : null}
+            {run.shardTotal ? (
+              <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
+                shard {(run.shardIndex ?? 0) + 1}/{run.shardTotal}
+              </span>
+            ) : null}
+            {run.attempt > 1 ? (
+              <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
+                attempt {run.attempt}
+              </span>
+            ) : null}
+          </div>
 
-          {/* ml-auto so the trigger sits at the far edge of the title row regardless of
-              how many badges precede it. Renders nothing when the viewer can do neither. */}
-          <div className="ml-auto">
+          {/* Renders nothing when the viewer can do none of these. */}
+          <div className="shrink-0">
             <RunActions
               runId={runId}
               orgSlug={orgSlug}
@@ -151,38 +228,133 @@ export default async function RunPage({
               totalTests={run.total}
               canRename={can(context, "run:rename")}
               canDelete={can(context, "run:delete")}
+              canVerdict={can(context, "run:verdict")}
+              canEditTags={can(context, "run:edit")}
+              tags={run.tags}
+              currentVerdict={latestVerdict?.verdict ?? null}
               deleteRedirectTo={`/o/${orgSlug}/p/${run.projectKey}/runs`}
             />
           </div>
         </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-[var(--color-ink-muted)]">
-          {run.branch ? <span>branch {run.branch}</span> : null}
-          {shortSha(run.commitSha) ? <span>commit {shortSha(run.commitSha)}</span> : null}
-          {run.prNumber ? <span>PR #{run.prNumber}</span> : null}
-          {run.environment ? <span>env {run.environment}</span> : null}
-          {run.framework ? <span>{run.framework}</span> : null}
-          <span title={formatAbsoluteTime(run.startedAt)}>
-            started {formatRelativeTime(run.startedAt)}
-          </span>
-          {run.ciJobUrl ? (
-            <a
-              href={run.ciJobUrl}
-              className="underline hover:text-[var(--color-ink)]"
-              target="_blank"
-              rel="noreferrer"
-            >
-              CI job
-            </a>
-          ) : null}
-        </div>
+        {/*
+         * The run's identity, as a spec strip rather than a sentence.
+         *
+         * This was one mono line — "branch jcp-common-ext commit 02ae8a8 env SWADESHUAT
+         * cucumber-jvm started 1h ago" — where the labels and the values shared a weight, a
+         * size and a colour, so finding the environment meant reading the whole line and
+         * mentally separating the words that name things from the words that are the answer.
+         *
+         * The pattern is the stat-tile row's, deliberately: quiet uppercase label, value as
+         * the figure, cells divided. This app already teaches that shape one card below, so
+         * reusing it costs the reader nothing new to learn. Chips were the other candidate
+         * and are wrong here — the tag row sits directly beneath, and metadata dressed as
+         * chips would read as more tags.
+         */}
+        <dl className="mt-3 overflow-hidden rounded-md border border-[var(--color-border-subtle)]">
+          {/*
+           * Two bands, not one grid.
+           *
+           * `divide-*` borders children by DOM order rather than grid position, so a
+           * seventh cell wrapping onto a second row gets a stray left border while the row
+           * above it gets none at the top — which is the divider that was missing. Tailwind
+           * cannot express "border between grid rows" here, so the tags band is its own
+           * element with an explicit top border instead.
+           *
+           * Full width suits it anyway: the value is a list, and a list given the whole row
+           * reads as a list rather than as a cell that overflowed.
+           */}
+          <div className="grid grid-cols-2 divide-x divide-y divide-[var(--color-border-subtle)] sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+            {metaCells.map((cell) => (
+              <div key={cell.label} className="min-w-0 px-3 py-2">
+                <dt className="text-[10px] font-medium tracking-wide text-[var(--color-ink-muted)] uppercase">
+                  {cell.label}
+                </dt>
+                <dd
+                  className={`mt-0.5 truncate text-xs ${
+                    cell.missing ? "text-[var(--color-ink-muted)]/70 italic" : "font-mono"
+                  }`}
+                  title={cell.title ?? cell.value}
+                >
+                  {cell.href ? (
+                    <a
+                      href={cell.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline hover:no-underline"
+                    >
+                      {cell.value}
+                    </a>
+                  ) : (
+                    cell.value
+                  )}
+                </dd>
+              </div>
+            ))}
+          </div>
+          {/*
+           * Tags as a cell, not a row of their own.
+           *
+           * They were hanging under the strip as an orphan band of chips — the only piece
+           * of run metadata that was not a labelled cell, which made it read as a separate
+           * feature rather than another fact about the run.
+           *
+           * Two columns wide because the value is a *set*: one column truncates a realistic
+           * tag list to almost nothing. Beyond three the rest collapse into "+N", with the
+           * complete list on hover — hover as supplement, never as the only route, since
+           * touch has none and the full set is also in the editor behind the ⋯ menu.
+           *
+           * Explicitly not an expand-on-hover panel: it would shift the strip's layout
+           * while the pointer is in it, which is the mistake the history strip's detail
+           * panel already made once and had to have undone.
+           */}
+          <div className="min-w-0 border-t border-[var(--color-border-subtle)] px-3 py-2">
+            <dt className="text-[10px] font-medium tracking-wide text-[var(--color-ink-muted)] uppercase">
+              Tags
+            </dt>
+            <dd className="mt-0.5 min-w-0">
+              {tagEntries.length === 0 ? (
+                <span
+                  className="text-xs text-[var(--color-ink-muted)]/70 italic"
+                  title="No tags on this run. CI can send them as ?tag=key:value on /api/v1/ingest."
+                >
+                  none
+                </span>
+              ) : (
+                <span
+                  className="flex min-w-0 items-center gap-1"
+                  title={tagEntries.map(([key, value]) => `${key}:${value}`).join("  ·  ")}
+                >
+                  {tagEntries.slice(0, 3).map(([key, value]) => (
+                    <span
+                      key={key}
+                      className="min-w-0 truncate rounded bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-[10px]"
+                    >
+                      <span className="text-[var(--color-ink-muted)]">{key}</span>
+                      <span className="text-[var(--color-ink-muted)]/50">:</span>
+                      {value}
+                    </span>
+                  ))}
+                  {tagEntries.length > 3 ? (
+                    <span className="shrink-0 font-mono text-[10px] text-[var(--color-ink-muted)]">
+                      +{tagEntries.length - 3}
+                    </span>
+                  ) : null}
+                </span>
+              )}
+            </dd>
+          </div>
+        </dl>
 
-        {/* Tags keep their own visible editor rather than moving into the ⋯ menu: it is
-            already discoverable, members can use it where the menu's actions are
-            admin-only, and the chips have to be on screen to be worth editing. */}
-        <div className="mt-3">
-          <TagEditor runId={runId} initialTags={run.tags} />
-        </div>
+        {/*
+         * The verdict trail. Shown to everyone, not only to whoever can write it: the
+         * value of "this was infra, not your code" is that a developer reads it.
+         *
+         * Superseded entries stay visible and muted rather than being hidden behind a
+         * disclosure — a verdict that changed is itself information ("this looked like
+         * infra until someone dug in"), and hiding it would make the table's history
+         * pointless.
+         */}
       </header>
 
       {/* Live progress replaces itself with the real numbers once parsing finishes. */}
@@ -229,6 +401,84 @@ export default async function RunPage({
           />
         </div>
       </Card>
+
+      {/*
+       * The verdict log.
+       *
+       * Sized to show five entries and scroll past that. Which means every row has to be
+       * the same height, and that is why notes are truncated to one line rather than
+       * wrapping: with variable-height rows a fixed box shows five short entries or two
+       * long ones, and "five" stops meaning anything. The full note is on hover, and a
+       * log is read by scanning anyway — h-8 per row against max-h-40 is exactly five.
+       *
+       * Kept to a readable measure instead of the page width: these are short lines, and
+       * stretched across 1400px the timestamp ends up a screen away from the badge it
+       * belongs to.
+       *
+       * mb-6 matches every other block on this page. The stat tiles above already supply
+       * the gap on top; without a margin below, the log butted straight into the results
+       * table with nothing separating them.
+       */}
+      {verdicts.length > 0 ? (
+        <section className="mb-6 overflow-hidden rounded-md border border-[var(--color-border-subtle)]">
+          <div className="flex items-baseline justify-between gap-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-1.5">
+            <h2 className="text-[10px] font-medium tracking-wide uppercase">Verdict log</h2>
+            <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
+              {verdicts.length} entr{verdicts.length === 1 ? "y" : "ies"} · newest first
+              {verdicts.length > 5 ? " · scroll for more" : ""}
+            </span>
+          </div>
+          {/* tabIndex makes the scroll region reachable by keyboard: an overflow container
+              is not focusable by default, so its content would be unreachable without a
+              pointer. */}
+          <ul
+            className="max-h-40 divide-y divide-[var(--color-border-subtle)] overflow-y-auto focus-visible:ring-2 focus-visible:ring-[var(--color-ink)] focus-visible:outline-none"
+            tabIndex={0}
+            aria-label={`Verdict history, ${verdicts.length} entries, newest first`}
+          >
+            {verdicts.map((entry, index) => (
+              <li
+                key={entry.id}
+                className={`flex h-8 items-center gap-2 px-3 ${
+                  index === 0 ? "" : "bg-[var(--color-surface)]/40"
+                }`}
+              >
+                <VerdictBadge verdict={entry.verdict} size="sm" />
+                <span
+                  className={`min-w-0 flex-1 truncate text-[11px] ${
+                    entry.note ? "" : "text-[var(--color-ink-muted)] italic"
+                  }`}
+                  title={entry.note ?? undefined}
+                >
+                  {entry.note ?? "no note"}
+                </span>
+                <span
+                  className="shrink-0 font-mono text-[10px] text-[var(--color-ink-muted)]"
+                  title={formatAbsoluteTime(entry.createdAt)}
+                >
+                  {entry.authorName ?? entry.authorEmail ?? "removed account"} ·{" "}
+                  {formatRelativeTime(entry.createdAt)}
+                </span>
+                {/* "Superseded" as a mark rather than a word: the word repeated down every
+                    row but the first is a column of noise, and position already says it. */}
+                {index === 0 ? (
+                  <span className="shrink-0 text-[9px] text-[var(--color-status-passed)]">
+                    current
+                  </span>
+                ) : (
+                  <span
+                    className="shrink-0 text-[10px] text-[var(--color-ink-muted)]"
+                    title="Superseded by a later verdict"
+                    aria-label="superseded"
+                  >
+                    ↩
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {/* Filters on the right, matching the runs list and test search. This page was the
           only one with them on the left, so the sidebar jumped sides as you navigated

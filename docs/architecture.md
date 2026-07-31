@@ -301,6 +301,7 @@ project-scoped ones — so every link is shareable and unambiguous.
 | `/o/:org/projects`, `/projects/new` | projects; creation mints a CI token and shows the recipe |
 | `/o/:org/settings/members`, `/settings/tokens` | access and tokens |
 | `/o/:org/p/:project/*` | project-scoped dashboard, runs, tests, flaky, upload, settings |
+| `/help` | the narrative guide — five acts, illustrated with the app's own components. Outside `/o/:org` because that layout is the authorisation gate; unauthenticated and reads no tenant data, so it works in an invitation mail and during an outage |
 
 `/o/:org/p/:key/runs` and `/o/:org/runs?project=` render the *same* component
 (`features/run-list.tsx`). The project route used to redirect to the org route with

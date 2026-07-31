@@ -5,6 +5,7 @@ import {
   failureConcentration,
   flakeDistribution,
   flakyLeaderboard,
+  latestRunVerdicts,
   listRuns,
   orgSummary,
   slowestTests,
@@ -16,6 +17,8 @@ import { RankedBars } from "@/components/charts/ranked-bars";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { VolumeChart } from "@/components/charts/volume-chart";
 import { CiSnippet } from "@/components/ci-snippet";
+import { TimeRangeNav } from "@/components/time-range-nav";
+import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import {
   Button,
   Card,
@@ -26,7 +29,13 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { passRateTone, TONE_COLOR } from "@/lib/health";
-import { formatDuration, formatPercent, formatRelativeTime, formatInteger } from "@/lib/format";
+import {
+  formatAbsoluteTime,
+  formatDuration,
+  formatPercent,
+  formatRelativeTime,
+  formatInteger,
+} from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext, requirePageProject } from "@/lib/viewer";
 
@@ -38,6 +47,14 @@ import { can, requirePageContext, requirePageProject } from "@/lib/viewer";
  * pipeline. Afterwards it becomes the project's dashboard.
  */
 export const dynamic = "force-dynamic";
+
+/**
+ * Windows offered on this page: a week, a sprint, a month.
+ *
+ * Deliberately not the org dashboard's 7/30/90 — a project is where day-to-day work
+ * happens, and a quarter of history says little about whether this suite is healthy now.
+ */
+const DAY_OPTIONS = [7, 15, 30] as const;
 
 export default async function ProjectOverview({
   params,
@@ -68,7 +85,14 @@ export default async function ProjectOverview({
   const project = await requirePageProject(context, projectKey);
   const { sql } = getServices();
 
-  const days = Math.min(Math.max(Number(daysParam ?? 30), 7), 90);
+  /*
+   * Snapped to the offered set, not clamped to a range.
+   *
+   * Clamping accepted `?days=45` and silently measured 45 days while no button was
+   * highlighted, so the URL and the control disagreed about what was on screen. Anything
+   * unrecognised falls back to the default instead.
+   */
+  const days = DAY_OPTIONS.find((option) => option === Number(daysParam)) ?? 30;
   const scope = { orgId: context.org.id, projectId: project.id };
 
   // Same three view selections as the org dashboard, so the two pages behave alike.
@@ -89,7 +113,16 @@ export default async function ProjectOverview({
       todaysRuns(sql, { ...scope, limit: 24 }),
     ]);
 
+  const recentVerdicts = await latestRunVerdicts(sql, {
+    orgId: context.org.id,
+    runIds: recent.runs.map((run) => run.id),
+  });
+
   const branchRates = branchView ? await branchPassRates(sql, { ...scope, days, limit: 8 }) : [];
+
+  // listRuns returns newest first, so the head is the latest run. Taken from the list the
+  // page already fetched rather than querying again for one row.
+  const latestRun = recent.runs[0] ?? null;
 
   const base = `/o/${orgSlug}/p/${projectKey}`;
 
@@ -117,8 +150,45 @@ export default async function ProjectOverview({
           <p className="mt-0.5 font-mono text-xs text-[var(--color-ink-muted)]">
             {project.key} · default branch {project.defaultBranch}
           </p>
+          {/* When the suite last ran, which is the first thing worth knowing about a
+              dashboard: numbers from a suite nobody has run this week describe the past,
+              and nothing on the page says so otherwise. The absolute time is on hover
+              because "3h ago" is the readable form and the timestamp is the precise one. */}
+          <p className="mt-1 text-xs text-[var(--color-ink-muted)]">
+            {summary.lastRunAt ? (
+              <>
+                Last run{" "}
+                <span
+                  title={formatAbsoluteTime(summary.lastRunAt)}
+                  className="text-[var(--color-ink)]"
+                >
+                  {formatRelativeTime(summary.lastRunAt)}
+                </span>
+                {latestRun?.branch ? (
+                  <span className="font-mono"> on {latestRun.branch}</span>
+                ) : null}
+                {latestRun ? (
+                  <>
+                    {" · "}
+                    <Link href={`/o/${orgSlug}/runs/${latestRun.id}`} className="underline">
+                      open
+                    </Link>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              "No runs yet"
+            )}
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <TimeRangeNav
+            options={DAY_OPTIONS.map((option) => ({
+              days: option,
+              href: viewHref({ days: String(option) }),
+              active: days === option,
+            }))}
+          />
           <Button href={`${base}/runs`}>Runs</Button>
           <Button href={`${base}/tests`}>Tests</Button>
           {can(context, "run:upload") ? (
@@ -391,6 +461,12 @@ export default async function ProjectOverview({
                           {run.name ?? run.framework ?? "Run"}
                         </Link>
                         <StatusBadge status={run.status} />
+                        {awaitsVerdict(run.status) ? (
+                          <VerdictBadge
+                            verdict={recentVerdicts.get(run.id)?.verdict ?? null}
+                            size="sm"
+                          />
+                        ) : null}
                       </div>
                       <div className="mt-0.5 flex gap-x-3 font-mono text-[10px] text-[var(--color-ink-muted)]">
                         {run.branch ? <span>{run.branch}</span> : null}

@@ -41,6 +41,15 @@ export const CAPABILITIES = {
    */
   "run:rename": "admin",
   /**
+   * Recording a verdict on a run — whether its failures were a real regression, the
+   * environment, or noise.
+   *
+   * Admin, because it is an assertion other people then act on: an `infra` verdict tells
+   * a developer the failure is not theirs, and a `pass` says a red run was reviewed and
+   * accepted. Reading it is open to everyone; making the claim is not.
+   */
+  "run:verdict": "admin",
+  /**
    * Deleting a run, with every result and artifact under it. Admin, not maintainer.
    *
    * Raised deliberately. A run is evidence: it is what "when did this start failing"

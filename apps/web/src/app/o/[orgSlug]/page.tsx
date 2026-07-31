@@ -5,6 +5,7 @@ import {
   failureConcentration,
   flakeDistribution,
   flakyLeaderboard,
+  latestRunVerdicts,
   listProjects,
   listRuns,
   orgSummary,
@@ -14,6 +15,8 @@ import {
 } from "@testcenter/db";
 import { ChartToggle } from "@/components/charts/chart-toggle";
 import { RankedBars } from "@/components/charts/ranked-bars";
+import { TimeRangeNav } from "@/components/time-range-nav";
+import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { VolumeChart } from "@/components/charts/volume-chart";
 import {
@@ -46,6 +49,9 @@ import { can, requirePageContext } from "@/lib/viewer";
  */
 export const dynamic = "force-dynamic";
 
+/** A week, a month, a quarter — the org view is about longer-run health than a project's. */
+const DAY_OPTIONS = [7, 30, 90] as const;
+
 export default async function OrgDashboard({
   params,
   searchParams,
@@ -68,7 +74,8 @@ export default async function OrgDashboard({
   const context = await requirePageContext(orgSlug);
   const { sql } = getServices();
 
-  const days = Math.min(Math.max(Number(daysParam ?? 30), 7), 90);
+  // Snapped to the offered set so the URL and the highlighted button always agree.
+  const days = DAY_OPTIONS.find((option) => option === Number(daysParam)) ?? 30;
   const orgId = context.org.id;
 
   // View selections. Each names a different question, not a different drawing — see
@@ -100,6 +107,12 @@ export default async function OrgDashboard({
     flakeDistribution(sql, { orgId }),
     todaysRuns(sql, { orgId, limit: 24 }),
   ]);
+
+  // Batched after the list, which is where the run ids come from.
+  const recentVerdicts = await latestRunVerdicts(sql, {
+    orgId,
+    runIds: recent.runs.map((run) => run.id),
+  });
 
   // Only fetched for the view that needs it: the aggregate chart is the default, and
   // paying for a per-branch split on every dashboard load would be waste.
@@ -158,21 +171,15 @@ export default async function OrgDashboard({
               : "no runs yet"}
           </p>
         </div>
-        <nav className="flex gap-1" aria-label="Time range">
-          {[7, 30, 90].map((option) => (
-            <Link
-              key={option}
-              href={`/o/${orgSlug}?days=${option}`}
-              className={`rounded-md border px-2 py-1 text-xs ${
-                days === option
-                  ? "border-[var(--color-ink-muted)] font-semibold"
-                  : "border-[var(--color-border-subtle)] text-[var(--color-ink-muted)] hover:border-[var(--color-ink-muted)]"
-              }`}
-            >
-              {option}d
-            </Link>
-          ))}
-        </nav>
+        {/* Through viewHref, so changing the range keeps the chart views. These links
+            used to be built by hand and reset volume/rate/duration on every click. */}
+        <TimeRangeNav
+          options={DAY_OPTIONS.map((option) => ({
+            days: option,
+            href: viewHref({ days: String(option) }),
+            active: days === option,
+          }))}
+        />
       </div>
 
       <Card className="mb-5">
@@ -535,6 +542,15 @@ export default async function OrgDashboard({
                         {run.name ?? run.framework ?? "Run"}
                       </Link>
                       <StatusBadge status={run.status} />
+                      {/* A badge is information, not a control — which is why it belongs on
+                          this glance widget even though the action menu deliberately does
+                          not. "Which of these still needs review?" is a glance question. */}
+                      {awaitsVerdict(run.status) ? (
+                        <VerdictBadge
+                          verdict={recentVerdicts.get(run.id)?.verdict ?? null}
+                          size="sm"
+                        />
+                      ) : null}
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] text-[var(--color-ink-muted)]">
                       <span>{run.projectKey}</span>

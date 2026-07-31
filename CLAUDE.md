@@ -75,6 +75,14 @@ Each of these cost real debugging time. They are in the code as comments too.
 - **Deleting rows does not fix rollups.** `project_daily_stats` and the `test_cases`
   aggregates are maintained at write time; nothing recomputes them on read. Use
   `deleteRun`, which recomputes the day and refreshes the affected tests in one transaction.
+- **`var()` in an SVG *presentation attribute* is not universally resolved.**
+  `fill="var(--color-ink)"` works in some engines and is simply invalid in others, where the
+  shape falls back to solid black — no error, no warning, a diagram of black boxes for
+  whoever opened the wrong browser. Pass token colours through `style` instead; both inherit,
+  so a `<g>` still covers its children. `help-illustrations.tsx` does this throughout.
+- **`animation-delay` applies to the first iteration only.** A staggered reveal built from
+  per-element delays plays correctly once and then fires every element simultaneously on
+  every later loop. Animate one clipping window over a fixed-width row instead.
 
 ## Conventions
 
@@ -91,6 +99,17 @@ Each of these cost real debugging time. They are in the code as comments too.
 - **Charts:** the form is chosen by the question the data answers. No dual-axis, ever. Only
   three categorical series tokens exist — fold a fourth into "other" rather than inventing
   a hue. Validate any new palette rather than eyeballing it.
+- **Motion must teach, and must end on its resting state.** The global
+  `prefers-reduced-motion` rule collapses every animation to one 0.01ms iteration, so the
+  100% keyframe is what those readers see — a loop that resets to "empty" at 100% shows them
+  nothing. Decoration that carries no information does not get animated at all.
+- **`/help` documents the product with the product.** It is the narrative front door — five
+  acts following one build from CI to a verdict — and it illustrates itself with the app's
+  own live components given sample props, never screenshots, so it cannot silently go stale.
+  Only concepts with no screen of their own (fingerprinting, signature clustering) are drawn
+  as artwork. It renders unauthenticated and reads no tenant data, which is what lets it go
+  in an invitation mail and survive an outage; keep it that way. `docs/user-guide.md` stays
+  the exhaustive reference.
 
 ## Testing
 

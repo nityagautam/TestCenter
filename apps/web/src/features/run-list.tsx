@@ -1,9 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normalizeTags, type Tags } from "@testcenter/core";
-import { findProjectByKey, listRuns, runFilterOptions, tagFacets } from "@testcenter/db";
+import {
+  findProjectByKey,
+  latestRunVerdicts,
+  listRuns,
+  runFilterOptions,
+  tagFacets,
+} from "@testcenter/db";
 import { RunActions } from "@/components/run-actions";
 import { SearchBox } from "@/components/search-box";
+import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import { Button, Card, EmptyState, ResultBar, StatusBadge, TagChip } from "@/components/ui";
 import { formatDuration, formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
 import { getServices } from "@/lib/services";
@@ -149,6 +156,7 @@ export async function RunList({
   // Hoisted out of the row loop: the role does not change per run.
   const canRename = can(context, "run:rename");
   const canDelete = can(context, "run:delete");
+  const canVerdict = can(context, "run:verdict");
 
   // A path-scoped project wins over ?project=, so a stray query parameter cannot widen a
   // view whose URL claims to be about one project.
@@ -178,6 +186,13 @@ export async function RunList({
     tagFacets(sql, filter, { limit: 24 }),
     runFilterOptions(sql, filter),
   ]);
+
+  // Batched after the list, since it needs the ids the list resolved. One LATERAL per
+  // visible run rather than a query per row.
+  const verdicts = await latestRunVerdicts(sql, {
+    orgId,
+    runIds: page.runs.map((run) => run.id),
+  });
 
   const activeFilters = [
     params.branch
@@ -337,6 +352,12 @@ export async function RunList({
                             {run.name ?? run.framework ?? "Run"}
                           </Link>
                           <StatusBadge status={run.status} />
+                          {awaitsVerdict(run.status) ? (
+                            <VerdictBadge
+                              verdict={verdicts.get(run.id)?.verdict ?? null}
+                              size="sm"
+                            />
+                          ) : null}
                           {run.flaky > 0 ? (
                             <StatusBadge status="flaky">{run.flaky} flaky</StatusBadge>
                           ) : null}
@@ -356,6 +377,12 @@ export async function RunList({
                           <span>{formatDuration(run.durationMs)}</span>
                           <span>{formatRelativeTime(run.startedAt)}</span>
                         </div>
+
+                        {verdicts.get(run.id)?.note ? (
+                          <p className="mt-1 text-[11px] text-[var(--color-ink-muted)] italic">
+                            “{verdicts.get(run.id)!.note}”
+                          </p>
+                        ) : null}
 
                         {Object.keys(run.tags).length > 0 ? (
                           <div className="mt-2 flex flex-wrap gap-1">
@@ -406,7 +433,7 @@ export async function RunList({
                       {/* Last in the row, past the numbers, so the menu is never between
                           the name and the result it describes. The panels it opens are
                           wider than this column, hence min-w-0 on the wrapper. */}
-                      {canRename || canDelete ? (
+                      {canRename || canDelete || canVerdict ? (
                         <div className="min-w-0 shrink-0">
                           <RunActions
                             runId={run.id}
@@ -416,6 +443,8 @@ export async function RunList({
                             totalTests={run.total}
                             canRename={canRename}
                             canDelete={canDelete}
+                            canVerdict={canVerdict}
+                            currentVerdict={verdicts.get(run.id)?.verdict ?? null}
                             deleteRedirectTo={base}
                           />
                         </div>

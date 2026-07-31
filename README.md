@@ -8,6 +8,12 @@ TestNG, Cypress, Jest and others — via direct upload or API/CI — then triage
 [bug register and backlog](docs/known-issues.md) ·
 [architecture and phase plan](docs/test-center-plan.md)
 
+**New to it?** The app serves its own narrative guide at **`/help`** — one build followed
+from CI to a verdict, in five acts. It needs no sign-in, so it is the right link to put in
+an invitation mail. Reach it with the **?** button beside Search, by pressing `?` anywhere
+in the app, or from the command palette. The user guide below stays the exhaustive
+reference; `/help` is the front door.
+
 **Status: multi-tenant product.** Sign in, land in the organisations you have access to,
 create projects, upload results from CI or the browser, then search tests and read a
 test's full history. See [`docs/test-center-plan.md`](docs/test-center-plan.md) for the
@@ -27,6 +33,7 @@ for project-scoped ones — so every link is shareable and unambiguous.
 | `/o/:org/projects` | Projects, and creating one (mints a CI token and shows the recipe) |
 | `/o/:org/settings/members` | Grant access by email, set roles, revoke |
 | `/o/:org/settings/tokens` | Create and revoke CI tokens |
+| `/help` | The narrative guide — no sign-in needed. `?` from anywhere in the app |
 
 ## Access model
 

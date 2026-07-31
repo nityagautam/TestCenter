@@ -2,6 +2,16 @@
 
 How to sign in, what each role can do, and how to work through the app.
 
+> **There is a guide inside the app, at <http://localhost:3000/help>.** It tells the same
+> story as a story: one build followed from the moment CI finishes to the moment somebody
+> decides whose problem it is, in five acts — a run arrives, something is red, is it always
+> red, how are we doing, who can do what. It illustrates itself with the app's own live
+> components rather than screenshots, so it cannot go stale, and it renders without a
+> session, so it is the link to put in an invitation mail. Press `?` anywhere in the app.
+>
+> This document is the reference the guide points back to: every role boundary measured
+> rather than described, the seeded accounts, the scenario projects, troubleshooting.
+
 ---
 
 ## Quick reference
@@ -294,6 +304,7 @@ to the database — including a seed script or a compromised app — could mint 
 | `↵` | Open the highlighted result |
 | `esc` | Close the palette, a dropdown, or the mobile nav |
 | `[` | Collapse or expand the sidebar |
+| `?` | The in-app guide at `/help` |
 
 The palette searches tests by name fragment against the database, so `case_7` finds every
 matching test across all projects with its status. Collapsed, the sidebar keeps the

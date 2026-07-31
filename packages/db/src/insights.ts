@@ -105,110 +105,108 @@ export async function dailySeries(
   }));
 }
 
-export interface BranchSeries {
-  branch: string;
-  points: { day: string; passRate: number | null; runs: number }[];
+export interface RunVerdictRow {
+  id: string;
+  runId: string;
+  verdict: string;
+  note: string | null;
+  createdAt: Date;
+  /** Null once the account that recorded it has been deleted. */
+  authorName: string | null;
+  authorEmail: string | null;
 }
 
 /**
- * Daily pass rate split by branch.
+ * Records a verdict. Append-only — a correction is a new row, not an update.
  *
- * `dailySeries` sums across branches, which answers "is the aggregate healthy?" — a
- * different question from "is main healthy?", and one that a busy feature branch can
- * quietly dominate. `project_daily_stats` is already keyed by (project, day, branch),
- * so the split costs nothing extra; it is only that the existing query collapses it.
- *
- * Capped at `maxBranches` by run volume, with the remainder folded into one "other"
- * series. The cap is not cosmetic: the design system ships three categorical hues, and
- * generating a fourth would produce a colour indistinguishable from an existing one
- * under deuteranopia. Folding is the correct answer to too many series; inventing hues
- * is not.
+ * Scoped by org on the way in: the run id is checked against the caller's organisation
+ * before the insert, so a run id from another tenant records nothing rather than
+ * attaching a judgement to someone else's run.
  */
-export async function dailySeriesByBranch(
+export async function addRunVerdict(
   sql: Sql,
   input: {
     orgId: string;
-    projectId?: string | undefined;
-    days?: number;
-    maxBranches?: number;
+    runId: string;
+    verdict: string;
+    note?: string | null;
+    userId: string | null;
   },
-): Promise<BranchSeries[]> {
-  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
-  const maxBranches = Math.min(Math.max(input.maxBranches ?? 3, 1), 6);
+): Promise<RunVerdictRow | null> {
+  const inserted = await sql<{ id: string }[]>`
+    INSERT INTO run_verdicts (org_id, run_id, verdict, note, created_by)
+    SELECT ${input.orgId}, r.id, ${input.verdict}, ${input.note ?? null}, ${input.userId}
+    FROM runs r
+    WHERE r.id = ${input.runId} AND r.org_id = ${input.orgId}
+    RETURNING id
+  `;
+  if (!inserted[0]) return null;
 
-  const rows = await sql<{ branch: string; day: string; passRate: number | null; runs: number }[]>`
-    WITH scoped AS (
-      SELECT
-        COALESCE(NULLIF(branch, ''), '(no branch)') AS branch,
-        day, runs, passed, failed
-      FROM project_daily_stats
-      WHERE org_id = ${input.orgId}
-        ${input.projectId ? sql`AND project_id = ${input.projectId}` : sql``}
-        AND day >= (now() - (${days - 1} || ' days')::interval)::date
-    ),
-    ranked AS (
-      SELECT branch, sum(runs) AS total_runs,
-             row_number() OVER (ORDER BY sum(runs) DESC, branch ASC) AS rn
-      FROM scoped GROUP BY branch
-    ),
-    labelled AS (
-      SELECT
-        CASE WHEN r.rn <= ${maxBranches} THEN s.branch ELSE 'other branches' END AS branch,
-        s.day, s.runs, s.passed, s.failed
-      FROM scoped s
-      JOIN ranked r ON r.branch = s.branch
-    ),
-    calendar AS (
-      SELECT generate_series(
-        (now() - (${days - 1} || ' days')::interval)::date,
-        now()::date,
-        '1 day'
-      )::date AS day
-    ),
-    /*
-     * Every branch crossed with every day, so each series spans the whole window.
-     *
-     * Without this the series contains only the days that happen to have rows, which
-     * compresses the x-axis: a branch with one day of history and a branch with thirty
-     * would be drawn across the same width and read as directly comparable, and a single
-     * point would land mid-plot instead of on its date. dailySeries fills its calendar
-     * for exactly this reason. (No backticks in this comment: it lives inside a template
-     * literal, and one would terminate the SQL string.)
-     */
-    grid AS (
-      SELECT b.branch, c.day
-      FROM (SELECT DISTINCT branch FROM labelled) b
-      CROSS JOIN calendar c
-    ),
-    per_day AS (
-      SELECT branch, day, sum(runs) AS runs, sum(passed) AS passed, sum(failed) AS failed
-      FROM labelled GROUP BY branch, day
-    )
+  const rows = await sql<RunVerdictRow[]>`
     SELECT
-      grid.branch,
-      to_char(grid.day, 'Mon DD') AS day,
-      COALESCE(per_day.runs, 0)::int AS runs,
-      CASE
-        WHEN COALESCE(per_day.passed + per_day.failed, 0) = 0 THEN NULL
-        ELSE ROUND(per_day.passed::numeric * 100 / (per_day.passed + per_day.failed), 2)
-      END AS "passRate"
-    FROM grid
-    LEFT JOIN per_day ON per_day.branch = grid.branch AND per_day.day = grid.day
-    ORDER BY grid.branch, grid.day ASC
+      v.id, v.run_id AS "runId", v.verdict, v.note, v.created_at AS "createdAt",
+      u.name AS "authorName", u.email AS "authorEmail"
+    FROM run_verdicts v
+    LEFT JOIN users u ON u.id = v.created_by
+    WHERE v.id = ${inserted[0].id}
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * The newest verdict for each of many runs, for list views.
+ *
+ * LATERAL with LIMIT 1 per run rather than a window over the whole table: the work is
+ * then bounded by the rows on screen and served by (run_id, created_at DESC), which is
+ * the same reason `recentOutcomes` is shaped this way.
+ */
+export async function latestRunVerdicts(
+  sql: Sql,
+  input: { orgId: string; runIds: readonly string[] },
+): Promise<Map<string, RunVerdictRow>> {
+  const byRun = new Map<string, RunVerdictRow>();
+  if (input.runIds.length === 0) return byRun;
+
+  const rows = await sql<RunVerdictRow[]>`
+    SELECT
+      latest.id, ids.run_id AS "runId", latest.verdict, latest.note,
+      latest.created_at AS "createdAt",
+      u.name AS "authorName", u.email AS "authorEmail"
+    FROM unnest(${input.runIds as string[]}::uuid[]) AS ids(run_id)
+    CROSS JOIN LATERAL (
+      SELECT v.id, v.verdict, v.note, v.created_at, v.created_by
+      FROM run_verdicts v
+      WHERE v.run_id = ids.run_id AND v.org_id = ${input.orgId}
+      -- id breaks the tie: two verdicts recorded in the same millisecond would
+      -- otherwise make "latest" arbitrary, and uuidv7 is time-ordered so this is
+      -- the same ordering the timestamps intend.
+      ORDER BY v.created_at DESC, v.id DESC
+      LIMIT 1
+    ) latest
+    LEFT JOIN users u ON u.id = latest.created_by
   `;
 
-  const byBranch = new Map<string, BranchSeries>();
-  for (const row of rows) {
-    const existing = byBranch.get(row.branch);
-    const point = { day: row.day, passRate: row.passRate, runs: row.runs };
-    if (existing) existing.points.push(point);
-    else byBranch.set(row.branch, { branch: row.branch, points: [point] });
-  }
-  // Busiest branch first, so the series that matters most gets the first hue.
-  return [...byBranch.values()].sort(
-    (a, b) =>
-      b.points.reduce((sum, p) => sum + p.runs, 0) - a.points.reduce((sum, p) => sum + p.runs, 0),
-  );
+  for (const row of rows) byRun.set(row.runId, row);
+  return byRun;
+}
+
+/** Every verdict on one run, newest first — the audit trail the run page shows. */
+export async function runVerdictHistory(
+  sql: Sql,
+  input: { orgId: string; runId: string; limit?: number },
+): Promise<RunVerdictRow[]> {
+  const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+
+  return sql<RunVerdictRow[]>`
+    SELECT
+      v.id, v.run_id AS "runId", v.verdict, v.note, v.created_at AS "createdAt",
+      u.name AS "authorName", u.email AS "authorEmail"
+    FROM run_verdicts v
+    LEFT JOIN users u ON u.id = v.created_by
+    WHERE v.run_id = ${input.runId} AND v.org_id = ${input.orgId}
+    ORDER BY v.created_at DESC, v.id DESC
+    LIMIT ${limit}
+  `;
 }
 
 export interface BranchPassRate {

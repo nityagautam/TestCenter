@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { orgScopeHref, projectKeyFromPath, projectScopeHref } from "@/lib/scope";
 import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import { signOutAction } from "@/app/actions/auth";
@@ -78,6 +78,7 @@ export function AppShell({
   initialTheme,
 }: AppShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [sidebar, setSidebar] = useState<SidebarState>(initialSidebar);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [, startTransition] = useTransition();
@@ -98,8 +99,9 @@ export function AppShell({
     startTransition(() => void setSidebarState(next));
   }, [collapsed]);
 
-  // `[` is the convention in editors and developer tools, which is the audience here.
-  // Ignored while typing so it cannot eat a character in the search box.
+  // `[` for the sidebar is the convention in editors and developer tools, which is the
+  // audience here; `?` for help is the convention nearly everywhere else. Both are ignored
+  // while typing so they cannot eat a character in the search box.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       const target = event.target as HTMLElement | null;
@@ -109,6 +111,16 @@ export function AppShell({
         target?.tagName === "SELECT" ||
         target?.isContentEditable;
       if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+
+      // Matched on the character alone, unlike `[` below: `?` needs Shift on most layouts
+      // and sits on a different physical key depending on the layout, so `event.code` would
+      // be wrong more often than it was right. Shift is deliberately not excluded above.
+      if (event.key === "?") {
+        event.preventDefault();
+        router.push("/help");
+        return;
+      }
+
       // Matched on both the character and the physical key: on layouts where `[`
       // needs a modifier (German, French) event.key is something else entirely, and
       // event.code still identifies the same physical key.
@@ -119,7 +131,7 @@ export function AppShell({
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [toggle]);
+  }, [toggle, router]);
 
   /*
    * Escape closes the mobile drawer.
@@ -216,6 +228,9 @@ export function AppShell({
         >
           Flaky tests
         </NavLink>
+        <NavLink href={`/o/${orgSlug}/reports`} icon="reports" collapsed={collapsed}>
+          Reports
+        </NavLink>
         <NavLink href={`/o/${orgSlug}/projects`} icon="projects" collapsed={collapsed}>
           Projects
         </NavLink>
@@ -237,6 +252,9 @@ export function AppShell({
               other projects' flakes to this one. The page states its own count. */}
           <NavLink href={`${projectBase}/flaky`} icon="flaky" collapsed={collapsed}>
             Flaky tests
+          </NavLink>
+          <NavLink href={`${projectBase}/reports`} icon="reports" collapsed={collapsed}>
+            Reports
           </NavLink>
           {capabilities.canUpload ? (
             <NavLink href={`${projectBase}/upload`} icon="upload" collapsed={collapsed}>
@@ -418,7 +436,7 @@ export function AppShell({
 
       {/* ── Fixed header ─────────────────────────────────────────────────── */}
       <header
-        className="fixed inset-x-0 top-0 z-30 h-12 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)] transition-[padding] duration-150 motion-reduce:transition-none"
+        className="tc-print-hide fixed inset-x-0 top-0 z-30 h-12 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)] transition-[padding] duration-150 motion-reduce:transition-none"
         style={{
           paddingLeft: `var(--tc-sidebar, 0px)`,
           /*
@@ -538,6 +556,33 @@ export function AppShell({
               </kbd>
             </button>
 
+            {/* Beside Search rather than buried in a menu, and it states its shortcut for
+                the same reason Search does. Help that has to be found is help nobody reads,
+                and this is the one page that has to work on somebody's first day. */}
+            <Link
+              href="/help"
+              title="Help  ?"
+              aria-label="Help — how Test Center works. Keyboard shortcut: question mark"
+              className="flex items-center gap-1.5 rounded-md border border-[var(--color-border-subtle)] px-2 py-1.5 text-xs text-[var(--color-ink-muted)] hover:border-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                className="size-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                aria-hidden
+              >
+                <circle cx="8" cy="8" r="6.25" />
+                <path d="M6.2 6.1a1.9 1.9 0 1 1 2.1 2.5v1.1" />
+                <path d="M8.3 11.6h.01" strokeWidth="1.8" />
+              </svg>
+              <kbd className="hidden rounded border border-[var(--color-border-subtle)] px-1 font-mono text-[10px] sm:inline">
+                ?
+              </kbd>
+            </Link>
+
             <ThemeToggle initial={initialTheme} />
             {capabilities.canUpload ? (
               <Link
@@ -559,7 +604,9 @@ export function AppShell({
         className="transition-[padding] duration-150 motion-reduce:transition-none"
         style={{ paddingLeft: "var(--tc-sidebar, 0px)" }}
       >
-        <main id="content" tabIndex={-1} className="pt-12">
+        {/* pt-12 clears the fixed top bar. The print sheet drops that padding along with the
+            bar, so a printed page does not open with an inch of white. */}
+        <main id="content" tabIndex={-1} className="tc-shell-main pt-12">
           {children}
         </main>
       </div>
