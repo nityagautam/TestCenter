@@ -4,7 +4,7 @@ Two lists. **Part A** records defects that were found and fixed, with the root c
 they are recognisable if they recur — most of them failed *silently*, which is why they
 are written down rather than just closed. **Part B** is outstanding work.
 
-Last updated 2026-07-29.
+Last updated 2026-07-31.
 
 ---
 
@@ -412,6 +412,74 @@ indistinguishable-from-deletion action with a reassuring name.
 
 Found because two projects in the development organisation were already archived and stuck.
 
+
+### A24. Percent-encoding in the CI publish script corrupted every non-ASCII character
+
+`--name "Nightly sanity — via script"` was stored as
+`Nightly sanity \xFFFFFFFFFFFFE2\x80\x94 via script`.
+
+bash's `printf "'$char"` yields a **signed** char, so a UTF-8 continuation byte such as
+`0xE2` comes back as `-30` and `%02X` renders it sign-extended. The encoder had been
+unit-tested — but only with ASCII (`&`, space, `/`), which all pass. Any accented character
+in a tag, environment or run name was silently mangled the same way.
+
+Fixed by masking to the low byte: `$(( $(printf '%d' "'$char") & 0xFF ))`. Verified `—` →
+`%E2%80%94` and `módulo:búsqueda` → `m%C3%B3dulo%3Ab%C3%BAsqueda`.
+
+### A25. A long test name pushed the run panel's controls outside the card
+
+A flex item defaults to `min-width: auto` and will not shrink below its min-content width.
+With a 151-character test name containing unbroken tokens like `"<CASE_LABEL>"`, the panel
+heading rendered **1130px wide inside an 884px card**, pushing its action links 323px past
+the card edge and giving the page 341px of horizontal scroll. The `truncate` already on the
+name could never engage — it had no bound to resolve against, and measured
+`scrollWidth === clientWidth`.
+
+Fixed in the shared `CardHeader` (`min-w-0` on the title, `shrink-0` on the action) plus the
+same on the panel's inner flex, since the min-content width otherwise propagates back up one
+level and undoes it. Pre-existing; adding a second action to that header is what made it
+visible.
+
+### A26. A per-branch series compressed its own x-axis
+
+`dailySeriesByBranch` returned only the days that had rows, so a branch with one day of
+history and a branch with thirty were drawn across the same width and read as directly
+comparable — and a single point landed mid-plot instead of on its date. Exactly the failure
+`dailySeries` documents avoiding with its `generate_series` calendar fill, reintroduced in a
+new query.
+
+Fixed with a branch × calendar cross join. The chart it fed was later replaced by bars (a
+one-day multi-line series is two dots in an empty plot), and the query was removed.
+
+### A27. A summed `bigint` was typed `number` and was a string at runtime
+
+`total_duration_ms` came back from postgres.js as `"2687693"`. postgres.js does not silently
+narrow `int8`, so the value satisfied `number` at compile time and was a string at runtime:
+`formatDuration` rendered nonsense and any arithmetic on it concatenated. Coerced at the
+query boundary, and verified with a summation asserting `typeof === "number"`.
+
+### A28. Time-range links discarded the chart view toggles
+
+The dashboard's 7d/30d/90d links were built by hand as `?days=N`, so changing the range
+dropped `volume`, `rate` and `duration` — silently resetting every chart to its default
+view. Routed through the same href builder the toggles use.
+
+Also in the same pass: `days` was **clamped** rather than snapped to the offered set, so
+`?days=45` was accepted and measured 45 days with no button highlighted — the URL and the
+control disagreed about what was on screen. Unrecognised values now fall back to the default.
+
+### A29. A wrapping grid lost the divider between its rows
+
+The run metadata strip copied `lg:divide-y-0` from the stat-tile row, which is correct there
+because six tiles fill exactly six columns — one row, so only vertical dividers are needed.
+The strip has seven cells, so a second row genuinely exists and the border that would
+separate it had been switched off.
+
+Re-enabling `divide-y` was not the fix: Tailwind's `divide-*` borders children by **DOM
+order, not grid position**, so it would have drawn a stray left border on the first cell of
+row two. Tailwind cannot express "border between grid rows" for a wrapping grid. The tags
+cell became its own full-width band with an explicit `border-t` instead.
+
 ---
 
 ## Part B — outstanding
@@ -507,6 +575,33 @@ Phase 4 as planned. Nothing started.
 ### B12. SSE progress polls the database
 One indexed row per second for the seconds a parse takes. Fine now; if many concurrent
 viewers ever make it measurable, the poll body is the only thing that changes.
+
+### B15. No way to filter runs by verdict
+
+`?verdict=todo` — "what still needs my review?" — is the obvious companion to the verdict
+feature and is not implemented. Cheap now: it is a `NOT EXISTS` against `run_verdicts`, and
+`run_verdicts_org_verdict_idx` already exists for the recorded-value case.
+
+### B16. The publish script does not send a CI job URL
+
+Every run currently lacks `ci_job_url`, so the run page's CI cell never appears. The Azure
+pipeline variable is available (`SYSTEM_JOBURL`); adding `&jobUrl=` to the ingest call would
+make each run link back to the pipeline execution that produced it. Single line, and it is
+the one field that turns a run into a round trip to CI.
+
+### B17. TODO appears on every finished run, including all-green ones
+
+Derived from "no verdict row exists", which is correct but broad: on a busy project most
+TODOs will sit on runs nobody needs to sign off. Gating it on `failed + errored > 0` is a
+one-line change if the badge starts reading as noise. Left broad for now because a green run
+can still legitimately want explicit sign-off.
+
+### B18. The run header stacks into three rows on a phone
+
+At roughly 560px the title, the verdict badge and the ⋯ trigger each wrap onto their own
+line, spending three rows of height on what is one row on a tablet. A pre-existing
+consequence of `flex-wrap` in that header; desktop and tablet are unaffected.
+
 
 ---
 
