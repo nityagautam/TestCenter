@@ -1,19 +1,32 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
+import { RUN_VERDICT_LABELS, type RunVerdict } from "@testcenter/core";
 import {
   dailySeries,
   branchPassRates,
   failureConcentration,
   flakeDistribution,
   flakyLeaderboard,
+  latestRunVerdicts,
   listProjects,
   listRuns,
   orgSummary,
+  runActivity,
+  runSeries,
   slowestTests,
-  todaysRuns,
   topFailingTests,
 } from "@testcenter/db";
+import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { ChartToggle } from "@/components/charts/chart-toggle";
+import { OutcomeDonut } from "@/components/charts/outcome-donut";
 import { RankedBars } from "@/components/charts/ranked-bars";
+import { TimeRangeNav } from "@/components/time-range-nav";
+import {
+  awaitsVerdict,
+  VerdictBadge,
+  VERDICT_COLOR,
+  VERDICT_TODO_COLOR,
+} from "@/components/verdict-badge";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { VolumeChart } from "@/components/charts/volume-chart";
 import {
@@ -34,6 +47,7 @@ import {
   formatInteger,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
+import { readViewerTimeZone, TIMEZONE_COOKIE } from "@/lib/timezone";
 import { can, requirePageContext } from "@/lib/viewer";
 
 /**
@@ -45,6 +59,17 @@ import { can, requirePageContext } from "@/lib/viewer";
  * whether to care.
  */
 export const dynamic = "force-dynamic";
+
+/**
+ * A week, a fortnight, a month, six weeks, a quarter.
+ *
+ * One control drives every chart on the page, so the set has to serve all of them: 7 answers
+ * "how is this week going", 90 answers "is the trend real", and the middle three are the
+ * sprint lengths people actually plan in. `dailySeries` caps at 365 and `runSeries` at 300
+ * points, so the widest window degrades by dropping the oldest runs rather than by getting
+ * slower.
+ */
+const DAY_OPTIONS = [7, 15, 30, 45, 90] as const;
 
 export default async function OrgDashboard({
   params,
@@ -68,7 +93,15 @@ export default async function OrgDashboard({
   const context = await requirePageContext(orgSlug);
   const { sql } = getServices();
 
-  const days = Math.min(Math.max(Number(daysParam ?? 30), 7), 90);
+  // Written by TimezoneSync in the shell. Absent on a first visit, which renders in UTC and
+  // corrects itself the moment the cookie lands.
+  const timeZone = readViewerTimeZone((await cookies()).get(TIMEZONE_COOKIE)?.value);
+
+  // Snapped to the offered set so the URL and the highlighted button always agree.
+  // Defaults to a week. The page is opened to answer "how are we doing right now",
+  // and a 30-day window dilutes a bad Tuesday into a rounding error — the reader who
+  // wants the longer view asks for it, and the URL then carries the choice.
+  const days = DAY_OPTIONS.find((option) => option === Number(daysParam)) ?? 7;
   const orgId = context.org.id;
 
   // View selections. Each names a different question, not a different drawing — see
@@ -87,7 +120,8 @@ export default async function OrgDashboard({
     slowest,
     concentration,
     flakeBands,
-    todayRuns,
+    activity,
+    runPoints,
   ] = await Promise.all([
     orgSummary(sql, { orgId }),
     dailySeries(sql, { orgId, days }),
@@ -95,11 +129,27 @@ export default async function OrgDashboard({
     listRuns(sql, { orgId }, { limit: 6 }),
     flakyLeaderboard(sql, { orgId, limit: 6 }),
     topFailingTests(sql, { orgId, limit: 6 }),
-    slowestTests(sql, { orgId, limit: 6 }),
-    failureConcentration(sql, { orgId, limit: 6 }),
+    // Twenty, not six: these two lists scroll now, and the tail is the part that says
+    // whether this is one bad test or something systemic.
+    slowestTests(sql, { orgId, limit: 20 }),
+    failureConcentration(sql, { orgId, limit: 20 }),
     flakeDistribution(sql, { orgId }),
-    todaysRuns(sql, { orgId, limit: 24 }),
+    runActivity(sql, { orgId, days, timeZone: timeZone.zone }),
+    runSeries(sql, { orgId, days, timeZone: timeZone.zone }),
   ]);
+
+  /*
+   * Batched after the queries above, which is where the run ids come from — and batched
+   * across *both* consumers.
+   *
+   * The recent-runs list and the outcome chart's verdict ribbon want the same thing for
+   * overlapping sets of runs. Two calls would issue two queries and fetch the last six runs'
+   * verdicts twice; the union is deduplicated here and both read from one map.
+   */
+  const verdictRunIds = [
+    ...new Set([...recent.runs.map((run) => run.id), ...runPoints.map((run) => run.id)]),
+  ];
+  const recentVerdicts = await latestRunVerdicts(sql, { orgId, runIds: verdictRunIds });
 
   // Only fetched for the view that needs it: the aggregate chart is the default, and
   // paying for a per-branch split on every dashboard load would be waste.
@@ -145,6 +195,9 @@ export default async function OrgDashboard({
   }
 
   const hasHistory = series.some((point) => point.runs > 0);
+  // Newest first, so the head of the list the "Recent runs" card already fetched is also
+  // the run the donut is about. No extra query.
+  const lastRun = recent.runs[0] ?? null;
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-6">
@@ -158,21 +211,15 @@ export default async function OrgDashboard({
               : "no runs yet"}
           </p>
         </div>
-        <nav className="flex gap-1" aria-label="Time range">
-          {[7, 30, 90].map((option) => (
-            <Link
-              key={option}
-              href={`/o/${orgSlug}?days=${option}`}
-              className={`rounded-md border px-2 py-1 text-xs ${
-                days === option
-                  ? "border-[var(--color-ink-muted)] font-semibold"
-                  : "border-[var(--color-border-subtle)] text-[var(--color-ink-muted)] hover:border-[var(--color-ink-muted)]"
-              }`}
-            >
-              {option}d
-            </Link>
-          ))}
-        </nav>
+        {/* Through viewHref, so changing the range keeps the chart views. These links
+            used to be built by hand and reset volume/rate/duration on every click. */}
+        <TimeRangeNav
+          options={DAY_OPTIONS.map((option) => ({
+            days: option,
+            href: viewHref({ days: String(option) }),
+            active: days === option,
+          }))}
+        />
       </div>
 
       <Card className="mb-5">
@@ -207,39 +254,75 @@ export default async function OrgDashboard({
       {hasHistory ? (
         <>
           {/*
-           * Today, one column per run — placed above the 30-day charts on purpose.
+           * Two thirds to the window's outcomes, one third to its rhythm.
            *
-           * Someone watching a suite finish is asking "is this run worse than the last
-           * one?", and every chart below answers only "how has the month gone". A daily
-           * rollup cannot answer it at all: it averages today's runs together, so a single
-           * bad run hides inside the day's number until tomorrow.
+           * They are the same days asked two different questions, which is why they lead the
+           * page together: the stacked columns read along time and answer "how much, and how
+           * much of it was red"; the heatmap folds those same days into weeks and answers
+           * "when does this actually run". The split is not cosmetic — the columns carry one
+           * mark per day over a 90-day window and need the width, while the heatmap is a
+           * fixed 7×N lattice that gains nothing from it.
            */}
-          <Card className="mb-5 p-4">
-            <VolumeChart
-              title={`Today — ${todayRuns.length} run${todayRuns.length === 1 ? "" : "s"}, newest right`}
-              height={140}
-              mode={shareView ? "share" : "counts"}
-              days={todayRuns.map((run) => ({
-                label: run.label,
-                passed: run.passed,
-                failed: run.failed,
-                skipped: run.skipped,
-                flaky: run.flaky,
-                runs: 1,
-              }))}
-              action={
-                <ChartToggle
-                  label="Today view"
-                  options={[
-                    { label: "counts", href: viewHref({ volume: null }), active: !shareView },
-                    { label: "share", href: viewHref({ volume: "share" }), active: shareView },
-                  ]}
-                />
-              }
-            />
-          </Card>
-
           <div className="mb-5 grid gap-5 lg:grid-cols-3">
+            <Card className="p-4 lg:col-span-2">
+              <VolumeChart
+                title="Execution over time"
+                shape="area"
+                mode={shareView ? "share" : "counts"}
+                /*
+                 * One point per run, not per day.
+                 *
+                 * A daily rollup averages the executions inside it, so a single run at 40%
+                 * beside four at 100% reads as a mildly bad day and the bad run disappears.
+                 * The window still bounds the axis; what changed is that the axis is now
+                 * executions in time order rather than calendar buckets.
+                 */
+                days={runPoints.map((run) => ({
+                  label: run.label,
+                  detail: [run.name ?? run.status, run.branch].filter(Boolean).join(" · "),
+                  href: `/o/${orgSlug}/runs/${run.id}`,
+                  ribbon: ribbonFor(recentVerdicts.get(run.id)?.verdict ?? null),
+                  passed: run.passed,
+                  failed: run.failed,
+                  skipped: run.skipped,
+                  flaky: run.flaky,
+                  runs: 1,
+                }))}
+                action={
+                  <ChartToggle
+                    label="Outcome view"
+                    options={[
+                      { label: "counts", href: viewHref({ volume: null }), active: !shareView },
+                      { label: "share", href: viewHref({ volume: "share" }), active: shareView },
+                    ]}
+                  />
+                }
+              />
+            </Card>
+
+            {/* `flex flex-col` on the card is what gives the figure a height to fill: a
+                stretched grid item is only as tall as its row, and `h-full` inside it
+                resolves to nothing unless the card itself is a flex container. */}
+            <Card className="flex flex-col p-4">
+              <ActivityHeatmap
+                title="When"
+                buckets={activity}
+                days={days}
+                unit="run"
+                timeZoneLabel={timeZone.label}
+                action={
+                  <span className="text-[11px] text-[var(--color-ink-muted)]">
+                    last {days} days
+                  </span>
+                }
+              />
+            </Card>
+          </div>
+
+          {/* Four across at 2xl, two at lg. The donut sits beside the pass-rate trend
+              because the pair answers "how are we doing" and "how did the last one go" —
+              the two questions people arrive with, in that order. */}
+          <div className="mb-5 grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
             <Card className="p-4">
               {branchView ? (
                 <RankedBars
@@ -291,28 +374,41 @@ export default async function OrgDashboard({
                 />
               )}
             </Card>
-            <Card className="p-4">
-              <VolumeChart
-                title="Tests by outcome"
-                mode={shareView ? "share" : "counts"}
-                days={series.map((point) => ({
-                  label: point.day,
-                  passed: point.passed,
-                  failed: point.failed,
-                  skipped: point.skipped,
-                  flaky: point.flaky,
-                  runs: point.runs,
-                }))}
-                action={
-                  <ChartToggle
-                    label="Outcome view"
-                    options={[
-                      { label: "counts", href: viewHref({ volume: null }), active: !shareView },
-                      { label: "share", href: viewHref({ volume: "share" }), active: shareView },
-                    ]}
-                  />
-                }
-              />
+            <Card className="flex flex-col p-4">
+              {/*
+               * The most recent run, not an aggregate of the window.
+               *
+               * `recent.runs` is ordered newest first and is not restricted to today, which
+               * matters on a Monday morning: a card reading "no runs" because nothing has
+               * started yet is worse than one showing Friday's last run. The hint states how
+               * many have run today so the two are never confused.
+               */}
+              {lastRun ? (
+                <OutcomeDonut
+                  title="Last run"
+                  passed={lastRun.passed}
+                  failed={lastRun.failed + lastRun.errored}
+                  skipped={lastRun.skipped}
+                  flaky={lastRun.flaky}
+                  action={
+                    <Link
+                      href={`/o/${orgSlug}/runs/${lastRun.id}`}
+                      className="text-[11px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+                    >
+                      {summary.runsToday} today
+                    </Link>
+                  }
+                  footnote={`${lastRun.name ?? lastRun.framework ?? "Run"} · ${lastRun.projectKey} · ${formatRelativeTime(lastRun.startedAt)}`}
+                />
+              ) : (
+                <OutcomeDonut
+                  title="Last run"
+                  passed={0}
+                  failed={0}
+                  skipped={0}
+                  emptyMessage="No runs yet."
+                />
+              )}
             </Card>
             <Card className="p-4">
               {/* Separate chart, never a second axis on the pass-rate plot: aligning two
@@ -353,11 +449,17 @@ export default async function OrgDashboard({
             <Card className="p-4">
               <RankedBars
                 title="Slowest tests (p95)"
+                maxVisible={5}
+                /*
+                 * The name alone. The suite path under each row was a second line of 10px
+                 * mono that doubled the height of the list and answered a question nobody
+                 * asks of a ranking — you are looking for *which test*, and the path is one
+                 * click away on the test's own page.
+                 */
                 bars={slowest.map((test) => ({
                   label: test.name,
                   value: test.p95DurationMs,
                   display: formatDuration(test.p95DurationMs),
-                  detail: test.suite,
                   href: `/o/${orgSlug}/tests/${test.id}`,
                 }))}
                 emptyMessage="No duration data yet."
@@ -367,6 +469,7 @@ export default async function OrgDashboard({
             <Card className="p-4">
               <RankedBars
                 title="Failure concentration"
+                maxVisible={5}
                 color="var(--color-status-failed)"
                 bars={concentration.tests.map((test) => ({
                   label: test.name,
@@ -535,6 +638,15 @@ export default async function OrgDashboard({
                         {run.name ?? run.framework ?? "Run"}
                       </Link>
                       <StatusBadge status={run.status} />
+                      {/* A badge is information, not a control — which is why it belongs on
+                          this glance widget even though the action menu deliberately does
+                          not. "Which of these still needs review?" is a glance question. */}
+                      {awaitsVerdict(run.status) ? (
+                        <VerdictBadge
+                          verdict={recentVerdicts.get(run.id)?.verdict ?? null}
+                          size="sm"
+                        />
+                      ) : null}
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] text-[var(--color-ink-muted)]">
                       <span>{run.projectKey}</span>
@@ -565,4 +677,19 @@ export default async function OrgDashboard({
       </Card>
     </main>
   );
+}
+
+/**
+ * A run's verdict as a ribbon cell.
+ *
+ * `null` is not "no verdict exists in the data" — it is the TODO state, which is a real
+ * thing to show: an unreviewed run is an open item. It is drawn in the same blue the badge
+ * uses so the strip and the badges on the runs list cannot be read as different states.
+ */
+function ribbonFor(verdict: string | null): { color: string; label: string } {
+  if (verdict === null) return { color: VERDICT_TODO_COLOR, label: "verdict TODO" };
+  const known = verdict in RUN_VERDICT_LABELS ? (verdict as RunVerdict) : null;
+  return known
+    ? { color: VERDICT_COLOR[known], label: `verdict ${RUN_VERDICT_LABELS[known]}` }
+    : { color: "var(--color-border-subtle)", label: `verdict ${verdict}` };
 }

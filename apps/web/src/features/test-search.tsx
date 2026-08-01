@@ -18,6 +18,7 @@ import {
   truncateMiddle,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
+import { viewerTimeZone } from "@/lib/timezone";
 import { can, requirePageContext } from "@/lib/viewer";
 
 /**
@@ -81,6 +82,7 @@ export async function TestSearch({
   query: TestSearchParams;
 }) {
   const context = await requirePageContext(orgSlug);
+  const tz = await viewerTimeZone();
   // Hoisted: the role does not change per row.
   const canEdit = can(context, "run:edit");
   const { sql } = getServices();
@@ -392,6 +394,8 @@ export async function TestSearch({
                             cells={outcomes.get(test.id) ?? []}
                             href={`/o/${orgSlug}/tests/${test.id}`}
                             testName={test.name}
+                            timeZone={tz.zone}
+                            timeZoneLabel={tz.label}
                           />
                         </td>
                         <td className="px-3 py-2 text-right font-mono whitespace-nowrap tabular-nums">

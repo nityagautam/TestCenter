@@ -2,6 +2,16 @@
 
 How to sign in, what each role can do, and how to work through the app.
 
+> **There is a guide inside the app, at <http://localhost:3000/help>.** It tells the same
+> story as a story: one build followed from the moment CI finishes to the moment somebody
+> decides whose problem it is, in five acts — a run arrives, something is red, is it always
+> red, how are we doing, who can do what. It illustrates itself with the app's own live
+> components rather than screenshots, so it cannot go stale, and it renders without a
+> session, so it is the link to put in an invitation mail. Press `?` anywhere in the app.
+>
+> This document is the reference the guide points back to: every role boundary measured
+> rather than described, the seeded accounts, the scenario projects, troubleshooting.
+
 ---
 
 ## Quick reference
@@ -39,6 +49,10 @@ cd /Users/amishra/workspace/code/poc/TestCenter
 # Postgres and Redis (installed via brew)
 brew services start postgresql@17
 brew services start redis
+
+# Build the workspace packages once — they resolve to dist/, so `pnpm dev`
+# cannot start without this on a fresh clone
+pnpm build
 
 # Apply migrations and provision partitions
 pnpm db:migrate
@@ -154,8 +168,10 @@ control what you can *do*, and are ordered — each includes everything below it
 | Dashboard, runs, tests, flaky, projects | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Upload results | | ✓ | ✓ | ✓ | ✓ |
 | Edit tags, quarantine tests | | ✓ | ✓ | ✓ | ✓ |
-| Delete runs | | | ✓ | ✓ | ✓ |
 | Create projects / edit project settings | | | ✓ | ✓ | ✓ |
+| Rename a run | | | | ✓ | ✓ |
+| Record a verdict on a run | | | | ✓ | ✓ |
+| **Delete a run** | | | | ✓ | ✓ |
 | Archive **and restore** projects | | | | ✓ | ✓ |
 | Manage members and API tokens | | | | ✓ | ✓ |
 | Platform admin area | | | | | superadmin only |
@@ -288,6 +304,7 @@ to the database — including a seed script or a compromised app — could mint 
 | `↵` | Open the highlighted result |
 | `esc` | Close the palette, a dropdown, or the mobile nav |
 | `[` | Collapse or expand the sidebar |
+| `?` | The in-app guide at `/help` |
 
 The palette searches tests by name fragment against the database, so `case_7` finds every
 matching test across all projects with its status. Collapsed, the sidebar keeps the
@@ -310,7 +327,10 @@ Scope is in the URL, so every link is shareable and unambiguous:
 /o/test-organisation/tests               test search (all projects)
 /o/test-organisation/tests/412070        one test's full history
 /o/test-organisation/flaky               flaky leaderboard
+/o/test-organisation/reports             reports — a question with blanks, answered
 /o/test-organisation/p/checkout-web      one project's dashboard
+/o/test-organisation/p/checkout-web/reports   the same questions, one project
+/help                                    the in-app guide (no sign-in needed)
 ```
 
 Pasting a link into Slack lands the recipient on exactly what you were looking at,
@@ -318,8 +338,47 @@ provided they have access.
 
 ### The dashboard
 
-Headline numbers first — pass rate, runs, tests, failing, flaky, quarantined — then three
-charts, then two named lists.
+Headline numbers first — pass rate, runs, tests, failing, flaky, quarantined — then the
+two lead charts, then a row of trends, then two rows of detail and two named lists.
+
+**Execution over time is one point per run, not per day.** A daily rollup averages the
+executions inside it, so a single run at 40% beside four at 100% reads as a mildly bad day
+and the bad run disappears. Every execution in the window is a point, oldest left; hover for
+the run's name, branch and counts, and click to open it. Under it runs the **verdict
+ribbon** — one cell per run, coloured by its verdict — which answers the question the chart
+provokes: *we had a bad week, but was any of it us?* A cluster of red points that is entirely
+orange underneath is an environment problem. The ribbon only appears once something in the
+window has been reviewed.
+
+**"When runs happen" is a punchcard** — hour of day across, weekday down, with the window's
+days folded onto seven rows so four Tuesdays stack into one. It answers a question no time
+series can: a scheduled suite is a vertical band, a weekly release is one bright cell, and
+ad-hoc publishing is scatter through office hours. A nightly job that silently stopped
+leaves a hole in its band. Shading is by quantile rather than by fraction of the busiest
+hour, so one enormous nightly does not flatten everything else into the palest step — which
+is why the legend says *fewer → more* instead of printing numbers on it. Every exact count
+is one hover away.
+
+**The last run** is a donut beside the pass-rate trend: all four outcomes, always listed,
+even at zero. Hover a slice and the centre reports it.
+
+Three charts carry a **view toggle** which changes the *question*, not the drawing:
+
+| Chart | Toggle | The two questions |
+| --- | --- | --- |
+| Execution over time | counts / share | "how much did we run" vs "what proportion failed" |
+| Pass rate | over time / by branch | "is the org healthy" vs "is *main* healthy" |
+| Run duration | average / total | per-run speed vs what CI is spending |
+
+Below them: **slowest tests** (p95, because a test that is usually fast and occasionally
+slow is the one worth finding), **failure concentration** (one bad test or systemic?), and
+the **flake score distribution**.
+
+The toggles live in the URL, so a view is shareable and survives a reload.
+
+**Times follow your machine.** Every timestamp, and both time axes, render in your own zone
+and say which one — `IST`, `PDT`, `UTC`. The very first page load renders in UTC and
+corrects itself once the browser has reported its zone.
 
 **"Flakiest tests" and "Most-failing tests" are deliberately separate lists.** A test
 that always fails is *broken*, not flaky, and scores 0 on flakiness. Mixing them is what
@@ -327,8 +386,10 @@ makes most flake dashboards useless. In the seeded data `test_case_7` fails 76 t
 of 89 runs and appears only in "most-failing"; the flaky list holds tests that pass
 *inconsistently*.
 
-Hover any chart for a per-day tooltip. Use the 7d / 30d / 90d buttons to change the
-window.
+Hover any chart for a per-day tooltip. Use the day buttons to change the window — 7 / 30 /
+90 on the organisation dashboard, 7 / 15 / 30 on a project, which is where day-to-day work
+happens and a quarter of history says little about whether the suite is healthy now. A
+project dashboard also states **when the suite last ran**, with a link to that run.
 
 ### Finding a test
 
@@ -341,7 +402,10 @@ filter is in the URL, so a useful view can be bookmarked.
 
 ### Reading a test's history — the main event
 
-Open any test (or click **history** next to a result on a run page). You get:
+Open any test — from the Tests list, or by clicking the **outcome strip** in the Recent
+column of a run's result table. That strip is the last handful of executions at a glance
+(`✓`/`✕` glyphs, newest on the right); the whole strip is one link to the full history. You
+get:
 
 1. **Stat tiles** — fail rate, runs, failures, flake score, average and p95 duration.
 2. **Execution history strip** — one cell per run, oldest on the left, `✓` pass, `✕`
@@ -361,8 +425,13 @@ dashboards while staying visible and still reported. It is not skipping or delet
 
 ### Uploading results
 
-**From the browser** — pick a project → Upload → drag JUnit XML files in, optionally set
-branch, environment and tags, then Upload. You land on the run and watch it parse live.
+**From the browser** — pick a project → Upload → drag JUnit XML files in, optionally set a
+**run name**, branch, environment and tags, then Upload. You land on the run and watch it
+parse live.
+
+Naming the run at upload is worth the two seconds: it is what every list, link and report
+identifies the run by afterwards. Drop several files at once and each becomes its own run,
+with the file name appended to the name you typed so they stay distinguishable.
 
 **From CI** — one command:
 
@@ -380,6 +449,51 @@ exactly when tests fail, which is when you most want the results.
 
 Supported today: **JUnit / xUnit XML** — pytest `--junitxml`, Playwright's junit
 reporter, Maven Surefire, Gradle, jest-junit, Cypress, Robot, TestNG.
+
+### Run actions: rename, tags, verdict, delete
+
+Every action on a run lives behind the **⋯** button at the top right of the run — and on
+each row of the runs list, so you do not have to open a run to act on it. The menu only
+lists what your role permits, and renders nothing at all if that is nothing.
+
+| Action | Who | Notes |
+| --- | --- | --- |
+| Rename… | admin | Empty clears the name, and the heading falls back to the framework |
+| Edit tags… | member | Chips with removal; add as `key:value` |
+| Add / change verdict… | admin | See below |
+| Delete run… | admin | Requires typing the run's name to confirm |
+
+Deleting asks you to **type the run's name** rather than clicking "yes". It is the only
+action here that destroys evidence — the results, their stack traces and the uploaded report
+all go, and trends are recalculated without them. Typing the name also makes it impossible
+to delete the run above the one you meant.
+
+### Verdicts — why a run looked the way it did
+
+A verdict is the one thing Test Center cannot work out for itself. "96%, 2 failing" does not
+distinguish a real regression from a UAT cluster being down, and that distinction decides
+who gets handed the problem.
+
+| Verdict | Means | Goes to |
+| --- | --- | --- |
+| **Pass** | Reviewed; the failures are known and tolerated | nobody |
+| **Product bug** | A genuine regression | a developer |
+| **Infra** | Environment or data, not the code under test | whoever owns the environment |
+| **Flaky** | Non-deterministic, so not a real signal | the test's author |
+| **Investigating** | Seen, not yet judged | you, later |
+
+A run nobody has judged shows a blue dashed **TODO** badge — so "what still needs review?"
+is answerable at a glance from the runs list, the dashboards and the run itself. TODO is
+never stored; it simply means no verdict exists yet, which is why it is distinct from
+*Investigating* (someone looked and has not finished).
+
+Verdicts are **append-only**. Changing your mind records a new entry and the previous one
+stays in the **verdict log** on the run page, marked superseded — because "who called this
+infra, and when?" has to stay answerable after the call changes. The log shows five entries
+and scrolls.
+
+They deliberately **do not** change any number: pass rates, trends and flake scores ignore
+verdicts entirely, so no chart shifts meaning because someone labelled a run.
 
 ### Creating a project
 

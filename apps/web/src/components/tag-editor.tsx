@@ -16,14 +16,23 @@ import { TagChip } from "@/components/ui";
 export function TagEditor({
   runId,
   initialTags,
+  showChips = true,
+  startOpen = false,
 }: {
   runId: string;
   initialTags: Record<string, string>;
+  /**
+   * False when the chips are already displayed elsewhere — on the run page they live in
+   * the metadata strip, so repeating them here would give two places to read one thing.
+   */
+  showChips?: boolean;
+  /** Opens straight into editing, for when the caller is an explicit "Edit tags" action. */
+  startOpen?: boolean;
 }) {
   const router = useRouter();
   const [tags, setTags] = useState(initialTags);
   const [draft, setDraft] = useState("");
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startOpen);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -76,11 +85,11 @@ export function TagEditor({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-1.5">
-        {entries.length === 0 && !editing ? (
+        {showChips && entries.length === 0 && !editing ? (
           <span className="text-[11px] text-[var(--color-ink-muted)]">No tags</span>
         ) : null}
 
-        {entries.map(([key, value]) =>
+        {(showChips || editing ? entries : []).map(([key, value]) =>
           editing ? (
             <TagChip
               key={key}

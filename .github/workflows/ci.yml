@@ -1,9 +1,17 @@
-name: CI
+name: CI (manual)
 
+# Disabled as an automatic workflow: `pr-checks.yml` is the only thing that runs by itself.
+#
+# Left in place rather than deleted, because it is the only coverage that exists for three
+# things nothing else checks — the unit tests, migration drift (a migration edited after it
+# was applied), and partition provisioning being idempotent. Deleting the file would delete
+# the knowledge of *how* to check them along with the trigger.
+#
+# `workflow_dispatch` means it never fires on a push or a pull request, and can still be run
+# on demand from the Actions tab — worth doing before a release, or after touching anything
+# under packages/db/sql.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}

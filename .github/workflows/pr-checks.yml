@@ -1,0 +1,59 @@
+name: PR checks
+
+# Pull requests only. Nothing runs on a push to a branch, and nothing runs on merge to
+# main — this is a gate on proposed changes, not a build of the trunk.
+on:
+  pull_request:
+    # `synchronize` is included deliberately, and it is the one addition to "on creation".
+    # Without it a PR that opens red can never go green: pushing the fix would not re-run
+    # the check, so the failing result from the first commit would stand for ever and the
+    # gate would have to be overridden by hand every time it caught something.
+    types: [opened, reopened, synchronize]
+
+# A new push supersedes the run in flight. Two runs of the same PR tell you nothing extra
+# and the older one is answering a question about code that no longer exists.
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint and compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # No Postgres, no Redis. Nothing here touches a database: that is what keeps this job
+    # under a couple of minutes and free of the flakiness that service containers bring.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Compile. Workspace packages resolve to their `dist/`, so this has to precede both
+      # steps below — without it `@testcenter/db` cannot be resolved and every downstream
+      # file reports a phantom error.
+      - name: Build
+        run: pnpm run build
+
+      # Before lint, because it is the cheapest check and the one most likely to fail on a
+      # PR from someone whose editor is not wired to Prettier. Failing in two seconds with
+      # "run pnpm format" is a better first result than failing after a build.
+      - name: Format
+        run: pnpm run format:check
+
+      - name: Lint
+        # Also enforces the portability guardrail: infrastructure SDKs may only be imported
+        # inside packages/adapters, so the hosting decision stays open.
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck

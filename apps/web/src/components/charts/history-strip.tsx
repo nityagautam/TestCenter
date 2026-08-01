@@ -52,6 +52,8 @@ export function HistoryStrip({
   cells,
   runHrefBase,
   title = "Execution history",
+  timeZone,
+  timeZoneLabel,
 }: {
   cells: HistoryCell[];
   /**
@@ -60,6 +62,16 @@ export function HistoryStrip({
    */
   runHrefBase: string;
   title?: string;
+  /**
+   * The viewer's zone, threaded from the server page.
+   *
+   * Deliberately not read from the browser here. This is a client component, but its first
+   * render is server HTML — resolving the zone locally would format one way on the server
+   * and another in the browser, which is the hydration bug the format module exists to
+   * prevent, multiplied by sixty cells.
+   */
+  timeZone?: string;
+  timeZoneLabel?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
 
@@ -106,10 +118,10 @@ export function HistoryStrip({
                 // Hit target is larger than the visual mark, which a 10px cell needs.
                 className="flex size-5 items-center justify-center rounded-sm text-[9px] leading-none font-bold text-white transition-transform hover:scale-110"
                 style={{ background: colorFor(cell) }}
-                title={`${labelFor(cell)} · ${formatAbsoluteTime(cell.startedAt)}`}
+                title={`${labelFor(cell)} · ${formatAbsoluteTime(cell.startedAt, timeZone, timeZoneLabel)}`}
                 aria-label={`Execution ${index + 1} of ${ordered.length}: ${labelFor(
                   cell,
-                )} on ${formatAbsoluteTime(cell.startedAt)}`}
+                )} on ${formatAbsoluteTime(cell.startedAt, timeZone, timeZoneLabel)}`}
               >
                 <span aria-hidden>{GLYPH[cell.status] ?? "?"}</span>
               </Link>
@@ -137,7 +149,7 @@ export function HistoryStrip({
                 {labelFor(active)}
               </span>
               <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                {formatAbsoluteTime(active.startedAt)}
+                {formatAbsoluteTime(active.startedAt, timeZone, timeZoneLabel)}
               </span>
               {active.branch ? (
                 <span className="font-mono text-[10px] text-[var(--color-ink-muted)]">

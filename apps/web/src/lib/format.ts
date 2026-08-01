@@ -43,24 +43,57 @@ export function formatPercent(value: string | number | null | undefined): string
  * what the database stores, and is labelled so it is never guessed at.
  */
 const DATE_LOCALE = "en-GB";
-const DISPLAY_TIME_ZONE = "UTC";
 
-const dayFormat = new Intl.DateTimeFormat(DATE_LOCALE, {
-  timeZone: DISPLAY_TIME_ZONE,
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-});
+/**
+ * The zone used when a caller does not name one.
+ *
+ * Still UTC, and still the right default: it matches what CI logs and what the database
+ * stores, and any call site that has not been given the viewer's zone renders the same
+ * string on the server and in the browser. A default of "whatever runtime this is" would
+ * reintroduce the hydration bug described above one unthreaded call site at a time.
+ */
+export const DEFAULT_DISPLAY_ZONE = "UTC";
 
-const dayTimeFormat = new Intl.DateTimeFormat(DATE_LOCALE, {
-  timeZone: DISPLAY_TIME_ZONE,
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
+/**
+ * The zone is a *parameter*, never module state.
+ *
+ * The tempting shortcut is a module-level `currentZone` that the server sets per request.
+ * On a server that is a cross-request data leak with a very quiet failure mode: two readers
+ * in different zones are served by the same process, and whoever renders second sees the
+ * first one's clock. Passing it explicitly is more typing and cannot do that.
+ *
+ * Formatters are cached per (zone, kind) because constructing an `Intl.DateTimeFormat` is
+ * expensive and a run page formats several hundred timestamps.
+ */
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function formatterFor(zone: string, withTime: boolean): Intl.DateTimeFormat {
+  const key = `${zone}|${withTime}`;
+  const cached = formatterCache.get(key);
+  if (cached) return cached;
+
+  const options: Intl.DateTimeFormatOptions = {
+    timeZone: zone,
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    ...(withTime ? { hour: "2-digit" as const, minute: "2-digit" as const, hour12: false } : {}),
+  };
+
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat(DATE_LOCALE, options);
+  } catch {
+    // An unusable zone must not take a page down over a timestamp. Fall back to the default
+    // and label it honestly — the caller passed something Intl does not recognise.
+    formatter = new Intl.DateTimeFormat(DATE_LOCALE, {
+      ...options,
+      timeZone: DEFAULT_DISPLAY_ZONE,
+    });
+  }
+  formatterCache.set(key, formatter);
+  return formatter;
+}
 
 /** Thousands separators without asking the runtime which ones it prefers. */
 const integerFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
@@ -74,7 +107,10 @@ export function formatInteger(value: number | null | undefined): string {
  * Relative time, because "3 minutes ago" answers the question people actually have
  * about a test run. Falls back to an absolute date once relative stops being useful.
  */
-export function formatRelativeTime(value: Date | string | null | undefined): string {
+export function formatRelativeTime(
+  value: Date | string | null | undefined,
+  timeZone: string = DEFAULT_DISPLAY_ZONE,
+): string {
   if (!value) return "—";
   const date = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(date.getTime())) return "—";
@@ -88,23 +124,37 @@ export function formatRelativeTime(value: Date | string | null | undefined): str
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return dayFormat.format(date);
+  // Only the fallback past a week is zone-dependent; "3h ago" is the same everywhere.
+  return formatterFor(timeZone, false).format(date);
 }
 
-/** Absolute, unambiguous, and identical on the server and in the browser. */
-export function formatAbsoluteTime(value: Date | string | null | undefined): string {
+/**
+ * Absolute, unambiguous, and identical on the server and in the browser.
+ *
+ * Always labelled with its zone. A bare "14:32" is a different instant to every reader, and
+ * this is a dashboard people compare against CI logs in another window.
+ */
+export function formatAbsoluteTime(
+  value: Date | string | null | undefined,
+  timeZone: string = DEFAULT_DISPLAY_ZONE,
+  /** What to print after the time. Defaults to the zone id when no abbreviation is known. */
+  label: string = timeZone,
+): string {
   if (!value) return "—";
   const date = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(date.getTime())) return "—";
-  return `${dayTimeFormat.format(date)} ${DISPLAY_TIME_ZONE}`;
+  return `${formatterFor(timeZone, true).format(date)} ${label}`;
 }
 
 /** Day only, for chart axis labels. */
-export function formatDay(value: Date | string | null | undefined): string {
+export function formatDay(
+  value: Date | string | null | undefined,
+  timeZone: string = DEFAULT_DISPLAY_ZONE,
+): string {
   if (!value) return "—";
   const date = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(date.getTime())) return "—";
-  return dayFormat.format(date);
+  return formatterFor(timeZone, false).format(date);
 }
 
 export function formatCount(value: number): string {

@@ -27,7 +27,8 @@ export type NavIcon =
   | "admin"
   | "upload"
   | "settings"
-  | "overview";
+  | "overview"
+  | "reports";
 
 export function NavLink({
   href,
@@ -184,6 +185,15 @@ function NavGlyph({ icon }: { icon: NavIcon }) {
     projects: (
       <>
         <path d="M2 5 L6.5 5 L8 7 L14 7 L14 13 L2 13 Z" />
+      </>
+    ),
+    // A document with a chart on it: the answer to a question, on a page you can hand over.
+    reports: (
+      <>
+        <path d="M3.5 2 L10 2 L12.5 4.5 L12.5 14 L3.5 14 Z" />
+        <path d="M6 11.5 L6 9" />
+        <path d="M8 11.5 L8 7" />
+        <path d="M10 11.5 L10 10" />
       </>
     ),
     members: (

@@ -151,6 +151,9 @@ export function CommandPalette({
         group: "Go to",
         href: `/o/${orgSlug}/settings/tokens`,
       },
+      // Reachable by three routes on purpose — the header button, `?`, and here — because
+      // someone who cannot find something is equally likely to try any of them.
+      { id: "nav-help", label: "Help — how Test Center works", group: "Go to", href: "/help" },
       ...(canUpload
         ? [
             {

@@ -135,6 +135,35 @@ export const shardSchema = z.object({
 export type Shard = z.infer<typeof shardSchema>;
 
 /**
+ * The verdicts an admin can record against a run.
+ *
+ * Declared once here and mirrored by a CHECK constraint in migration 0005. Two
+ * definitions of the same set will drift, so the API validates against this list and
+ * the database refuses anything that somehow gets past it — belt and braces on purpose,
+ * because a bad value would be stored forever in an append-only table.
+ *
+ * The order is the order they are offered in the UI: the two that end review first, then
+ * the two causes that route elsewhere, then the not-yet-decided state.
+ */
+export const RUN_VERDICTS = ["pass", "product-bug", "infra", "flaky", "investigating"] as const;
+
+export type RunVerdict = (typeof RUN_VERDICTS)[number];
+
+/** Long enough to explain a judgement, short enough to read in a list row. */
+export const MAX_VERDICT_NOTE_LENGTH = 500;
+
+export const runVerdictSchema = z.enum(RUN_VERDICTS);
+
+/** Human labels, so the UI and any future export agree on wording. */
+export const RUN_VERDICT_LABELS: Record<RunVerdict, string> = {
+  pass: "Pass",
+  "product-bug": "Product bug",
+  infra: "Infra",
+  flaky: "Flaky",
+  investigating: "Investigating",
+};
+
+/**
  * Cap on a run's display name, shared by every path that can set one.
  *
  * `runs.name` is an unbounded `text` column, so without this the single-shot ingest

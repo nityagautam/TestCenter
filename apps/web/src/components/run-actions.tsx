@@ -2,8 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MAX_RUN_NAME_LENGTH } from "@testcenter/core";
+import {
+  MAX_RUN_NAME_LENGTH,
+  MAX_VERDICT_NOTE_LENGTH,
+  RUN_VERDICT_LABELS,
+  RUN_VERDICTS,
+  type RunVerdict,
+} from "@testcenter/core";
 import { ActionMenu, type ActionItem } from "@/components/action-menu";
+import { TagEditor } from "@/components/tag-editor";
 
 /**
  * Every action on a run, behind one ⋯ trigger.
@@ -20,7 +27,16 @@ import { ActionMenu, type ActionItem } from "@/components/action-menu";
  * name is, deleting shows its confirmation under the row. A modal would cover the very
  * thing you are deciding about — which run this is, and how many results it holds.
  */
-type Mode = "idle" | "rename" | "delete";
+/** One line each, so the picker is self-explanatory without documentation. */
+const VERDICT_HINTS: Record<RunVerdict, string> = {
+  pass: "Reviewed — the failures here are known and tolerated",
+  "product-bug": "A genuine regression; someone owns a fix",
+  infra: "Environment or data, not the code under test",
+  flaky: "Non-deterministic, so not a real signal either way",
+  investigating: "Seen, not yet judged",
+};
+
+type Mode = "idle" | "rename" | "delete" | "verdict" | "tags";
 
 export function RunActions({
   runId,
@@ -30,6 +46,10 @@ export function RunActions({
   totalTests,
   canRename,
   canDelete,
+  canVerdict = false,
+  canEditTags = false,
+  tags,
+  currentVerdict = null,
   deleteRedirectTo,
   align = "right",
 }: {
@@ -42,6 +62,12 @@ export function RunActions({
   totalTests: number;
   canRename: boolean;
   canDelete: boolean;
+  canVerdict?: boolean;
+  /** Tag editing is `run:edit` (member), unlike the admin-only actions beside it. */
+  canEditTags?: boolean;
+  tags?: Record<string, string>;
+  /** The verdict already on the run, so the picker opens on it rather than blank. */
+  currentVerdict?: string | null;
   /** Where to land after deleting; this run's own page will 404. */
   deleteRedirectTo: string;
   align?: "left" | "right";
@@ -50,6 +76,8 @@ export function RunActions({
   const [mode, setMode] = useState<Mode>("idle");
   const [draft, setDraft] = useState(name ?? "");
   const [confirmation, setConfirmation] = useState("");
+  const [verdict, setVerdict] = useState<string>(currentVerdict ?? "investigating");
+  const [verdictNote, setVerdictNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -64,7 +92,30 @@ export function RunActions({
     setMode("idle");
     setDraft(name ?? "");
     setConfirmation("");
+    setVerdict(currentVerdict ?? "investigating");
+    setVerdictNote("");
     setError(null);
+  }
+
+  async function saveVerdict(): Promise<void> {
+    setPending(true);
+    setError(null);
+
+    const response = await fetch(`/api/v1/runs/${runId}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ orgSlug, verdict, note: verdictNote.trim() || null }),
+    });
+
+    if (!response.ok) {
+      setError((await messageFrom(response)) ?? "could not record this verdict");
+      setPending(false);
+      return;
+    }
+    setPending(false);
+    setMode("idle");
+    setVerdictNote("");
+    router.refresh();
   }
 
   async function saveName(): Promise<void> {
@@ -115,6 +166,15 @@ export function RunActions({
   const items: ActionItem[] = [
     ...(canRename
       ? [{ label: name ? "Rename…" : "Name this run…", onSelect: () => setMode("rename") }]
+      : []),
+    ...(canEditTags && tags ? [{ label: "Edit tags…", onSelect: () => setMode("tags") }] : []),
+    ...(canVerdict
+      ? [
+          {
+            label: currentVerdict ? "Change verdict…" : "Add verdict…",
+            onSelect: () => setMode("verdict"),
+          },
+        ]
       : []),
     ...(canDelete
       ? [
@@ -174,6 +234,104 @@ export function RunActions({
           <span role="alert" className="basis-full text-[11px] text-[var(--color-status-failed)]">
             {error}
           </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (mode === "tags" && tags) {
+    return (
+      <div className="w-full max-w-md rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-3">
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <p className="text-xs font-medium">Tags</p>
+          <button
+            type="button"
+            onClick={reset}
+            className="text-[11px] text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
+          >
+            close
+          </button>
+        </div>
+        {/* Chips are rendered here while editing so removal targets exist; the read-only
+            view lives in the metadata strip, which is why the editor does not repeat them
+            when closed. */}
+        <TagEditor runId={runId} initialTags={tags} startOpen />
+      </div>
+    );
+  }
+
+  if (mode === "verdict") {
+    return (
+      <div className="w-full max-w-sm rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-3">
+        <p className="text-xs font-medium">Why did this run look like this?</p>
+        <p className="mt-1 text-[10px] leading-relaxed text-[var(--color-ink-muted)]">
+          Recorded against the run with your name and the time. Corrections are kept as history
+          rather than overwriting what was said before.
+        </p>
+
+        <div className="mt-2.5 space-y-1">
+          {RUN_VERDICTS.map((option) => (
+            <label
+              key={option}
+              className={`flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-[11px] ${
+                verdict === option
+                  ? "bg-[var(--color-surface)] font-medium"
+                  : "hover:bg-[var(--color-surface)]"
+              }`}
+            >
+              <input
+                type="radio"
+                name={`verdict-${runId}`}
+                value={option}
+                checked={verdict === option}
+                onChange={() => setVerdict(option)}
+                className="mt-0.5"
+              />
+              <span className="min-w-0">
+                <span className="block">{RUN_VERDICT_LABELS[option]}</span>
+                <span className="block text-[10px] text-[var(--color-ink-muted)]">
+                  {VERDICT_HINTS[option]}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        <input
+          value={verdictNote}
+          onChange={(event) => setVerdictNote(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void saveVerdict();
+            if (event.key === "Escape") reset();
+          }}
+          maxLength={MAX_VERDICT_NOTE_LENGTH}
+          placeholder="Optional note — the sentence that helps the next person"
+          aria-label="Verdict note"
+          className="mt-2.5 w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-2 py-1 text-[11px] outline-none focus:border-[var(--color-ink-muted)]"
+        />
+
+        <div className="mt-2.5 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void saveVerdict()}
+            disabled={pending}
+            className="rounded-md bg-[var(--color-ink)] px-2.5 py-1 text-xs font-medium text-[var(--color-surface)] disabled:opacity-60"
+          >
+            {pending ? "saving…" : "Record verdict"}
+          </button>
+          <button
+            type="button"
+            onClick={reset}
+            className="px-1 text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
+          >
+            Cancel
+          </button>
+        </div>
+
+        {error ? (
+          <p role="alert" className="mt-2 text-[11px] text-[var(--color-status-failed)]">
+            {error}
+          </p>
         ) : null}
       </div>
     );
