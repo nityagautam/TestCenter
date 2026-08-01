@@ -21,7 +21,9 @@ import {
   formatRelativeTime,
   shortSha,
 } from "@/lib/format";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { getServices } from "@/lib/services";
+import { viewerTimeZone } from "@/lib/timezone";
 import { can, requirePageContext } from "@/lib/viewer";
 
 /**
@@ -52,6 +54,7 @@ export default async function TestDetailPage({
   const { orgSlug, testId } = await params;
   const { mode, show } = await searchParams;
   const context = await requirePageContext(orgSlug);
+  const tz = await viewerTimeZone();
   const { sql } = getServices();
 
   const numericId = Number(testId);
@@ -105,26 +108,26 @@ export default async function TestDetailPage({
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-6">
-      <nav className="mb-3 flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-ink-muted)]">
-        <Link href={`/o/${orgSlug}/tests`} className="hover:underline">
-          Tests
-        </Link>
-        <span>/</span>
-        <Link href={`/o/${orgSlug}/p/${test.projectKey}`} className="hover:underline">
-          {test.projectName}
-        </Link>
-        {test.suite ? (
-          <>
-            <span>/</span>
-            <Link
-              href={`/o/${orgSlug}/tests?suite=${encodeURIComponent(test.suite)}`}
-              className="truncate font-mono hover:underline"
-            >
-              {test.suite}
-            </Link>
-          </>
-        ) : null}
-      </nav>
+      {/* The suite crumb stays a *filter* on the test list rather than a page of its own —
+          suites have no page — but it sits in the trail because it is how someone thinks
+          about where a test lives. */}
+      <Breadcrumbs
+        backHref={`/o/${orgSlug}/p/${test.projectKey}/tests`}
+        items={[
+          { label: test.projectName, href: `/o/${orgSlug}/p/${test.projectKey}` },
+          { label: "Tests", href: `/o/${orgSlug}/p/${test.projectKey}/tests` },
+          ...(test.suite
+            ? [
+                {
+                  label: test.suite,
+                  href: `/o/${orgSlug}/tests?suite=${encodeURIComponent(test.suite)}`,
+                  mono: true,
+                },
+              ]
+            : []),
+          { label: test.name },
+        ]}
+      />
 
       <header className="mb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -205,6 +208,8 @@ export default async function TestDetailPage({
       <div className="mb-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card className="p-4">
           <HistoryStrip
+            timeZone={tz.zone}
+            timeZoneLabel={tz.label}
             cells={executions.map((execution) => ({
               resultId: execution.resultId,
               runId: execution.runId,
@@ -228,7 +233,7 @@ export default async function TestDetailPage({
           <TrendChart
             title="Duration over time"
             points={durations.map((entry) => ({
-              label: formatDay(entry.startedAt),
+              label: formatDay(entry.startedAt, tz.zone),
               value: entry.durationMs,
               detail: entry.status,
             }))}
@@ -353,7 +358,7 @@ export default async function TestDetailPage({
                   ) : null}
                   <span
                     className="font-mono text-[10px] text-[var(--color-ink-muted)]"
-                    title={formatAbsoluteTime(detail.startedAt)}
+                    title={formatAbsoluteTime(detail.startedAt, tz.zone, tz.label)}
                   >
                     {formatRelativeTime(detail.startedAt)}
                   </span>

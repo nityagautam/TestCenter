@@ -3,7 +3,9 @@ import { listProjects, orgSummary } from "@testcenter/db";
 import { PROJECT_SCOPE_COOKIE, readProjectScope } from "@/lib/project-scope";
 import { readSidebarState, SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { readThemePreference, THEME_COOKIE } from "@/lib/theme";
+import { readViewerTimeZone, TIMEZONE_COOKIE } from "@/lib/timezone";
 import { AppShell } from "@/components/app-shell";
+import { TimezoneSync } from "@/components/timezone-sync";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext } from "@/lib/viewer";
 
@@ -35,6 +37,9 @@ export default async function OrgLayout({
 
   const sidebar = readSidebarState(store.get(SIDEBAR_COOKIE)?.value);
   const theme = readThemePreference(store.get(THEME_COOKIE)?.value);
+  // Mounted once for the whole org area rather than per page, so the correction happens on
+  // whichever page the reader lands on first.
+  const timeZone = readViewerTimeZone(store.get(TIMEZONE_COOKIE)?.value);
 
   /*
    * Read here, in the server render, so a page whose URL carries no project still arrives
@@ -74,6 +79,7 @@ export default async function OrgLayout({
       initialSidebar={sidebar}
       initialTheme={theme}
     >
+      <TimezoneSync current={`${timeZone.zone}|${timeZone.label}`} />
       {children}
     </AppShell>
   );

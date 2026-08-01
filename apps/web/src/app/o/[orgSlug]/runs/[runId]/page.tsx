@@ -21,7 +21,9 @@ import {
   shortSha,
   truncateStart,
 } from "@/lib/format";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { getServices } from "@/lib/services";
+import { viewerTimeZone } from "@/lib/timezone";
 import { can, requirePageContext } from "@/lib/viewer";
 
 /**
@@ -53,6 +55,7 @@ export default async function RunPage({
   const { orgSlug, runId } = await params;
   const query = await searchParams;
   const context = await requirePageContext(orgSlug);
+  const tz = await viewerTimeZone();
   const orgId = context.org.id;
 
   const { sql } = getServices();
@@ -148,7 +151,7 @@ export default async function RunPage({
     {
       label: "Started",
       value: formatRelativeTime(run.startedAt),
-      title: formatAbsoluteTime(run.startedAt),
+      title: formatAbsoluteTime(run.startedAt, tz.zone, tz.label),
     },
     run.durationMs
       ? { label: "Duration", value: formatDuration(run.durationMs) }
@@ -176,20 +179,17 @@ export default async function RunPage({
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
-      <nav className="mb-4 flex items-center gap-2 text-xs text-[var(--color-ink-muted)]">
-        <Link href={`/o/${orgSlug}/runs`} className="hover:text-[var(--color-ink)] hover:underline">
-          Runs
-        </Link>
-        <span>/</span>
-        {/* The project-scoped path, not `?project=` on the org list: the crumb should put
-            you inside the project, with the header dropdown and project nav agreeing. */}
-        <Link
-          href={`/o/${orgSlug}/p/${run.projectKey}/runs`}
-          className="hover:text-[var(--color-ink)] hover:underline"
-        >
-          {run.projectKey}
-        </Link>
-      </nav>
+      {/* Project-scoped paths throughout, never `?project=` on the org list: a crumb should
+          put you *inside* the project, with the header dropdown and the project nav agreeing
+          with where you landed. */}
+      <Breadcrumbs
+        backHref={`/o/${orgSlug}/p/${run.projectKey}/runs`}
+        items={[
+          { label: run.projectKey, href: `/o/${orgSlug}/p/${run.projectKey}`, mono: true },
+          { label: "Runs", href: `/o/${orgSlug}/p/${run.projectKey}/runs` },
+          { label: run.name ?? run.framework ?? "Run" },
+        ]}
+      />
 
       <header className="mb-6">
         {/* items-start, and the title grouped with its badges: the ⋯ actions expand into
@@ -454,7 +454,7 @@ export default async function RunPage({
                 </span>
                 <span
                   className="shrink-0 font-mono text-[10px] text-[var(--color-ink-muted)]"
-                  title={formatAbsoluteTime(entry.createdAt)}
+                  title={formatAbsoluteTime(entry.createdAt, tz.zone, tz.label)}
                 >
                   {entry.authorName ?? entry.authorEmail ?? "removed account"} ·{" "}
                   {formatRelativeTime(entry.createdAt)}
@@ -649,6 +649,8 @@ export default async function RunPage({
                         </td>
                         <td className="px-4 py-2 align-top">
                           <OutcomeStrip
+                            timeZone={tz.zone}
+                            timeZoneLabel={tz.label}
                             cells={outcomes.get(result.testCaseId) ?? []}
                             href={`/o/${orgSlug}/tests/${result.testCaseId}`}
                             testName={result.name}

@@ -338,19 +338,35 @@ provided they have access.
 
 ### The dashboard
 
-Headline numbers first — pass rate, runs, tests, failing, flaky, quarantined — then
-**today's runs**, then the trend charts, then two rows of detail and two named lists.
+Headline numbers first — pass rate, runs, tests, failing, flaky, quarantined — then the
+two lead charts, then a row of trends, then two rows of detail and two named lists.
 
-**"Today" is one column per run, not per day.** Someone watching a suite finish is asking
-"is this run worse than the last one?", and a daily rollup cannot answer that until
-tomorrow — by then it has averaged the two together. A single bad run stands out here while
-the day's aggregate hides it.
+**Execution over time is one point per run, not per day.** A daily rollup averages the
+executions inside it, so a single run at 40% beside four at 100% reads as a mildly bad day
+and the bad run disappears. Every execution in the window is a point, oldest left; hover for
+the run's name, branch and counts, and click to open it. Under it runs the **verdict
+ribbon** — one cell per run, coloured by its verdict — which answers the question the chart
+provokes: *we had a bad week, but was any of it us?* A cluster of red points that is entirely
+orange underneath is an environment problem. The ribbon only appears once something in the
+window has been reviewed.
+
+**"When runs happen" is a punchcard** — hour of day across, weekday down, with the window's
+days folded onto seven rows so four Tuesdays stack into one. It answers a question no time
+series can: a scheduled suite is a vertical band, a weekly release is one bright cell, and
+ad-hoc publishing is scatter through office hours. A nightly job that silently stopped
+leaves a hole in its band. Shading is by quantile rather than by fraction of the busiest
+hour, so one enormous nightly does not flatten everything else into the palest step — which
+is why the legend says *fewer → more* instead of printing numbers on it. Every exact count
+is one hover away.
+
+**The last run** is a donut beside the pass-rate trend: all four outcomes, always listed,
+even at zero. Hover a slice and the centre reports it.
 
 Three charts carry a **view toggle** which changes the *question*, not the drawing:
 
 | Chart | Toggle | The two questions |
 | --- | --- | --- |
-| Tests by outcome | counts / share | "how much did we run" vs "what proportion failed" |
+| Execution over time | counts / share | "how much did we run" vs "what proportion failed" |
 | Pass rate | over time / by branch | "is the org healthy" vs "is *main* healthy" |
 | Run duration | average / total | per-run speed vs what CI is spending |
 
@@ -359,6 +375,10 @@ slow is the one worth finding), **failure concentration** (one bad test or syste
 the **flake score distribution**.
 
 The toggles live in the URL, so a view is shareable and survives a reload.
+
+**Times follow your machine.** Every timestamp, and both time axes, render in your own zone
+and say which one — `IST`, `PDT`, `UTC`. The very first page load renders in UTC and
+corrects itself once the browser has reported its zone.
 
 **"Flakiest tests" and "Most-failing tests" are deliberately separate lists.** A test
 that always fails is *broken*, not flaky, and scores 0 on flakiness. Mixing them is what

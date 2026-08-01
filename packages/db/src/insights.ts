@@ -29,6 +29,64 @@ export interface DailyPoint {
 }
 
 /**
+ * When runs actually start, bucketed by calendar day and hour of day.
+ *
+ * Read from `runs` directly rather than from `project_daily_stats`, because the rollup is
+ * keyed by day and the question here is specifically *within* the day — no aggregate that
+ * already exists can answer it. It counts runs rather than results: this measures CI
+ * cadence, not test volume, and one 5,000-test run is one event.
+ *
+ * Bucketed in the *viewer's* zone, which the caller supplies. It has to happen here rather
+ * than by shifting UTC buckets afterwards: India is UTC+5:30, so a UTC hour bucket spans two
+ * local hours and cannot be reassigned to one of them. Postgres also gets DST right across
+ * the window, which arithmetic on a fixed offset would not.
+ *
+ * Defaults to UTC — the first render before the browser has reported its zone.
+ *
+ * Sparse on purpose: only buckets with runs come back. A full 24 × 90 grid is 2,160 rows to
+ * ship for what is usually a few dozen non-empty ones, and the caller has to build the
+ * lattice anyway to draw it.
+ */
+export interface ActivityBucket {
+  /** `YYYY-MM-DD` in the requested zone. A real date, unlike `DailyPoint.day`. */
+  day: string;
+  /** 0–23 in the requested zone. */
+  hour: number;
+  runs: number;
+}
+
+export async function runActivity(
+  sql: Sql,
+  input: {
+    orgId: string;
+    projectId?: string | undefined;
+    days?: number;
+    /** IANA zone. Validated by the caller — Postgres raises on an unknown one. */
+    timeZone?: string | undefined;
+  },
+): Promise<ActivityBucket[]> {
+  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
+  const zone = input.timeZone ?? "UTC";
+
+  const rows = await sql<{ day: string; hour: number; runs: number }[]>`
+    SELECT
+      to_char(started_at AT TIME ZONE ${zone}, 'YYYY-MM-DD')      AS day,
+      EXTRACT(HOUR FROM started_at AT TIME ZONE ${zone})::int      AS hour,
+      count(*)::int                                               AS runs
+    FROM runs
+    WHERE org_id = ${input.orgId}
+      ${input.projectId ? sql`AND project_id = ${input.projectId}` : sql``}
+      AND started_at >= (now() - (${days - 1} || ' days')::interval)::date
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+  `;
+
+  // `count(*)` is bigint, and postgres.js hands int8 back as a string — the ::int cast in
+  // the query is what keeps that from reaching the caller as "3" instead of 3.
+  return rows.map((row) => ({ day: row.day, hour: row.hour, runs: Number(row.runs) }));
+}
+
+/**
  * Daily series for the trend charts.
  *
  * `generate_series` fills days with no runs so a quiet weekend shows as a gap rather
@@ -315,6 +373,85 @@ export async function todaysRuns(
       LIMIT ${limit}
     ) recent
     ORDER BY label ASC
+  `;
+
+  return rows;
+}
+
+/**
+ * Every run in the window, oldest first — one row per execution.
+ *
+ * The per-*day* series answers "how did the month go"; this answers "how did each run go",
+ * and they are not the same question. A day that rolled up to 96% can hide one run at 40%
+ * beside four at 100%, and the rollup will never show it — the bad run is averaged away the
+ * moment it lands. Plotting executions puts every one of them on the axis.
+ *
+ * Reads `runs` rather than `project_daily_stats` for the same reason `todaysRuns` does: the
+ * rollup has already thrown away the distinction being asked about. The denormalised counts
+ * on `runs` mean this is still one index scan on (org, started_at) with no join to results.
+ *
+ * Runs with no results are excluded. A pending or parsing run has nothing to plot yet, and a
+ * report that parsed to zero tests would otherwise draw a column of height zero — a visual
+ * claim that everything failed, when in fact nothing was measured.
+ */
+export interface RunPoint {
+  id: string;
+  /** `Mon DD HH:MM` in the requested zone — the axis is time, so the label carries both. */
+  label: string;
+  name: string | null;
+  branch: string | null;
+  status: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  flaky: number;
+}
+
+export async function runSeries(
+  sql: Sql,
+  input: {
+    orgId: string;
+    projectId?: string | undefined;
+    days?: number;
+    limit?: number;
+    /** IANA zone for the point labels, so the axis agrees with the heatmap beside it. */
+    timeZone?: string | undefined;
+  },
+): Promise<RunPoint[]> {
+  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
+  const zone = input.timeZone ?? "UTC";
+  /*
+   * Capped, and the cap keeps the *newest* runs.
+   *
+   * A busy organisation can publish a few thousand runs in ninety days, and every point
+   * becomes a hover target in the chart. Truncating the far end of the window degrades the
+   * axis gracefully — the recent history stays complete, which is the part anyone is looking
+   * at — whereas keeping the oldest would show a chart that stops before today.
+   */
+  const limit = Math.min(Math.max(input.limit ?? 300, 1), 1000);
+
+  const rows = await sql<RunPoint[]>`
+    SELECT id, label, name, branch, status, total, passed, failed, skipped, flaky
+    FROM (
+      SELECT
+        r.id,
+        r.started_at,
+        to_char(r.started_at AT TIME ZONE ${zone}, 'Mon DD HH24:MI') AS label,
+        r.name, r.branch, r.status,
+        r.total, r.passed, r.skipped, r.flaky,
+        (r.failed + r.errored) AS failed
+      FROM runs r
+      WHERE r.org_id = ${input.orgId}
+        ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+        AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+        AND r.total > 0
+      ORDER BY r.started_at DESC
+      LIMIT ${limit}
+    ) recent
+    -- Re-sorted ascending after the LIMIT, so the newest run is the rightmost point. Sorted
+    -- on the timestamp rather than the label: "Aug 01" sorts before "Jul 31" as text.
+    ORDER BY recent.started_at ASC
   `;
 
   return rows;

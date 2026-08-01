@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useState, type ReactNode } from "react";
 
 /**
  * One run's composition as a ring — "what is this run made of".
@@ -15,7 +17,10 @@ import type { ReactNode } from "react";
  * is the number people actually read first, and the legend then carries every count as text
  * beside its share.
  *
- * Server component — pure SVG, no client JavaScript. Nothing here is hover-only.
+ * A client component only for the hover: pointing at a slice or its legend row reports
+ * that outcome in the centre, where the total otherwise sits. Nothing is hover-*only* —
+ * every count and share is already printed in the legend, so the interaction shortens the
+ * path to a number rather than being the only way to reach one.
  */
 
 /** The fixed order every stacked thing in this app uses. Never sorted by size. */
@@ -67,6 +72,8 @@ export function OutcomeDonut({
   footnote?: string;
   emptyMessage?: string;
 }) {
+  const [hover, setHover] = useState<string | null>(null);
+
   const total = passed + failed + skipped;
   const values: Record<string, number> = {
     failed,
@@ -75,13 +82,22 @@ export function OutcomeDonut({
     skipped,
   };
 
+  /*
+   * The ring draws what exists; the legend lists all four, always.
+   *
+   * A zero arc is nothing — drawing it is impossible and faking a sliver would be a lie
+   * about the data. But *omitting* the row is a different lie: a legend showing only Pass
+   * and Fail reads as "this run had no skips and no flakes recorded", when the honest
+   * statement is "skipped: 0". The four outcomes are a fixed vocabulary, so the card should
+   * answer for all four every time and the reader should never have to notice an absence.
+   */
   const present = SEGMENTS.filter((segment) => (values[segment.key] ?? 0) > 0);
 
   if (total === 0) {
     return (
-      <figure className="min-w-0">
+      <figure className="flex h-full min-w-0 flex-col">
         <Caption title={title} action={action} />
-        <p className="rounded-md border border-[var(--color-border-subtle)] px-3 py-6 text-center text-[11px] text-[var(--color-ink-muted)]">
+        <p className="flex flex-1 items-center justify-center rounded-md border border-[var(--color-border-subtle)] px-3 py-6 text-center text-[11px] text-[var(--color-ink-muted)]">
           {emptyMessage}
         </p>
       </figure>
@@ -116,8 +132,19 @@ export function OutcomeDonut({
     .map((segment) => `${values[segment.key]} ${segment.label.toLowerCase()}`)
     .join(", ")}.`;
 
+  const hovered = SEGMENTS.find((segment) => segment.key === hover) ?? null;
+
   return (
-    <figure className="min-w-0">
+    /*
+     * Fills the card rather than sitting at the top of it.
+     *
+     * Grid items stretch to the tallest card in their row, and this one is the shortest —
+     * a 112px ring against a 160px trend plot. Left alone the surplus piles up underneath as
+     * a band of dead space that reads as a rendering fault. `h-full` plus a centred flexible
+     * middle spends it above and below instead, so the card looks composed at whatever
+     * height its neighbours impose.
+     */
+    <figure className="flex h-full min-w-0 flex-col">
       <Caption title={title} action={action} />
 
       {/*
@@ -129,7 +156,7 @@ export function OutcomeDonut({
        * thing here, so `min-w-0` on it is what lets the pair shrink instead of overflowing:
        * a flex item defaults to `min-width:auto` and refuses to go below min-content.
        */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-1 items-center justify-center gap-4 py-1">
         <div className="relative shrink-0">
           <svg viewBox="0 0 100 100" className="size-28" role="img" aria-label={summary}>
             {/* Track, so a ring made of thin slices still reads as a ring. */}
@@ -154,7 +181,16 @@ export function OutcomeDonut({
                   strokeWidth={STROKE}
                   strokeDasharray={`${arc.drawn} ${CIRCUMFERENCE - arc.drawn}`}
                   strokeDashoffset={-arc.offset}
-                  style={{ stroke: arc.color }}
+                  onMouseEnter={() => setHover(arc.key)}
+                  onMouseLeave={() => setHover(null)}
+                  style={{
+                    stroke: arc.color,
+                    // Everything else recedes rather than the target advancing: growing the
+                    // hovered arc would change its radius and therefore its apparent size,
+                    // which is the one thing a proportion chart must not do.
+                    opacity: hover === null || hover === arc.key ? 1 : 0.35,
+                    transition: "opacity 120ms",
+                  }}
                 />
               ))}
             </g>
@@ -162,9 +198,14 @@ export function OutcomeDonut({
           {/* The total, in the hole the ring gives you for free. Centred over the SVG rather
               than drawn as <text> so it inherits the page's font and tabular numerals. */}
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="font-mono text-xl font-semibold tabular-nums">{total}</span>
+            <span
+              className="font-mono text-xl font-semibold tabular-nums"
+              style={hovered ? { color: hovered.color } : undefined}
+            >
+              {hovered ? (values[hovered.key] ?? 0) : total}
+            </span>
             <span className="text-[10px] tracking-widest text-[var(--color-ink-muted)] uppercase">
-              {total === 1 ? "test" : "tests"}
+              {hovered ? hovered.label : total === 1 ? "test" : "tests"}
             </span>
           </div>
         </div>
@@ -176,10 +217,19 @@ export function OutcomeDonut({
          * the ring and as every stacked bar elsewhere.
          */}
         <dl className="min-w-0 flex-1 space-y-1.5">
-          {present.map((segment) => {
+          {SEGMENTS.map((segment) => {
             const value = values[segment.key] ?? 0;
             return (
-              <div key={segment.key} className="flex items-baseline gap-2">
+              <div
+                key={segment.key}
+                // Present but quiet: an outcome that did not happen is worth stating and
+                // not worth reading first.
+                onMouseEnter={() => setHover(value > 0 ? segment.key : null)}
+                onMouseLeave={() => setHover(null)}
+                className={`-mx-1 flex items-baseline gap-2 rounded px-1 transition-colors ${
+                  value === 0 ? "opacity-45" : ""
+                } ${hover === segment.key ? "bg-[var(--color-surface)]" : ""}`}
+              >
                 <span
                   className="size-2.5 shrink-0 translate-y-[1px] rounded-[2px]"
                   style={{ background: segment.color }}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
+import { smoothPath, type Point } from "@/components/charts/curve";
 import { formatDuration, formatPercent } from "@/lib/format";
 
 /**
@@ -97,24 +98,36 @@ export function TrendChart({
     index,
   }));
 
-  // Breaks in the line where data is missing are honest: a straight segment across a
-  // gap would imply measurements nobody took.
-  const segments: string[] = [];
-  let current: string[] = [];
+  /*
+   * Breaks in the line where data is missing are honest: a straight segment across a gap
+   * would imply measurements nobody took. Runs of present points are collected first and
+   * smoothed independently, so a curve is never fitted *through* a gap either — the
+   * interpolation only ever connects points that exist.
+   */
+  const runs: Point[][] = [];
+  let current: Point[] = [];
   for (const coordinate of coordinates) {
     if (coordinate.y === null) {
-      if (current.length > 1) segments.push(current.join(" "));
+      if (current.length > 1) runs.push(current);
       current = [];
       continue;
     }
-    current.push(`${current.length === 0 ? "M" : "L"}${coordinate.x},${coordinate.y}`);
+    current.push({ x: coordinate.x, y: coordinate.y });
   }
-  if (current.length > 1) segments.push(current.join(" "));
+  if (current.length > 1) runs.push(current);
 
-  const areaPath =
-    segments.length === 1
-      ? `${segments[0]} L${coordinates.at(-1)?.x ?? width},100 L${coordinates[0]?.x ?? 0},100 Z`
-      : null;
+  const segments = runs.map((run) => smoothPath(run));
+
+  /*
+   * The area reuses the *same* curve as the line, then drops to the baseline.
+   *
+   * Recomputing it would risk the fill and the stroke disagreeing by a fraction of a pixel,
+   * which shows up as a hairline of background colour along the top of the fill.
+   */
+  const areaRun = runs.length === 1 ? runs[0]! : null;
+  const areaPath = areaRun
+    ? `${smoothPath(areaRun)} L${areaRun.at(-1)!.x},100 L${areaRun[0]!.x},100 Z`
+    : null;
 
   const last = [...coordinates].reverse().find((coordinate) => coordinate.y !== null);
   const hovered = hover !== null ? coordinates[hover] : null;

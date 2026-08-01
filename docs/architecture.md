@@ -292,7 +292,7 @@ project-scoped ones — so every link is shareable and unambiguous.
 
 | Route | Contents |
 | --- | --- |
-| `/o/:org` | dashboard: KPI tiles, today-per-run, pass-rate/outcome/duration trends, slowest tests, failure concentration, flake distribution, leaderboards, recent runs |
+| `/o/:org` | dashboard: KPI tiles; outcome-per-run area chart (2/3) beside the activity heatmap (1/3); pass rate, last-run donut and duration; slowest tests, failure concentration, flake distribution; leaderboards; recent runs |
 | `/o/:org/runs` | filterable run list — search, branch/env/framework/tag facets, keyset pagination |
 | `/o/:org/runs/:id` | run detail: metadata strip, KPI tiles, verdict log, suite tree, failures-first results, output |
 | `/o/:org/tests` | test search + per-test outcome strips |
@@ -311,6 +311,15 @@ and the shell derives the selected project from the path, so the header dropdown
 the project nav vanished. Rendering the same component under both paths keeps one
 implementation *and* the scope. `/reports` is rendered by `features/reports.tsx` under both
 paths for the same reason.
+
+**Time zones.** Every timestamp and every time bucket renders in the viewer's zone. A server
+component cannot ask the browser what zone it is in, so `TimezoneSync` writes
+`Asia/Kolkata|IST` to a cookie and refreshes; `viewerTimeZone()` reads it during render and
+the zone is passed explicitly — to `formatAbsoluteTime`, and to `runActivity`/`runSeries`,
+which bucket `AT TIME ZONE <zone>` in SQL. It cannot be done by shifting UTC buckets
+afterwards: at UTC+5:30 an hour bucket spans two local hours. The label travels in the cookie
+beside the zone because deriving "IST" from "Asia/Kolkata" depends on the runtime's ICU data.
+The first render before the cookie exists is UTC, labelled as such.
 
 **The report panel contract** (`packages/core/src/reports.ts`) is the seam that lets a
 question catalog ship now and a chart builder arrive later without a rewrite. A panel is a
@@ -350,6 +359,11 @@ there is no saved-report table: the report *is* the link.
 | `charts/history-strip` | one test's outcomes, each cell a link (detail pages) |
 | `charts/outcome-strip` | compact strip for list rows — whole strip is one link (server component) |
 | `charts/chart-toggle` | switches a chart's *question*, via the URL |
+| `charts/volume-chart` | `shape="columns"\|"area"`; area mode is a smoothed stacked area with a value axis, per-point dots, verdict ribbon and click-through to the run |
+| `charts/outcome-donut` | one run's composition as a ring; all four outcomes always listed, hover reports a slice in the centre |
+| `charts/activity-heatmap` | punchcard — hour of day across, weekday down, square cells, quantile-bucketed |
+| `charts/curve` | monotone cubic interpolation shared by the line and area charts |
+| `timezone-sync` | writes the browser's zone to a cookie and refreshes; renders nothing |
 
 Two menus exist and answer the keyboard identically on purpose — differing behaviour
 between two menus in one app is worse than either behaviour alone.

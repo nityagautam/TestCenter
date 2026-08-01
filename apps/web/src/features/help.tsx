@@ -467,10 +467,10 @@ function ActFour() {
       </Illustration>
 
       <P>
-        The first chart under them is <Term>today&rsquo;s runs</Term>, and it is one column per{" "}
-        <em>run</em> rather than one per day. Somebody watching a suite finish is asking &ldquo;is
-        this run worse than the last one?&rdquo; — a daily rollup cannot answer that until tomorrow,
-        and by then it has averaged the bad run into the good ones.
+        The chart under them plots <Term>one point per run</Term>, not one per day. That is the
+        whole reason it is drawn this way: a daily rollup averages the executions inside it, so a
+        single run at 40% beside four at 100% reads as a mildly bad day and the bad run disappears.
+        Every execution in the window is a point, and clicking one opens that run.
       </P>
 
       <RunVersusDay />
@@ -482,11 +482,18 @@ function ActFour() {
       <Table
         columns={["Chart", "Toggle", "The two questions"]}
         rows={[
-          ["Tests by outcome", "counts / share", "how much did we run · what proportion failed"],
+          ["Execution over time", "counts / share", "how much did we run · what proportion failed"],
           ["Pass rate", "over time / by branch", "is the org healthy · is main healthy"],
           ["Run duration", "average / total", "per-run speed · what CI is spending"],
         ]}
       />
+
+      <P>
+        Beside it, <Term>when runs happen</Term> folds the same window into a punchcard — hour of
+        day across, weekday down — which answers what a time series cannot: whether the suite is on
+        a schedule at all. A nightly job is a vertical band; a nightly job that stopped is a band
+        with a hole in it.
+      </P>
 
       <P>
         Below them sit the named lists — slowest tests by p95, because a test that is usually fast

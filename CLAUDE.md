@@ -43,6 +43,16 @@ packages/adapters  the ONLY place S3/Redis/BullMQ SDKs may be imported
   rule blocks `@aws-sdk/*`, `ioredis`, `bullmq`, `postgres`, `drizzle-orm/*` and cloud
   vendor SDKs elsewhere. Depend on the ports in `packages/core` instead. This is what keeps
   the hosting decision open — do not work around it.
+- **A display time zone is a parameter, never module state.** The viewer's zone arrives in a
+  cookie (`lib/timezone.ts`) and is passed explicitly to every formatter and every query that
+  buckets by time. A module-level "current zone" the server sets per request is a
+  cross-request leak with a silent failure mode: two readers in different zones share a
+  process and the second one sees the first one's clock. Client components take it as a prop
+  and never resolve it locally — their first render is server HTML, and a mismatch there is
+  the hydration bug `format.ts` was written to prevent.
+- **Hour buckets cannot be shifted after the fact.** India is UTC+5:30, so a UTC hour spans
+  two local hours and belongs to neither. Anything grouped by hour is grouped
+  `AT TIME ZONE <viewer zone>` in SQL, where Postgres also gets DST right.
 - **`no-console`** except `warn`/`error`. Use the pino logger from `packages/core`.
 - **`consistent-type-imports`** — `import type { X }` for type-only imports.
 - **Every tenant-scoped query takes an explicit `orgId`.** There is deliberately no variant
@@ -80,6 +90,19 @@ Each of these cost real debugging time. They are in the code as comments too.
   shape falls back to solid black — no error, no warning, a diagram of black boxes for
   whoever opened the wrong browser. Pass token colours through `style` instead; both inherit,
   so a `<g>` still covers its children. `help-illustrations.tsx` does this throughout.
+- **A query's declared type describes the *column*, not what it returns.** `DailyPoint.day`
+  is typed `string` and holds `"Jul 20"` — `to_char(day, 'Mon DD')`, formatted for display.
+  Parsing it as a date yields `Invalid Date`, which crashed the heatmap and then, once that
+  was guarded, silently dropped every cell. Same family as the `int8` trap: read the SQL, not
+  the interface. `runActivity` and `runSeries` return real `YYYY-MM-DD` for this reason.
+- **Never key a chart's marks by their label.** Labels are not unique and were never promised
+  to be: two runs finishing in the same minute both render a column called `08:08`, React
+  warns, and it is free to drop one — silently losing a run from the chart. Position *is* the
+  identity in an ordered series; key by index.
+- **`preserveAspectRatio="none"` distorts everything round.** The chart viewBoxes are stretched
+  to their container, so an SVG `<circle>` renders as an ellipse whose eccentricity changes
+  with the card width, and `feDropShadow` blurs into a horizontal smear. Position dots as
+  absolute HTML and use a CSS `filter` — both run after layout, in device pixels.
 - **`animation-delay` applies to the first iteration only.** A staggered reveal built from
   per-element delays plays correctly once and then fires every element simultaneously on
   every later loop. Animate one clipping window over a fixed-width row instead.
@@ -99,6 +122,21 @@ Each of these cost real debugging time. They are in the code as comments too.
 - **Charts:** the form is chosen by the question the data answers. No dual-axis, ever. Only
   three categorical series tokens exist — fold a fourth into "other" rather than inventing
   a hue. Validate any new palette rather than eyeballing it.
+- **Magnitude has its own ramp.** `--color-scale-1..5` is the sequential scale, added for the
+  heatmap; the categorical tokens are identity and must never be reused for "how much". The
+  ramp is blue because every warm hue here is a reserved status token, and a warm heatmap of
+  *upload activity* reads as a map of failures.
+- **Bucket skewed data by quantile, not by fraction of the maximum.** One nightly job at forty
+  runs against hours of one or two puts everything in the palest step: accurate, and useless,
+  because the shape has been quantised away. When the ramp is quantile-based the legend says
+  fewer/more rather than printing numbers on a scale that is not linear.
+- **Smoothing must not overshoot.** Curves use monotone cubic (`charts/curve.ts`), never
+  Catmull-Rom: a pass rate of 100 → 96 → 100 drawn with a naive spline bulges *above* 100%,
+  and `yMax` clips the scale rather than the curve, so the lie renders outside the plot and
+  is cropped rather than caught.
+- **A stacked area cannot have the 2px gaps.** Its bands share an edge, so the form replaces
+  that encoding with a solid boundary stroke in each band's own colour. Fixed order and
+  legend counts are unchanged. Below ~30 points prefer columns, which keep the gaps.
 - **Motion must teach, and must end on its resting state.** The global
   `prefers-reduced-motion` rule collapses every animation to one 0.01ms iteration, so the
   100% keyframe is what those readers see — a loop that resets to "empty" at 100% shows them

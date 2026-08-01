@@ -236,8 +236,14 @@ export function AppShell({
         </NavLink>
       </NavSection>
 
+      {/* The heading is prefixed, because a bare project name sitting between "Organisation"
+          and "Settings" reads as a third category rather than as the name of the thing being
+          scoped to. */}
       {projectBase ? (
-        <NavSection title={currentProject?.name ?? "Project"} collapsed={collapsed}>
+        <NavSection
+          title={currentProject ? `Project: ${currentProject.name}` : "Project"}
+          collapsed={collapsed}
+        >
           <NavLink href={projectBase} icon="overview" exact collapsed={collapsed}>
             Overview
           </NavLink>

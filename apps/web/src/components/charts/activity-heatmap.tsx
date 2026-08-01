@@ -1,35 +1,43 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useState, type ReactNode } from "react";
 
 /**
- * When the suite actually runs — weekday × week, one cell per day.
+ * When runs start — hour of day across, weekday down.
  *
- * The question is *rhythm*, and it is the one question a time series cannot answer. The
- * pass-rate and volume charts run left to right, so a weekly cadence appears in them as
- * noise: five peaks and two troughs repeating, indistinguishable from instability. Folding
- * the same days into a calendar grid puts every Tuesday above every other Tuesday, and the
- * shape falls out — nightly on weekdays, nothing at weekends, or a team that only publishes
- * when someone remembers.
+ * Every other chart on this page reads along time; this one folds it. The window's days are
+ * collapsed onto seven rows, so four Tuesdays in a 30-day window land in the same row and
+ * their counts add up. That is the point: a *rhythm* only becomes visible once repetitions
+ * are stacked on top of one another. A nightly job at 02:00 is a vertical band down the
+ * weekday rows, a weekly release is one bright cell, and people running suites by hand are
+ * scatter through office hours.
  *
- * That makes it a diagnostic for the data as much as for the team. A blank Friday column on
- * a suite that is supposed to run nightly means the pipeline stopped publishing, and no
- * other chart here says so: the trend line simply carries on from Thursday to Saturday.
+ * Hours across rather than down, which is the punchcard convention and not an arbitrary
+ * choice: cells have to be square to be read as a matrix, and a square 24 × 7 grid is short
+ * and wide — about 110px tall at full card width. The transpose is 7 × 24, which at the same
+ * cell size is 360px of chart in a 100px-wide column, and at full width is 900px tall.
+ * Squares decide the orientation.
  *
- * Reads the daily series the dashboard has already fetched — no query of its own. Server
- * component, no client JavaScript.
+ * It also makes *absence* legible in a way no time series can. A nightly suite that stopped
+ * publishing leaves a band with a hole in it; on the trend charts the line simply carries on
+ * from Thursday to Saturday.
+ *
+ * Cells are totals over the window, not averages. "Six runs at 02:00 on Tuesdays" is the
+ * honest count of what happened; dividing by the number of Tuesdays yields a rate that reads
+ * as if it were measured, and 1.5 runs is not a thing that ever occurred. The tooltip states
+ * how many of that weekday the window held, so a total can be turned back into a rate by
+ * anyone who wants one.
  */
 
-/**
- * Monday-first, matching the working week the data is about.
- *
- * Sunday-first would split the weekend across the two ends of the grid, which is precisely
- * the block a reader is trying to see as a block.
- */
+const HOURS = 24;
+
+/** Monday first: the weekend belongs together at one end, not split across both. */
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
-const CELL = 13;
-const CELL_GAP = 3;
+const CELL_GAP = 2;
+const RAIL_WIDTH = 26;
+const HEADER_HEIGHT = 12;
 
-/** Five filled steps, plus an unfilled one for a day with no runs at all. */
 const STEPS = [
   "var(--color-scale-1)",
   "var(--color-scale-2)",
@@ -38,327 +46,316 @@ const STEPS = [
   "var(--color-scale-5)",
 ] as const;
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
-
-export interface ActivityDay {
-  /**
-   * A calendar day. Accepts both a `YYYY-MM-DD` string and a `Date`, because the type is
-   * not to be trusted — see `parseDay`.
-   */
-  day: string | Date;
-  value: number;
+export interface ActivityBucket {
+  /** `YYYY-MM-DD`, already in the viewer's zone. */
+  day: string;
+  /** 0–23, already in the viewer's zone. */
+  hour: number;
+  runs: number;
 }
 
-interface Cell {
-  date: Date;
-  value: number | null;
-}
-
-/**
- * Normalises a day to UTC midnight, whatever form it arrived in.
- *
- * `DailyPoint.day` is *typed* `string`, and it is not one: postgres.js decodes a `date`
- * column to a `Date`, so the template-string parse produced `Invalid Date` and the grid
- * threw on the first `toISOString()`. Nothing upstream noticed because the only other
- * consumer is `formatDay`, which accepts either. Same family as the `int8`-comes-back-a-
- * string trap — the declared type describes the column, not the driver.
- *
- * Everything downstream then reads UTC accessors. `new Date("2026-07-01")` is midnight
- * *UTC*, but `getDay()` reads it in the viewer's zone, so west of Greenwich every date lands
- * on the previous weekday and the whole grid shifts a column.
- *
- * The hours check is what makes the `Date` branch safe in both directions: postgres.js hands
- * back UTC midnight, so the UTC parts are the calendar day — but a driver or caller passing
- * *local* midnight would have its UTC parts roll back a day east of Greenwich. Reading the
- * local parts in that case keeps the day the day.
- */
-function parseDay(day: string | Date): Date | null {
-  if (day instanceof Date) {
-    if (Number.isNaN(day.getTime())) return null;
-    const utcMidnight = day.getUTCHours() === 0 && day.getUTCMinutes() === 0;
-    return utcMidnight
-      ? new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()))
-      : new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()));
-  }
-
-  // Date-only strings get an explicit UTC marker; anything longer is already a timestamp.
-  const parsed = new Date(/^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day}T00:00:00Z` : day);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
-}
-
-/** Monday index: JS numbers Sunday as 0, and this grid starts on Monday. */
+/** Monday-based index. JS numbers Sunday as 0, and this grid starts on Monday. */
 function weekdayIndex(date: Date): number {
   return (date.getUTCDay() + 6) % 7;
 }
 
 export function ActivityHeatmap({
   title,
+  buckets,
   days,
   action,
   unit = "run",
+  timeZoneLabel = "UTC",
   emptyMessage = "No activity in this period.",
 }: {
   title: string;
-  /** Ascending, one entry per calendar day. Gaps are days with zero, not missing days. */
-  days: ActivityDay[];
+  /** Sparse — only buckets that saw runs. */
+  buckets: ActivityBucket[];
+  /** Window length in days, used to count how many of each weekday it contained. */
+  days: number;
   action?: ReactNode;
-  /** Singular noun for the tooltip: "3 runs on Tue 14 Jul". */
   unit?: string;
+  /** Printed, never computed with — the buckets already arrive in this zone. */
+  timeZoneLabel?: string;
   emptyMessage?: string;
 }) {
-  /*
-   * Unparseable days are dropped, not rendered.
-   *
-   * A chart is not the place to discover a bad date: the alternative is the whole dashboard
-   * failing on one malformed row, which is what happened before `parseDay` returned null.
-   * A missing cell is a visible, survivable gap.
-   */
-  const parsed = days
-    .map((entry) => ({ date: parseDay(entry.day), value: entry.value }))
-    .filter((entry): entry is { date: Date; value: number } => entry.date !== null);
+  const [hover, setHover] = useState<{ weekday: number; hour: number } | null>(null);
 
-  if (parsed.length === 0) {
+  /*
+   * A fixed 7 × 24 lattice, always.
+   *
+   * Built from the axes rather than from the data, so an hour nobody ever publishes in is
+   * still drawn as an empty cell. A grid that dropped its empty columns would put 03:00
+   * beside 14:00 and destroy the only axis that makes this chart worth reading.
+   */
+  const grid: number[][] = Array.from({ length: WEEKDAYS.length }, () =>
+    new Array<number>(HOURS).fill(0),
+  );
+
+  for (const bucket of buckets) {
+    if (bucket.hour < 0 || bucket.hour > 23) continue;
+    const date = new Date(`${bucket.day}T00:00:00Z`);
+    if (Number.isNaN(date.getTime())) continue;
+    const weekday = weekdayIndex(date);
+    grid[weekday]![bucket.hour] = (grid[weekday]![bucket.hour] ?? 0) + bucket.runs;
+  }
+
+  /*
+   * How many of each weekday the window actually contained.
+   *
+   * A 30-day window holds four of some weekdays and five of others, so two equally bright
+   * cells can stand for different rates. Counted from the calendar rather than from the
+   * data, so a weekday that saw nothing still reports how many chances it had.
+   */
+  const occurrences = new Array<number>(WEEKDAYS.length).fill(0);
+  const now = new Date();
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  for (let offset = 0; offset < days; offset += 1) {
+    const index = weekdayIndex(new Date(end - offset * 86_400_000));
+    occurrences[index] = (occurrences[index] ?? 0) + 1;
+  }
+
+  const flat = grid.flat();
+  const max = Math.max(...flat, 0);
+  const total = flat.reduce((sum, value) => sum + value, 0);
+
+  if (total === 0) {
     return (
-      <figure className="min-w-0">
+      <figure className="flex h-full min-w-0 flex-col">
         <Caption title={title} action={action} />
-        <p className="rounded-md border border-[var(--color-border-subtle)] px-3 py-6 text-center text-[11px] text-[var(--color-ink-muted)]">
+        <p className="flex flex-1 items-center justify-center rounded-md border border-[var(--color-border-subtle)] px-3 py-6 text-center text-[11px] text-[var(--color-ink-muted)]">
           {emptyMessage}
         </p>
       </figure>
     );
   }
 
-  const first = parsed[0]!;
-  const last = parsed[parsed.length - 1]!;
+  const step = quantileScale(flat);
+  const peak = peakCell(grid);
 
-  /*
-   * The grid is padded to whole weeks at both ends with null cells rather than zero ones.
-   *
-   * A day before the window started is *unknown*, not quiet, and drawing it as an empty
-   * cell identical to a genuine zero would invent a fact — "nothing ran on the 28th" when
-   * the window simply began on the 30th. Nulls render as nothing at all.
-   */
-  const leading = weekdayIndex(first.date);
-  const trailing = 6 - weekdayIndex(last.date);
-
-  const cells: Cell[] = [];
-  for (let index = leading; index > 0; index -= 1) {
-    cells.push({ date: addDays(first.date, -index), value: null });
-  }
-  for (const entry of parsed) cells.push({ date: entry.date, value: entry.value });
-  for (let index = 1; index <= trailing; index += 1) {
-    cells.push({ date: addDays(last.date, index), value: null });
-  }
-
-  const weeks: Cell[][] = [];
-  for (let index = 0; index < cells.length; index += 7) {
-    weeks.push(cells.slice(index, index + 7));
-  }
-
-  const max = Math.max(...parsed.map((entry) => entry.value), 0);
-  const total = parsed.reduce((sum, entry) => sum + entry.value, 0);
-  const busiest = parsed.reduce((best, entry) => (entry.value > best.value ? entry : best), first);
-  const quietWeekdays = countQuietWeekdays(parsed);
-
-  /*
-   * Buckets are linear over the observed maximum, which is the honest default when the
-   * measure has no meaningful absolute ceiling — "busy" only means anything relative to this
-   * team's own busiest day. Any non-zero value reaches step 1, so a day with a single run is
-   * never drawn as an empty day.
-   */
-  const step = (value: number): number => {
-    if (value <= 0) return -1;
-    if (max <= 0) return 0;
-    return Math.min(Math.ceil((value / max) * STEPS.length) - 1, STEPS.length - 1);
-  };
-
-  /*
-   * The grid is one image with one accessible name, not 90 announced cells.
-   *
-   * A screen reader walking every square reads out three months of numbers to convey a
-   * shape, which is unusable. The name states what the shape *is*, and the footnote repeats
-   * the peak in visible text so the same fact is available without hovering anything.
-   */
   const label =
-    `${title}: ${total} ${unit}${total === 1 ? "" : "s"} between ${formatDate(first.date)} and ` +
-    `${formatDate(last.date)}. Busiest ${formatDate(busiest.date)} with ${busiest.value}. ` +
-    (quietWeekdays.length > 0
-      ? `No activity at all on ${listOf(quietWeekdays)}.`
-      : "Every weekday saw activity.");
+    `${title}: ${total} ${unit}${total === 1 ? "" : "s"} over ${days} days, by hour of day and weekday (${timeZoneLabel}). ` +
+    (peak
+      ? `Busiest ${WEEKDAYS[peak.weekday]} at ${formatHour(peak.hour)} with ${peak.value}.`
+      : "");
 
   return (
-    <figure className="min-w-0">
+    // Same reason as the donut: square cells fix this chart's height to a seventh of its
+    // width, so in a narrow card it is far shorter than the chart beside it. The grid takes
+    // the middle and the surplus is split above and below rather than dumped at the bottom.
+    <figure className="flex h-full min-w-0 flex-col">
       <Caption title={title} action={action} />
 
-      <div className="overflow-x-auto">
-        <div className="inline-flex gap-2" role="img" aria-label={label}>
-          {/* Weekday rail. Alternate labels only — seven stacked 10px words beside a 13px
-              grid is more text than grid, and the omitted rows are unambiguous. */}
-          <div
-            className="flex shrink-0 flex-col"
-            style={{ gap: CELL_GAP, paddingTop: 14 }}
-            aria-hidden
-          >
-            {WEEKDAYS.map((weekday, index) => (
+      {/*
+       * Rail and grid are siblings so the rail stretches to the grid's height, and each of
+       * its seven labels takes an equal share of it. The row heights are set by the cells'
+       * aspect ratio and are not known here — anything that hard-coded a height would drift
+       * out of alignment the moment the card resized.
+       */}
+      <div className="flex flex-1 items-center gap-1.5 py-1" role="img" aria-label={label}>
+        <div
+          className="flex shrink-0 flex-col"
+          style={{ gap: CELL_GAP, width: RAIL_WIDTH }}
+          aria-hidden
+        >
+          <span style={{ height: HEADER_HEIGHT }} />
+          {WEEKDAYS.map((weekday, weekdayIdx) => (
+            <span
+              key={weekday}
+              className={`flex flex-1 items-center justify-end text-[9px] leading-none font-medium tracking-wider uppercase ${
+                hover?.weekday === weekdayIdx
+                  ? "text-[var(--color-ink)]"
+                  : "text-[var(--color-ink-muted)]"
+              }`}
+            >
+              {weekday}
+            </span>
+          ))}
+        </div>
+
+        <div
+          className="relative flex min-w-0 flex-1 flex-col"
+          style={{ gap: CELL_GAP }}
+          onMouseLeave={() => setHover(null)}
+        >
+          {/* Hour scale, every sixth hour. Twenty-four labels do not fit a nine-pixel
+              column, and quarters of the day are the unit people actually reason in —
+              "overnight", "morning", "after lunch". The gaps read off the printed ones. */}
+          <div className="flex" style={{ gap: CELL_GAP, height: HEADER_HEIGHT }} aria-hidden>
+            {Array.from({ length: HOURS }, (_, hour) => (
               <span
-                key={weekday}
-                className="text-right text-[9px] leading-none text-[var(--color-ink-muted)]"
-                style={{ height: CELL, lineHeight: `${CELL}px`, width: 22 }}
+                key={hour}
+                className={`min-w-0 flex-1 text-center text-[8px] leading-none ${
+                  hover?.hour === hour ? "text-[var(--color-ink)]" : "text-[var(--color-ink-muted)]"
+                }`}
               >
-                {index % 2 === 0 ? weekday : ""}
+                {hour % 6 === 0 ? String(hour).padStart(2, "0") : ""}
               </span>
             ))}
           </div>
 
-          <div className="flex" style={{ gap: CELL_GAP }} aria-hidden>
-            {weeks.map((week, weekIndex) => (
-              <div key={weekIndex} className="flex flex-col" style={{ gap: CELL_GAP }}>
-                {/* Month label at the column where the month turns over, so a 90-day
-                    window is readable without a date under every week. */}
-                <span
-                  className="text-[9px] leading-none text-[var(--color-ink-muted)]"
-                  style={{ height: 11 }}
-                >
-                  {monthLabel(week, weeks[weekIndex - 1])}
-                </span>
-                {week.map((cell, dayIndex) => {
-                  const index = cell.value === null ? -1 : step(cell.value);
-                  return (
-                    <span
-                      // Position, not the date. The grid is a fixed 7×N lattice, so the
-                      // coordinate *is* the identity — and a key derived from the data
-                      // cannot then throw on a date the data got wrong.
-                      key={`${weekIndex}-${dayIndex}`}
-                      title={
-                        cell.value === null
-                          ? undefined
-                          : `${cell.value} ${unit}${cell.value === 1 ? "" : "s"} · ${formatDate(cell.date)}`
-                      }
-                      className="block rounded-[2px]"
-                      style={{
-                        width: CELL,
-                        height: CELL,
-                        // Outside the window: nothing. Inside but zero: the surface with a
-                        // hairline, so an idle day is visibly a day rather than a hole.
-                        background:
-                          cell.value === null
-                            ? "transparent"
-                            : index < 0
-                              ? "var(--color-surface)"
-                              : STEPS[index],
-                        boxShadow:
-                          cell.value === null
-                            ? undefined
-                            : index < 0
-                              ? "inset 0 0 0 1px var(--color-border-subtle)"
-                              : undefined,
-                      }}
-                    />
-                  );
-                })}
+          {grid.map((hours, weekdayIdx) => (
+            <div key={weekdayIdx} className="flex" style={{ gap: CELL_GAP }} aria-hidden>
+              {hours.map((value, hour) => {
+                const tone = step(value);
+                const active = hover?.weekday === weekdayIdx && hover.hour === hour;
+                return (
+                  <span
+                    key={hour}
+                    onMouseEnter={() => setHover({ weekday: weekdayIdx, hour })}
+                    // `aspect-square` is what makes a cell a cell: the width comes from the
+                    // flex share of the row, and the height follows it, so the grid stays
+                    // square at every card width instead of stretching into bricks.
+                    className="block aspect-square min-w-0 flex-1 rounded-[3px]"
+                    style={{
+                      /*
+                       * An empty hour is a pale fill, not an outline.
+                       *
+                       * Outlining 168 cells draws a grid of boxes and the eye reads the
+                       * lattice instead of the data in it. A wash keeps every cell present —
+                       * which matters, because "nothing ran here" is half of what this chart
+                       * says — while staying quiet enough that the populated cells are the
+                       * only thing with weight.
+                       */
+                      background:
+                        tone < 0
+                          ? "color-mix(in srgb, var(--color-border-subtle) 45%, transparent)"
+                          : STEPS[tone],
+                      boxShadow: active ? "inset 0 0 0 1.5px var(--color-ink)" : undefined,
+                      // Crosshair: the hovered row and column stay lit so a cell can be
+                      // traced back to its axes among 168 near-identical squares.
+                      opacity:
+                        hover === null || hover.weekday === weekdayIdx || hover.hour === hour
+                          ? 1
+                          : 0.45,
+                    }}
+                  />
+                );
+              })}
+            </div>
+          ))}
+
+          {hover ? (
+            /*
+             * Anchored to the hovered cell, flipping below the top rows and above the rest,
+             * so it never covers the cell it describes. Percentages rather than pixels: the
+             * row height is the cells' aspect ratio and changes with the card width.
+             */
+            <div
+              className="pointer-events-none absolute z-10 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1 shadow-md"
+              style={{
+                left: `${Math.min(Math.max(((hover.hour + 0.5) / HOURS) * 100, 12), 88)}%`,
+                top: `${((hover.weekday + (hover.weekday < 3 ? 1 : 0)) / WEEKDAYS.length) * 100}%`,
+                transform:
+                  hover.weekday < 3 ? "translate(-50%, 8px)" : "translate(-50%, calc(-100% - 8px))",
+              }}
+            >
+              <div className="font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
+                {WEEKDAYS[hover.weekday]} {formatHour(hover.hour)}–
+                {formatHour((hover.hour + 1) % 24)}
               </div>
-            ))}
-          </div>
+              <div className="font-mono text-[11px] whitespace-nowrap tabular-nums">
+                {grid[hover.weekday]?.[hover.hour] ?? 0} {unit}
+                {(grid[hover.weekday]?.[hover.hour] ?? 0) === 1 ? "" : "s"}
+              </div>
+              {/* The denominator, so a total can be read as a rate. Without it two equally
+                  bright cells can quietly mean different things. */}
+              <div className="font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
+                across {occurrences[hover.weekday]} {WEEKDAYS[hover.weekday]}
+                {occurrences[hover.weekday] === 1 ? "" : "s"}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
-      {/* Legend states both ends numerically. "Less → More" alone leaves the reader unable
-          to tell whether the darkest cell is four runs or four hundred. */}
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--color-ink-muted)]">
-        <span>0</span>
+      {/*
+       * "fewer → more", not a numeric axis.
+       *
+       * The steps are quantiles, so the ramp is deliberately *not* proportional to the
+       * count — labelling the ends with numbers would promise a linearity the scale does not
+       * have. The busiest cell is stated separately as the one number that anchors it, and
+       * every exact count is one hover away.
+       */}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--color-ink-muted)]">
+        <span>fewer</span>
         <span
-          className="block rounded-[2px]"
-          style={{
-            width: CELL - 2,
-            height: CELL - 2,
-            background: "var(--color-surface)",
-            boxShadow: "inset 0 0 0 1px var(--color-border-subtle)",
-          }}
+          className="block size-2 rounded-[2px]"
+          style={{ background: "color-mix(in srgb, var(--color-border-subtle) 45%, transparent)" }}
           aria-hidden
         />
         {STEPS.map((color) => (
           <span
             key={color}
-            className="block rounded-[2px]"
-            style={{ width: CELL - 2, height: CELL - 2, background: color }}
+            className="block size-2 rounded-[2px]"
+            style={{ background: color }}
             aria-hidden
           />
         ))}
         <span>
-          {max} {unit}
-          {max === 1 ? "" : "s"} a day
+          more · busiest {max} · {timeZoneLabel}
         </span>
       </div>
 
-      <p className="mt-2 text-[10px] leading-relaxed text-[var(--color-ink-muted)]">
-        Busiest {formatDate(busiest.date)} · {busiest.value} {unit}
-        {busiest.value === 1 ? "" : "s"}.{" "}
-        {quietWeekdays.length > 0
-          ? `Nothing ran on ${listOf(quietWeekdays)} in this window — a gap on a weekday usually means the pipeline stopped publishing, not that the suite went quiet.`
-          : "Every weekday saw at least one run."}
+      <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--color-ink-muted)]">
+        {peak
+          ? `Busiest ${WEEKDAYS[peak.weekday]} around ${formatHour(peak.hour)}. A schedule shows as a vertical band; scatter means people are publishing by hand.`
+          : `${total} ${unit}${total === 1 ? "" : "s"} in this window.`}
       </p>
     </figure>
   );
 }
 
-function addDays(date: Date, offset: number): Date {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + offset);
-  return next;
-}
-
-function formatDate(date: Date): string {
-  return `${WEEKDAYS[weekdayIndex(date)]} ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`;
-}
-
-/** Printed once per month, above the week the month starts in. */
-function monthLabel(week: Cell[], previous: Cell[] | undefined): string {
-  const inWindow = week.find((cell) => cell.value !== null);
-  if (!inWindow) return "";
-  const month = inWindow.date.getUTCMonth();
-  if (!previous) return MONTHS[month] ?? "";
-  const previousInWindow = previous.find((cell) => cell.value !== null);
-  const previousMonth = previousInWindow?.date.getUTCMonth();
-  return month === previousMonth ? "" : (MONTHS[month] ?? "");
-}
-
 /**
- * Weekdays that saw nothing across the whole window.
+ * Buckets by rank among the non-zero cells, not by fraction of the maximum.
  *
- * Only reported when the day appeared in the window at all, and Saturday and Sunday are
- * included deliberately — "nothing at weekends" is the normal, healthy answer, and stating
- * it is what makes a *weekday* in the same list alarming by contrast.
+ * Activity data is heavily skewed: one nightly job at 02:00 can be forty runs while every
+ * other populated hour is one or two. Divided by the maximum, all of those land in the
+ * lightest step and the chart is a single dark square on a flat wash — technically accurate
+ * and useless, because the shape it exists to show has been quantised away.
+ *
+ * Quantiles spend the ramp where the data actually is. The cost is that colour now means
+ * "busy relative to this team's other hours" rather than an absolute count, which is why the
+ * legend says fewer/more instead of printing numbers on it, and why the tooltip carries the
+ * real figure.
+ *
+ * Zero is never a bucket. An hour with no runs is a different kind of thing from a quiet
+ * one, and it gets the empty-cell treatment rather than the palest blue.
  */
-function countQuietWeekdays(entries: { date: Date; value: number }[]): string[] {
-  const seen = new Set<number>();
-  const active = new Set<number>();
-  for (const entry of entries) {
-    const index = weekdayIndex(entry.date);
-    seen.add(index);
-    if (entry.value > 0) active.add(index);
-  }
-  return WEEKDAYS.filter((_, index) => seen.has(index) && !active.has(index)).map(
-    (weekday) => weekday,
+function quantileScale(values: number[]): (value: number) => number {
+  const populated = values.filter((value) => value > 0).sort((a, b) => a - b);
+  if (populated.length === 0) return () => -1;
+
+  // Four cut points make five buckets. Duplicates collapse naturally — a grid where every
+  // populated hour saw exactly one run has identical thresholds and renders in one tone,
+  // which is the honest picture of a perfectly even schedule.
+  const cuts = [0.2, 0.4, 0.6, 0.8].map(
+    (fraction) =>
+      populated[Math.min(Math.floor(fraction * populated.length), populated.length - 1)]!,
   );
+
+  return (value: number): number => {
+    if (value <= 0) return -1;
+    for (let index = 0; index < cuts.length; index += 1) {
+      if (value <= cuts[index]!) return index;
+    }
+    return STEPS.length - 1;
+  };
 }
 
-function listOf(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+/** The single busiest weekday-and-hour cell, or null when nothing ran. */
+function peakCell(grid: number[][]): { weekday: number; hour: number; value: number } | null {
+  let best: { weekday: number; hour: number; value: number } | null = null;
+  grid.forEach((hours, weekday) => {
+    hours.forEach((value, hour) => {
+      if (value > 0 && (best === null || value > best.value)) best = { weekday, hour, value };
+    });
+  });
+  return best;
+}
+
+function formatHour(hour: number): string {
+  return `${String(hour).padStart(2, "0")}:00`;
 }
 
 function Caption({ title, action }: { title: string; action?: ReactNode }) {

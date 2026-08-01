@@ -22,6 +22,29 @@ const TONE: Record<RunVerdict, string> = {
   investigating: "bg-[var(--color-status-skipped)]/15 text-[var(--color-ink-muted)]",
 };
 
+/**
+ * The same assignments as `TONE`, as raw colour values.
+ *
+ * Kept immediately beside it, and not derived from it, because Tailwind resolves class
+ * names at build time — `bg-[var(--color-status-passed)]/12` cannot be constructed from a
+ * variable, so a single source would have to be the raw colour and every badge would lose
+ * its opacity modifier. Two lists is the lesser evil, and adjacency is what keeps them
+ * honest: a verdict added to one and not the other is visible in the same screenful.
+ *
+ * Used where a verdict has to be drawn rather than labelled — the ribbon under the outcome
+ * chart, where a cell is four pixels tall and there is no room for a word.
+ */
+export const VERDICT_COLOR: Record<RunVerdict, string> = {
+  pass: "var(--color-status-passed)",
+  "product-bug": "var(--color-status-failed)",
+  infra: "var(--color-series-2)",
+  flaky: "var(--color-status-flaky)",
+  investigating: "var(--color-status-skipped)",
+};
+
+/** Unreviewed. Blue, matching the badge: an open item, not a bad one. */
+export const VERDICT_TODO_COLOR = "var(--color-series-1)";
+
 export function VerdictBadge({
   verdict,
   size = "md",

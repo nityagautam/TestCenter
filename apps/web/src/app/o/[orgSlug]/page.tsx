@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
+import { RUN_VERDICT_LABELS, type RunVerdict } from "@testcenter/core";
 import {
   dailySeries,
   branchPassRates,
@@ -9,6 +11,8 @@ import {
   listProjects,
   listRuns,
   orgSummary,
+  runActivity,
+  runSeries,
   slowestTests,
   topFailingTests,
 } from "@testcenter/db";
@@ -17,7 +21,12 @@ import { ChartToggle } from "@/components/charts/chart-toggle";
 import { OutcomeDonut } from "@/components/charts/outcome-donut";
 import { RankedBars } from "@/components/charts/ranked-bars";
 import { TimeRangeNav } from "@/components/time-range-nav";
-import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
+import {
+  awaitsVerdict,
+  VerdictBadge,
+  VERDICT_COLOR,
+  VERDICT_TODO_COLOR,
+} from "@/components/verdict-badge";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { VolumeChart } from "@/components/charts/volume-chart";
 import {
@@ -38,6 +47,7 @@ import {
   formatInteger,
 } from "@/lib/format";
 import { getServices } from "@/lib/services";
+import { readViewerTimeZone, TIMEZONE_COOKIE } from "@/lib/timezone";
 import { can, requirePageContext } from "@/lib/viewer";
 
 /**
@@ -50,8 +60,16 @@ import { can, requirePageContext } from "@/lib/viewer";
  */
 export const dynamic = "force-dynamic";
 
-/** A week, a month, a quarter — the org view is about longer-run health than a project's. */
-const DAY_OPTIONS = [7, 30, 90] as const;
+/**
+ * A week, a fortnight, a month, six weeks, a quarter.
+ *
+ * One control drives every chart on the page, so the set has to serve all of them: 7 answers
+ * "how is this week going", 90 answers "is the trend real", and the middle three are the
+ * sprint lengths people actually plan in. `dailySeries` caps at 365 and `runSeries` at 300
+ * points, so the widest window degrades by dropping the oldest runs rather than by getting
+ * slower.
+ */
+const DAY_OPTIONS = [7, 15, 30, 45, 90] as const;
 
 export default async function OrgDashboard({
   params,
@@ -75,8 +93,15 @@ export default async function OrgDashboard({
   const context = await requirePageContext(orgSlug);
   const { sql } = getServices();
 
+  // Written by TimezoneSync in the shell. Absent on a first visit, which renders in UTC and
+  // corrects itself the moment the cookie lands.
+  const timeZone = readViewerTimeZone((await cookies()).get(TIMEZONE_COOKIE)?.value);
+
   // Snapped to the offered set so the URL and the highlighted button always agree.
-  const days = DAY_OPTIONS.find((option) => option === Number(daysParam)) ?? 30;
+  // Defaults to a week. The page is opened to answer "how are we doing right now",
+  // and a 30-day window dilutes a bad Tuesday into a rounding error — the reader who
+  // wants the longer view asks for it, and the URL then carries the choice.
+  const days = DAY_OPTIONS.find((option) => option === Number(daysParam)) ?? 7;
   const orgId = context.org.id;
 
   // View selections. Each names a different question, not a different drawing — see
@@ -85,24 +110,46 @@ export default async function OrgDashboard({
   const branchView = rateParam === "branch";
   const totalDurationView = durationParam === "total";
 
-  const [summary, series, projects, recent, flaky, failing, slowest, concentration, flakeBands] =
-    await Promise.all([
-      orgSummary(sql, { orgId }),
-      dailySeries(sql, { orgId, days }),
-      listProjects(sql, orgId),
-      listRuns(sql, { orgId }, { limit: 6 }),
-      flakyLeaderboard(sql, { orgId, limit: 6 }),
-      topFailingTests(sql, { orgId, limit: 6 }),
-      slowestTests(sql, { orgId, limit: 6 }),
-      failureConcentration(sql, { orgId, limit: 6 }),
-      flakeDistribution(sql, { orgId }),
-    ]);
+  const [
+    summary,
+    series,
+    projects,
+    recent,
+    flaky,
+    failing,
+    slowest,
+    concentration,
+    flakeBands,
+    activity,
+    runPoints,
+  ] = await Promise.all([
+    orgSummary(sql, { orgId }),
+    dailySeries(sql, { orgId, days }),
+    listProjects(sql, orgId),
+    listRuns(sql, { orgId }, { limit: 6 }),
+    flakyLeaderboard(sql, { orgId, limit: 6 }),
+    topFailingTests(sql, { orgId, limit: 6 }),
+    // Twenty, not six: these two lists scroll now, and the tail is the part that says
+    // whether this is one bad test or something systemic.
+    slowestTests(sql, { orgId, limit: 20 }),
+    failureConcentration(sql, { orgId, limit: 20 }),
+    flakeDistribution(sql, { orgId }),
+    runActivity(sql, { orgId, days, timeZone: timeZone.zone }),
+    runSeries(sql, { orgId, days, timeZone: timeZone.zone }),
+  ]);
 
-  // Batched after the list, which is where the run ids come from.
-  const recentVerdicts = await latestRunVerdicts(sql, {
-    orgId,
-    runIds: recent.runs.map((run) => run.id),
-  });
+  /*
+   * Batched after the queries above, which is where the run ids come from — and batched
+   * across *both* consumers.
+   *
+   * The recent-runs list and the outcome chart's verdict ribbon want the same thing for
+   * overlapping sets of runs. Two calls would issue two queries and fetch the last six runs'
+   * verdicts twice; the union is deduplicated here and both read from one map.
+   */
+  const verdictRunIds = [
+    ...new Set([...recent.runs.map((run) => run.id), ...runPoints.map((run) => run.id)]),
+  ];
+  const recentVerdicts = await latestRunVerdicts(sql, { orgId, runIds: verdictRunIds });
 
   // Only fetched for the view that needs it: the aggregate chart is the default, and
   // paying for a per-branch split on every dashboard load would be waste.
@@ -219,16 +266,27 @@ export default async function OrgDashboard({
           <div className="mb-5 grid gap-5 lg:grid-cols-3">
             <Card className="p-4 lg:col-span-2">
               <VolumeChart
-                title="Tests by outcome"
+                title="Execution over time"
                 shape="area"
                 mode={shareView ? "share" : "counts"}
-                days={series.map((point) => ({
-                  label: point.day,
-                  passed: point.passed,
-                  failed: point.failed,
-                  skipped: point.skipped,
-                  flaky: point.flaky,
-                  runs: point.runs,
+                /*
+                 * One point per run, not per day.
+                 *
+                 * A daily rollup averages the executions inside it, so a single run at 40%
+                 * beside four at 100% reads as a mildly bad day and the bad run disappears.
+                 * The window still bounds the axis; what changed is that the axis is now
+                 * executions in time order rather than calendar buckets.
+                 */
+                days={runPoints.map((run) => ({
+                  label: run.label,
+                  detail: [run.name ?? run.status, run.branch].filter(Boolean).join(" · "),
+                  href: `/o/${orgSlug}/runs/${run.id}`,
+                  ribbon: ribbonFor(recentVerdicts.get(run.id)?.verdict ?? null),
+                  passed: run.passed,
+                  failed: run.failed,
+                  skipped: run.skipped,
+                  flaky: run.flaky,
+                  runs: 1,
                 }))}
                 action={
                   <ChartToggle
@@ -242,11 +300,16 @@ export default async function OrgDashboard({
               />
             </Card>
 
-            <Card className="p-4">
+            {/* `flex flex-col` on the card is what gives the figure a height to fill: a
+                stretched grid item is only as tall as its row, and `h-full` inside it
+                resolves to nothing unless the card itself is a flex container. */}
+            <Card className="flex flex-col p-4">
               <ActivityHeatmap
-                title="When runs happen"
-                days={series.map((point) => ({ day: point.day, value: point.runs }))}
+                title="When"
+                buckets={activity}
+                days={days}
                 unit="run"
+                timeZoneLabel={timeZone.label}
                 action={
                   <span className="text-[11px] text-[var(--color-ink-muted)]">
                     last {days} days
@@ -311,7 +374,7 @@ export default async function OrgDashboard({
                 />
               )}
             </Card>
-            <Card className="p-4">
+            <Card className="flex flex-col p-4">
               {/*
                * The most recent run, not an aggregate of the window.
                *
@@ -386,11 +449,17 @@ export default async function OrgDashboard({
             <Card className="p-4">
               <RankedBars
                 title="Slowest tests (p95)"
+                maxVisible={5}
+                /*
+                 * The name alone. The suite path under each row was a second line of 10px
+                 * mono that doubled the height of the list and answered a question nobody
+                 * asks of a ranking — you are looking for *which test*, and the path is one
+                 * click away on the test's own page.
+                 */
                 bars={slowest.map((test) => ({
                   label: test.name,
                   value: test.p95DurationMs,
                   display: formatDuration(test.p95DurationMs),
-                  detail: test.suite,
                   href: `/o/${orgSlug}/tests/${test.id}`,
                 }))}
                 emptyMessage="No duration data yet."
@@ -400,6 +469,7 @@ export default async function OrgDashboard({
             <Card className="p-4">
               <RankedBars
                 title="Failure concentration"
+                maxVisible={5}
                 color="var(--color-status-failed)"
                 bars={concentration.tests.map((test) => ({
                   label: test.name,
@@ -607,4 +677,19 @@ export default async function OrgDashboard({
       </Card>
     </main>
   );
+}
+
+/**
+ * A run's verdict as a ribbon cell.
+ *
+ * `null` is not "no verdict exists in the data" — it is the TODO state, which is a real
+ * thing to show: an unreviewed run is an open item. It is drawn in the same blue the badge
+ * uses so the strip and the badges on the runs list cannot be read as different states.
+ */
+function ribbonFor(verdict: string | null): { color: string; label: string } {
+  if (verdict === null) return { color: VERDICT_TODO_COLOR, label: "verdict TODO" };
+  const known = verdict in RUN_VERDICT_LABELS ? (verdict as RunVerdict) : null;
+  return known
+    ? { color: VERDICT_COLOR[known], label: `verdict ${RUN_VERDICT_LABELS[known]}` }
+    : { color: "var(--color-border-subtle)", label: `verdict ${verdict}` };
 }

@@ -49,6 +49,8 @@ export function OutcomeStrip({
   cells,
   href,
   testName,
+  timeZone,
+  timeZoneLabel,
 }: {
   /** Oldest first — the order `recentOutcomes` returns. */
   cells: RecentOutcome[];
@@ -56,6 +58,9 @@ export function OutcomeStrip({
   href: string;
   /** Used only to name the destination for screen readers. */
   testName: string;
+  /** Passed in, not resolved here: a strip inside a client tree must format identically. */
+  timeZone?: string;
+  timeZoneLabel?: string;
 }) {
   if (cells.length === 0) {
     return (
@@ -76,7 +81,7 @@ export function OutcomeStrip({
   // accessible name — a screen reader gets the summary, not eight coloured boxes.
   const summary =
     `History for ${testName}: last ${cells.length} execution${cells.length === 1 ? "" : "s"}, ` +
-    `${failed} failed. Most recent ${labelFor(newest!)} ${formatAbsoluteTime(newest!.startedAt)}.`;
+    `${failed} failed. Most recent ${labelFor(newest!)} ${formatAbsoluteTime(newest!.startedAt, timeZone, timeZoneLabel)}.`;
 
   return (
     <Link
