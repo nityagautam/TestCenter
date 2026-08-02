@@ -4,7 +4,7 @@ Two lists. **Part A** records defects that were found and fixed, with the root c
 they are recognisable if they recur — most of them failed *silently*, which is why they
 are written down rather than just closed. **Part B** is outstanding work.
 
-Last updated 2026-07-29.
+Last updated 2026-07-31.
 
 ---
 
@@ -571,6 +571,33 @@ Phase 4 as planned. Nothing started.
 ### B12. SSE progress polls the database
 One indexed row per second for the seconds a parse takes. Fine now; if many concurrent
 viewers ever make it measurable, the poll body is the only thing that changes.
+
+### B15. No way to filter runs by verdict
+
+`?verdict=todo` — "what still needs my review?" — is the obvious companion to the verdict
+feature and is not implemented. Cheap now: it is a `NOT EXISTS` against `run_verdicts`, and
+`run_verdicts_org_verdict_idx` already exists for the recorded-value case.
+
+### B16. The publish script does not send a CI job URL
+
+Every run currently lacks `ci_job_url`, so the run page's CI cell never appears. The Azure
+pipeline variable is available (`SYSTEM_JOBURL`); adding `&jobUrl=` to the ingest call would
+make each run link back to the pipeline execution that produced it. Single line, and it is
+the one field that turns a run into a round trip to CI.
+
+### B17. TODO appears on every finished run, including all-green ones
+
+Derived from "no verdict row exists", which is correct but broad: on a busy project most
+TODOs will sit on runs nobody needs to sign off. Gating it on `failed + errored > 0` is a
+one-line change if the badge starts reading as noise. Left broad for now because a green run
+can still legitimately want explicit sign-off.
+
+### B18. The run header stacks into three rows on a phone
+
+At roughly 560px the title, the verdict badge and the ⋯ trigger each wrap onto their own
+line, spending three rows of height on what is one row on a tablet. A pre-existing
+consequence of `flex-wrap` in that header; desktop and tablet are unaffected.
+
 
 ---
 

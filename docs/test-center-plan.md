@@ -1,6 +1,16 @@
 # Test Center — Architecture & Phased Delivery Plan
 
-Status: draft v1 (2026-07-29)
+Status: draft v1 (2026-07-29). **Planning artifact and roadmap — not a description of the
+code as built.**
+
+> **Read [`architecture.md`](architecture.md) for what actually exists.** This document
+> records the reasoning, the phased plan and the open questions from before implementation.
+> Where the two disagree, the architecture reference is authoritative — most notably §9
+> below, which recommends shadcn/ui, TanStack Table/Query, Recharts and tRPC. None were
+> adopted: the UI, tables and charts are hand-built against the design tokens (which is what
+> allows the accessibility guarantees in §8 of the architecture doc), and the API is plain
+> Next.js route handlers. Phases 0–1 have shipped, plus a good deal of Phase 2 and 3 —
+> see the annotations in §7 and §8.
 Owner: Ashutosh Mishra
 
 ---
@@ -386,18 +396,30 @@ re-architecture. Do not build for it now.
 
 ## 7. Feature catalog
 
+Shipped items are marked ✅ as of 2026-07-31; see [`architecture.md`](architecture.md) for
+how each works. Unmarked entries remain outstanding, and the concrete ones are tracked in
+[`known-issues.md`](known-issues.md) Part B.
+
 ### Tier 1 — table stakes (Phases 1–2)
-1. Multi-format ingest via UI upload + API + CI integrations.
-2. Run list with rich filters: project, branch, env, status, framework, date, **tags**.
-3. Run detail: summary tiles, suite tree, result table, failure details, stack traces,
-   stdout/stderr, attachments (screenshot/video/trace).
+1. ✅ Multi-format ingest via UI upload + API + CI integrations (JUnit/xUnit family;
+   further parsers outstanding). Runs can be named at upload time.
+2. ✅ Run list with rich filters: project, branch, env, status, framework, **tags**, plus
+   free-text search over run name, branch and commit. Date-range filtering outstanding.
+3. ✅ Run detail: metadata strip, summary tiles, verdict log, suite tree, result table,
+   failure details, stack traces, stdout/stderr (including for *passed* tests, via
+   `?show=all`). Attachments are modelled but the viewer is outstanding.
 4. **Tagging system** — reserved keys (`env`, `branch`, `suite`, `browser`, `device`,
    `shard`, `release`, `owner`) + free-form `key:value`; auto-derived from CI env vars;
    editable post-upload; typeahead with facet counts; bulk tag/retag.
 5. Saved views — a named filter+tag combination pinned to a dashboard or shared with a team.
-6. Sharded/parallel run merging (one logical run from 8 CI shards).
-7. Projects, teams, roles, API tokens.
-8. Full-text search across test names and failure messages.
+   *(Outstanding — though every filter and view lives in the URL, so a bookmark already
+   serves much of this.)*
+6. Sharded/parallel run merging (one logical run from 8 CI shards). *(Outstanding — B9.)*
+7. ✅ Projects, teams, roles, API tokens.
+8. ✅ Full-text search across test names; trigram matching for mid-token fragments.
+9. ✅ **Run verdicts** — an admin records why a run looked the way it did
+   (`pass` / `product-bug` / `infra` / `flaky` / `investigating`), append-only with an audit
+   trail. Not in the original catalog; added 2026-07-31.
 
 ### Tier 2 — intelligence (Phase 3)
 9. **Test history & timeline** — per-test sparkline of last N runs, pass/fail heat strip,
@@ -603,6 +625,11 @@ Workspace), RLS + isolation suite (trigger: a second untrusted org), usage meter
 ---
 
 ## 9. Recommended stack
+
+> **As-planned, not as-built.** Kept for the reasoning. The adopted stack, with versions, is
+> in [`architecture.md` §1](architecture.md#1-tech-stack). Differences that matter: no
+> shadcn/ui, TanStack or Recharts (components and charts are hand-built), no tRPC (plain
+> route handlers), and Postgres 16/17 rather than "16+" in the abstract.
 
 | Layer | Recommendation | Why / alternative |
 |---|---|---|

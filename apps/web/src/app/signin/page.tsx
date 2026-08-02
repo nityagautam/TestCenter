@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { authStatus, signIn } from "@/auth";
 import { Card } from "@/components/ui";
@@ -31,6 +32,16 @@ export default async function SignInPage({
         </div>
         <p className="text-xs leading-relaxed text-[var(--color-ink-muted)]">
           Test intelligence for every framework. Sign in to see your organisations.
+        </p>
+        {/* Before the form, not after it: someone who has not decided whether they want an
+            account is the exact reader the guide is written for, and /help needs no session. */}
+        <p className="mt-2 text-xs">
+          <Link
+            href="/help"
+            className="text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+          >
+            New here? Read how it works
+          </Link>
         </p>
       </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
+import { smoothPath, type Point } from "@/components/charts/curve";
 import { formatDuration, formatPercent } from "@/lib/format";
 
 /**
@@ -97,24 +98,36 @@ export function TrendChart({
     index,
   }));
 
-  // Breaks in the line where data is missing are honest: a straight segment across a
-  // gap would imply measurements nobody took.
-  const segments: string[] = [];
-  let current: string[] = [];
+  /*
+   * Breaks in the line where data is missing are honest: a straight segment across a gap
+   * would imply measurements nobody took. Runs of present points are collected first and
+   * smoothed independently, so a curve is never fitted *through* a gap either — the
+   * interpolation only ever connects points that exist.
+   */
+  const runs: Point[][] = [];
+  let current: Point[] = [];
   for (const coordinate of coordinates) {
     if (coordinate.y === null) {
-      if (current.length > 1) segments.push(current.join(" "));
+      if (current.length > 1) runs.push(current);
       current = [];
       continue;
     }
-    current.push(`${current.length === 0 ? "M" : "L"}${coordinate.x},${coordinate.y}`);
+    current.push({ x: coordinate.x, y: coordinate.y });
   }
-  if (current.length > 1) segments.push(current.join(" "));
+  if (current.length > 1) runs.push(current);
 
-  const areaPath =
-    segments.length === 1
-      ? `${segments[0]} L${coordinates.at(-1)?.x ?? width},100 L${coordinates[0]?.x ?? 0},100 Z`
-      : null;
+  const segments = runs.map((run) => smoothPath(run));
+
+  /*
+   * The area reuses the *same* curve as the line, then drops to the baseline.
+   *
+   * Recomputing it would risk the fill and the stroke disagreeing by a fraction of a pixel,
+   * which shows up as a hairline of background colour along the top of the fill.
+   */
+  const areaRun = runs.length === 1 ? runs[0]! : null;
+  const areaPath = areaRun
+    ? `${smoothPath(areaRun)} L${areaRun.at(-1)!.x},100 L${areaRun[0]!.x},100 Z`
+    : null;
 
   const last = [...coordinates].reverse().find((coordinate) => coordinate.y !== null);
   const hovered = hover !== null ? coordinates[hover] : null;
@@ -142,9 +155,12 @@ export function TrendChart({
           aria-label={`${title}. ${present.length} points from ${points[0]?.label} to ${points.at(-1)?.label}.`}
         >
           <defs>
+            {/* Deep enough at the line to read as an area chart, gone by the baseline so
+                the fill never competes with the line that carries the actual values. */}
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity="0.14" />
-              <stop offset="100%" stopColor={color} stopOpacity="0.01" />
+              <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+              <stop offset="55%" stopColor={color} stopOpacity="0.12" />
+              <stop offset="100%" stopColor={color} stopOpacity="0.02" />
             </linearGradient>
           </defs>
 
@@ -174,6 +190,18 @@ export function TrendChart({
               strokeLinecap="round"
               strokeLinejoin="round"
               vectorEffect="non-scaling-stroke"
+              className="tc-line-shadow"
+              /*
+               * A CSS filter, not an SVG one.
+               *
+               * `feDropShadow` blurs in user space, and this viewBox is stretched by
+               * `preserveAspectRatio="none"` — a round blur becomes a horizontal smear at
+               * whatever the container's aspect ratio happens to be. CSS filters run after
+               * layout, in device pixels, so the shadow stays the same soft shadow at every
+               * width. Neutral rather than tinted, and barely there: it lifts the line off
+               * its own fill, which is all it is for.
+               */
+              style={{ filter: "drop-shadow(0 2px 3px rgb(0 0 0 / 0.22))" }}
             />
           ))}
 

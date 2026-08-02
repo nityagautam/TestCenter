@@ -67,9 +67,16 @@ export default tseslint.config(
     files: ["packages/db/src/**/*.ts", "packages/db/scripts/**/*.ts"],
     rules: { "no-restricted-imports": "off" },
   },
-  // CLI entrypoints and scripts legitimately write to stdout.
+  /*
+   * CLI entrypoints and scripts legitimately write to stdout.
+   *
+   * `.mjs` is included as well as `.ts` because a script with no build step is still a
+   * script — and plain ESM gets no ambient Node types from tsconfig, so `process` and
+   * `console` have to be declared here or every one-off tool trips `no-undef`.
+   */
   {
-    files: ["**/scripts/**/*.ts", "apps/worker/src/index.ts", "packages/db/src/migrate.ts"],
+    files: ["**/scripts/**/*.{ts,mjs}", "apps/worker/src/index.ts", "packages/db/src/migrate.ts"],
+    languageOptions: { globals: { process: "readonly", console: "readonly" } },
     rules: { "no-console": "off" },
   },
   {

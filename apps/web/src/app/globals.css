@@ -40,6 +40,31 @@
   --color-grid: #ecebe7;
 
   /*
+   * Sequential ramp — magnitude of one measure, never identity.
+   *
+   * The first non-categorical scale in the app, added for the activity heatmap. Five steps
+   * of the series-1 hue, terminating exactly on `--color-series-1` so the densest cell and
+   * the trend lines are the same blue rather than two blues that nearly match.
+   *
+   * Blue, and specifically not red, even though heatmaps are conventionally warm. Every
+   * warm hue here is a reserved status token, so a red heatmap of *upload activity* would
+   * read as a map of failures — the single most expensive misreading this dashboard could
+   * offer. Blue is already the app's "identity, not state" colour (it is why the unreviewed
+   * verdict badge is blue), which is what this measures: how much, not how bad.
+   *
+   * Steps are spaced by lightness rather than by mixing toward white at even intervals, so
+   * the middle of the ramp does not collapse into one indistinguishable band. Colour is
+   * still never the only encoding — every cell states its count in its tooltip and the
+   * figure states its peak as text, which is what makes the ramp safe rather than the
+   * spacing alone.
+   */
+  --color-scale-1: #dce8f8;
+  --color-scale-2: #b3cff0;
+  --color-scale-3: #7fb0e6;
+  --color-scale-4: #4a8ed8;
+  --color-scale-5: #2a78d6;
+
+  /*
    * Application chrome — the header band.
    *
    * Deliberately outside the data-colour space. Run this indigo through the palette
@@ -89,6 +114,15 @@
 
     --color-grid: #2b2b28;
 
+    /* Dark steps are chosen against the dark surface, not inverted from the light
+       ramp — an inversion puts the densest cell at near-white and inverts the whole
+       reading of the scale. Terminates on the dark --color-series-1 for the same reason. */
+    --color-scale-1: #1e3350;
+    --color-scale-2: #26456e;
+    --color-scale-3: #2e5b93;
+    --color-scale-4: #3372bd;
+    --color-scale-5: #3987e5;
+
     --color-chrome: #2b3252;
     --color-chrome-raised: #39416b;
     --color-chrome-border: #424a7a;
@@ -116,6 +150,14 @@
   --color-series-3: #199e70;
 
   --color-grid: #2b2b28;
+
+  /* Kept in step with the prefers-colour-scheme block above — an explicit dark choice must
+     not be a different dark from the system one. */
+  --color-scale-1: #1e3350;
+  --color-scale-2: #26456e;
+  --color-scale-3: #2e5b93;
+  --color-scale-4: #3372bd;
+  --color-scale-5: #3987e5;
 
   --color-chrome: #2b3252;
   --color-chrome-raised: #39416b;
@@ -215,4 +257,265 @@ thead.tc-sticky th {
   top: 0;
   z-index: 1;
   background: var(--color-surface-raised);
+}
+
+/*
+ * Help-page motion.
+ *
+ * Two loops, and only two: a run being parsed, and a flaky test disagreeing with itself.
+ * Both animate something the prose beside them can only assert — that results arrive
+ * progressively, and that the same test on the same commit can land either way. Anything
+ * that would merely decorate the page is static, because a help page people scroll slowly
+ * is the worst place to put movement that carries no information.
+ *
+ * Every keyframe set ends on the state that makes sense frozen. The global
+ * prefers-reduced-motion rule collapses these to a single 0.01ms iteration, so 100% is
+ * what a reader who opted out of motion actually sees: a finished run, and a flake row
+ * with mixed outcomes. A loop that reset to "empty" at 100% would show them nothing.
+ *
+ * The parse animation reveals a fixed-width strip through a clipping window rather than
+ * animating each cell with its own delay. `animation-delay` applies to the first iteration
+ * only, so a staggered fill plays once correctly and then, on every later loop, fires all
+ * fourteen cells simultaneously — the exact opposite of the point being made.
+ */
+@keyframes tc-help-reveal {
+  0% {
+    width: 0%;
+  }
+  40% {
+    width: 100%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+/* Three stacked status pills cross-fading in place: pending → parsing → complete. Paired
+   stops keep each switch near-instant, because a run's status changes, it does not fade. */
+@keyframes tc-help-cue-pending {
+  0%,
+  7% {
+    opacity: 1;
+  }
+  8%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes tc-help-cue-parsing {
+  0%,
+  7% {
+    opacity: 0;
+  }
+  8%,
+  40% {
+    opacity: 1;
+  }
+  41%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes tc-help-cue-complete {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  41%,
+  100% {
+    opacity: 1;
+  }
+}
+
+/*
+ * The flake flip: a fail layer blinking over a permanent pass layer.
+ *
+ * Two variants ending on opposite states, spread across four cells with mismatched
+ * durations, so the row never settles into a rhythm — a regular blink would read as a
+ * loading indicator, which is precisely the wrong idea. At rest the row is mixed, which is
+ * the definition being illustrated.
+ */
+@keyframes tc-help-flip-fail {
+  0%,
+  24% {
+    opacity: 1;
+  }
+  25%,
+  62% {
+    opacity: 0;
+  }
+  63%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes tc-help-flip-pass {
+  0%,
+  32% {
+    opacity: 0;
+  }
+  33%,
+  70% {
+    opacity: 1;
+  }
+  71%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.tc-help-reveal {
+  animation: tc-help-reveal 9s ease-in-out infinite;
+}
+
+.tc-help-cue-pending {
+  animation: tc-help-cue-pending 9s linear infinite;
+}
+
+.tc-help-cue-parsing {
+  animation: tc-help-cue-parsing 9s linear infinite;
+}
+
+.tc-help-cue-complete {
+  animation: tc-help-cue-complete 9s linear infinite;
+}
+
+.tc-help-flip-1 {
+  animation: tc-help-flip-fail 5.5s linear infinite;
+}
+
+.tc-help-flip-2 {
+  animation: tc-help-flip-pass 7.3s linear infinite;
+}
+
+.tc-help-flip-3 {
+  animation: tc-help-flip-fail 4.1s linear infinite;
+}
+
+.tc-help-flip-4 {
+  animation: tc-help-flip-pass 6.7s linear infinite;
+}
+
+/* Anchored sections sit under the sticky help header when jumped to from the contents. */
+.tc-help-anchor {
+  scroll-margin-top: 7rem;
+}
+
+/*
+ * Print — reports are meant to be handed to people who were not looking at the screen.
+ *
+ * The browser's own print pipeline is the PDF exporter (see `print-button.tsx`), so
+ * everything below is what turns a page into a document: drop the chrome, keep each panel
+ * whole, and make sure nothing depended on hover or on colour to be readable.
+ */
+@media print {
+  /* Navigation, filters and the export button itself are not part of the report. */
+  .tc-print-hide,
+  aside,
+  nav {
+    display: none !important;
+  }
+
+  /* Paper is white regardless of the reader's theme, and dark-mode ink on white is
+     unreadable. Force the light values and let the browser print backgrounds so status
+     fills survive. */
+  :root,
+  html[data-theme="dark"] {
+    --color-surface: #ffffff;
+    --color-surface-raised: #ffffff;
+    --color-ink: #111111;
+    --color-ink-muted: #444444;
+    --color-border-subtle: #cccccc;
+  }
+
+  html,
+  body {
+    background: #ffffff;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /*
+   * The shell reserves space for chrome that is no longer there: a left margin for the
+   * sidebar and top padding for the fixed bar. Both are dropped, but only on the shell's own
+   * wrapper — blanket-resetting every `main` also stripped the report's own padding and slid
+   * its heading under the bar.
+   */
+  .tc-shell-main {
+    padding-top: 0 !important;
+  }
+
+  main {
+    max-width: none !important;
+    margin: 0 !important;
+  }
+
+  /* Nothing may stay fixed: a fixed element repeats on every printed page, or covers the
+     content it was floating above. */
+  .fixed,
+  .sticky {
+    position: static !important;
+  }
+
+  /*
+   * A chart split across a page break is worse than a chart on the next page: half an axis
+   * carries no information and the caption ends up orphaned from its marks.
+   */
+  .tc-panel {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border-color: #cccccc !important;
+    box-shadow: none !important;
+  }
+
+  /* Two columns of panels on paper leaves each one too narrow to read. */
+  .tc-panel {
+    grid-column: 1 / -1 !important;
+  }
+
+  /*
+   * Truncation is a screen affordance: on screen the full value is one hover away, and on
+   * paper it is gone for good. Cells wrap instead.
+   */
+  .tc-cell-truncate {
+    max-width: none !important;
+    overflow: visible !important;
+    white-space: normal !important;
+    text-overflow: clip !important;
+  }
+
+  /* Table headers repeat on every page so a long table stays readable past page one. */
+  thead {
+    display: table-header-group;
+  }
+
+  thead.tc-sticky th {
+    position: static;
+  }
+
+  tr {
+    break-inside: avoid;
+  }
+
+  /* A printed link showing no destination is a dead end; underlines at least mark them. */
+  a {
+    text-decoration: underline;
+    color: inherit;
+  }
+
+  /*
+   * The trend line's drop shadow is a screen affordance — it lifts the line off its own
+   * gradient fill. On paper it prints as grey fuzz around a 2px line, which is the one
+   * place a soft shadow costs legibility instead of adding it. `!important` because the
+   * filter is an inline style, and only an important declaration outranks one.
+   */
+  .tc-line-shadow {
+    filter: none !important;
+  }
 }
