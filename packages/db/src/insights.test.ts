@@ -10,16 +10,20 @@ import {
   rollupProjectDay,
 } from "./ingest.js";
 import {
+  addRunVerdict,
   branchPassRates,
   dailySeries,
-  dailySeriesByBranch,
   failureConcentration,
   flakeDistribution,
   flakyLeaderboard,
   getTestCase,
+  latestRunVerdicts,
   listSuites,
   orgSummary,
   recentOutcomes,
+  runActivity,
+  runSeries,
+  runVerdictHistory,
   searchTests,
   setQuarantine,
   slowestTests,
@@ -267,13 +271,34 @@ describeIfDb("insights read path", () => {
       expect(today?.totalDurationMs).toBe(4 * 5_000);
     });
 
-    it("splits the series by branch and caps the branch count", async () => {
-      const byBranch = await dailySeriesByBranch(sql, { orgId, days: 30, maxBranches: 5 });
-      const names = byBranch.map((entry) => entry.branch);
-      expect(names).toContain("main");
-      expect(names).toContain("release/1.0");
-      expect(byBranch.length).toBeLessThanOrEqual(5);
-      for (const entry of byBranch) expect(entry.points.length).toBe(30);
+    it("buckets run activity by day and hour in the requested zone", async () => {
+      /*
+       * The heatmap's source. The zone is passed through to Postgres, so a wrong or
+       * unhandled zone is a runtime error rather than a type error — worth calling with a
+       * real one and with the default.
+       */
+      const utc = await runActivity(sql, { orgId, days: 30, timeZone: "UTC" });
+      expect(utc.length).toBeGreaterThan(0);
+      expect(utc.reduce((sum, bucket) => sum + bucket.runs, 0)).toBe(4);
+      for (const bucket of utc) {
+        expect(bucket.day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(bucket.hour).toBeGreaterThanOrEqual(0);
+        expect(bucket.hour).toBeLessThanOrEqual(23);
+      }
+
+      // A different zone must still return the same total — it relabels, it does not filter.
+      const kolkata = await runActivity(sql, { orgId, days: 30, timeZone: "Asia/Kolkata" });
+      expect(kolkata.reduce((sum, bucket) => sum + bucket.runs, 0)).toBe(4);
+    });
+
+    it("returns one point per run for the run-level series", async () => {
+      const points = await runSeries(sql, { orgId, days: 30, limit: 50, timeZone: "UTC" });
+      expect(points.length).toBe(4);
+      for (const point of points) {
+        expect(point.label).toBeTruthy();
+        expect(point.total).toBeGreaterThan(0);
+      }
+      expect(points.some((point) => point.branch === "release/1.0")).toBe(true);
     });
 
     it("ranks pass rate per branch", async () => {
@@ -559,6 +584,94 @@ describeIfDb("insights read path", () => {
     });
   });
 
+  // ── run verdicts ──────────────────────────────────────────────────────────
+
+  describe("run verdicts", () => {
+    /*
+     * The only write path among the new functions, and an append-only one: a verdict is a
+     * claim someone else acts on later, so correcting it must add a row rather than
+     * overwrite the record of who said what. These assert that property directly, because
+     * "the newest one wins" and "the older ones are gone" look identical from the run page
+     * and are completely different in an audit.
+     */
+    it("records a verdict and returns it as the latest", async () => {
+      const runId = runIds[0] as string;
+      const first = await addRunVerdict(sql, {
+        orgId,
+        runId,
+        verdict: "investigating",
+        note: "looking at it",
+        userId: null,
+      });
+      expect(first?.verdict).toBe("investigating");
+
+      const latest = await latestRunVerdicts(sql, { orgId, runIds: [runId] });
+      expect(latest.get(runId)?.verdict).toBe("investigating");
+    });
+
+    it("keeps the earlier verdict in history when it is corrected", async () => {
+      const runId = runIds[0] as string;
+      await addRunVerdict(sql, {
+        orgId,
+        runId,
+        verdict: "infra",
+        note: "cluster down",
+        userId: null,
+      });
+
+      const latest = await latestRunVerdicts(sql, { orgId, runIds: [runId] });
+      expect(latest.get(runId)?.verdict).toBe("infra");
+
+      const history = await runVerdictHistory(sql, { orgId, runId, limit: 10 });
+      expect(history.length).toBeGreaterThanOrEqual(2);
+      // Newest first, and the superseded judgement is still on the record.
+      expect(history[0]?.verdict).toBe("infra");
+      expect(history.map((row) => row.verdict)).toContain("investigating");
+    });
+
+    it("rejects a verdict outside the allowed set", async () => {
+      /*
+       * The check constraint lives in the database, not only in application code, so this
+       * asserts the boundary that actually holds — an API route or a future importer that
+       * forgets to validate cannot write a value the read path does not understand.
+       */
+      await expect(
+        addRunVerdict(sql, {
+          orgId,
+          runId: runIds[0] as string,
+          verdict: "not-a-real-verdict",
+          userId: null,
+        }),
+      ).rejects.toThrow();
+    });
+
+    it("will not record or read a verdict across organisations", async () => {
+      const otherOrg = "00000000-0000-7000-8000-0000000000ff";
+      expect(
+        await addRunVerdict(sql, {
+          orgId: otherOrg,
+          runId: runIds[0] as string,
+          verdict: "pass",
+          userId: null,
+        }),
+      ).toBeNull();
+
+      const latest = await latestRunVerdicts(sql, {
+        orgId: otherOrg,
+        runIds: [runIds[0] as string],
+      });
+      expect(latest.size).toBe(0);
+    });
+
+    it("returns nothing for runs that have no verdict", async () => {
+      const latest = await latestRunVerdicts(sql, { orgId, runIds: [runIds[1] as string] });
+      expect(latest.size).toBe(0);
+      // An empty id list must not produce invalid SQL.
+      expect((await latestRunVerdicts(sql, { orgId, runIds: [] })).size).toBe(0);
+      expect(await runVerdictHistory(sql, { orgId, runId: runIds[1] as string })).toEqual([]);
+    });
+  });
+
   // ── the empty case ────────────────────────────────────────────────────────
 
   it("answers for a project with no runs instead of throwing", async () => {
@@ -580,7 +693,8 @@ describeIfDb("insights read path", () => {
     expect(summary.lastRunAt).toBeNull();
 
     expect((await dailySeries(sql, { ...scope, days: 7 })).length).toBe(7);
-    expect(await dailySeriesByBranch(sql, { ...scope, days: 7 })).toEqual([]);
+    expect(await runActivity(sql, { ...scope, days: 7, timeZone: "UTC" })).toEqual([]);
+    expect(await runSeries(sql, { ...scope, days: 7, timeZone: "UTC" })).toEqual([]);
     expect(await branchPassRates(sql, scope)).toEqual([]);
     expect(await todaysRuns(sql, scope)).toEqual([]);
     expect(await slowestTests(sql, scope)).toEqual([]);
