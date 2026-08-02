@@ -197,6 +197,52 @@ export function AppShell({
   const projectHref = (key: string): string => projectScopeHref(pathname, orgSlug, key);
   const allProjectsHref = orgScopeHref(pathname, orgSlug);
 
+  /*
+   * One letter for the avatar, from the name when there is one and the address otherwise.
+   *
+   * Not initials from splitting on spaces: that gets "Ashutosh Mishra" right and mangles
+   * mononyms, patronymics and anyone whose name is not two words.
+   */
+  /*
+   * `||`, not `??`, and derived once so the avatar, the name line and the email line cannot
+   * disagree. `users.name` is nullable, but an *empty* name is also reachable: the dev
+   * provider backfills from the address (`auth.ts:88`) while the OAuth path stores whatever
+   * it was given (`auth.ts:111`). Under `??` an empty string is a hit, so the name line would
+   * render blank and — because the email line is conditional on the same value — take the
+   * address down with it, leaving an avatar next to nothing at all.
+   */
+  const accountName = viewer.name?.trim() || viewer.email;
+  const accountInitial = accountName.charAt(0).toUpperCase();
+  /** Only worth a second line when it is not already the first one. */
+  const showAccountEmail = accountName !== viewer.email;
+
+  /*
+   * The avatar is outlined rather than a bare filled disc, and the outline carries the
+   * platform-admin signal in both the expanded panel and the collapsed rail.
+   *
+   * On a light theme `surface-raised` is barely a shade off the sidebar, so an unbordered
+   * disc dissolved into the background and the initial read as a stray letter. A ring gives
+   * it an edge at any surface. Making that same ring indigo when the viewer is a platform
+   * admin means the badge survives the collapse to 56px, where there is no room for words —
+   * and it is never the *only* carrier, because the expanded panel spells it out.
+   */
+  const avatarRing = viewer.isPlatformAdmin
+    ? "border-[var(--color-chrome)]"
+    : "border-[var(--color-border-subtle)]";
+  /*
+   * What the collapsed rail says instead of the chips, since at 56px there is no room for
+   * them. It has to carry platform admin too — that is the one line here a reader cannot
+   * infer from anything else on screen.
+   */
+  const accountTitle = [
+    viewer.name,
+    viewer.email,
+    currentOrg ? `${currentOrg.role} in ${currentOrg.name}` : null,
+    viewer.isPlatformAdmin ? "Platform admin" : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   const orgOptions: ScopeOption[] = orgs.map((org) => ({
     slug: org.slug,
     name: org.name,
@@ -352,78 +398,154 @@ export function AppShell({
 
         {nav}
 
+        {/*
+         * Account and credit share one strip.
+         *
+         * They were two bordered blocks stacked on each other, which gave the sidebar two
+         * competing footers and made the credit — the least important thing in the shell —
+         * look structurally equal to the signed-in account. One divider, one footer.
+         */}
         <div
-          className={`shrink-0 border-t border-[var(--color-border-subtle)] py-3 ${
-            collapsed && !mobileOpen ? "px-2" : "px-4"
+          className={`shrink-0 border-t border-[var(--color-border-subtle)] ${
+            collapsed && !mobileOpen ? "px-2 py-3" : "px-3 py-3"
           }`}
         >
           {collapsed && !mobileOpen ? (
-            <form action={signOutAction}>
-              <button
-                type="submit"
-                title={`Sign out (${viewer.email})`}
-                aria-label={`Sign out ${viewer.email}`}
-                className="flex w-full items-center justify-center rounded-md py-1.5 text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-ink)]"
+            <div className="flex flex-col items-center gap-2">
+              {/* The avatar is the identity at 56px wide; the tooltip carries what the
+                  labels would have said if there were room for them. Same outline rule as
+                  the expanded panel, thicker so it survives the smaller disc — it is the only
+                  thing left saying "platform admin" once the words are gone. */}
+              <span
+                className={`flex size-7 items-center justify-center rounded-full border-2 bg-[var(--color-surface-raised)] text-[11px] font-semibold text-[var(--color-ink)] ${avatarRing}`}
+                title={accountTitle}
+                aria-hidden
               >
-                <svg
-                  viewBox="0 0 16 16"
-                  className="size-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  aria-hidden
-                >
-                  <path d="M6 2.5H3.5v11H6M9.5 8h4.5M11.5 5.5 14 8l-2.5 2.5" />
-                </svg>
-              </button>
-            </form>
-          ) : (
-            <>
-              <div className="truncate text-xs font-medium">{viewer.name ?? viewer.email}</div>
-              <div className="truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
-                {viewer.email}
-              </div>
+                {accountInitial}
+              </span>
               <form action={signOutAction}>
                 <button
                   type="submit"
-                  className="mt-2 text-[11px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+                  title={`Sign out (${viewer.email})`}
+                  aria-label={`Sign out ${viewer.email}`}
+                  className="flex items-center justify-center rounded-md p-1.5 text-[var(--color-ink-muted)] transition-colors hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-status-failed)]"
                 >
-                  Sign out
+                  <SignOutIcon />
                 </button>
               </form>
-            </>
-          )}
-        </div>
-
-        {/*
-         * Developer credit.
-         *
-         * Its own strip below the account block, and explicitly prefixed "Built by",
-         * because the block directly above it is also a person's name — an unlabelled
-         * second name stacked under the signed-in user reads as a second account. The
-         * label is what keeps the two apart.
-         *
-         * Deliberately the quietest thing in the shell: smaller than the nav, muted, no
-         * link. A credit earns its place by being present, not by competing with the
-         * navigation someone opened the app to use.
-         */}
-        <div
-          className={`shrink-0 border-t border-[var(--color-border-subtle)] py-2.5 ${
-            collapsed && !mobileOpen ? "px-2" : "px-4"
-          }`}
-        >
-          {collapsed && !mobileOpen ? (
-            <div
-              className="text-center font-mono text-[10px] text-[var(--color-ink-muted)]"
-              title={CREDIT.title}
-            >
-              {CREDIT.initials}
+              <span
+                className="font-mono text-[9px] text-[var(--color-ink-muted)]"
+                title={CREDIT.title}
+              >
+                {CREDIT.initials}
+              </span>
             </div>
           ) : (
-            <p className="truncate text-[10px] text-[var(--color-ink-muted)]">
-              Built by <span className="text-[var(--color-ink)]">{CREDIT.name}</span>
-            </p>
+            <>
+              {/*
+               * One row: who you are, and the way out.
+               *
+               * Sign out was an underlined 11px text link under two lines of text — it read
+               * as a footnote rather than an action, and its hit target was the size of the
+               * words. As an icon button on the account row it is a proper 28px target, it
+               * cannot be mistaken for prose, and it turns red on hover so the destructive
+               * one of the two things down here is the one that reacts.
+               */}
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-full border bg-[var(--color-surface-raised)] text-xs font-semibold text-[var(--color-ink)] ${avatarRing}`}
+                  aria-hidden
+                >
+                  {accountInitial}
+                </span>
+
+                <div className="min-w-0 flex-1">
+                  {/*
+                   * The name line falls back to the email, and then the email line is
+                   * dropped rather than printed twice. `users.name` is nullable — anyone who
+                   * signs in without typing one got their address rendered on both lines.
+                   */}
+                  <div className="truncate text-xs font-medium" title={accountName}>
+                    {accountName}
+                  </div>
+                  {showAccountEmail ? (
+                    <div
+                      className="truncate font-mono text-[10px] text-[var(--color-ink-muted)]"
+                      title={viewer.email}
+                    >
+                      {viewer.email}
+                    </div>
+                  ) : null}
+                </div>
+
+                <form action={signOutAction} className="shrink-0">
+                  <button
+                    type="submit"
+                    title={`Sign out (${viewer.email})`}
+                    aria-label={`Sign out ${viewer.email}`}
+                    className="flex items-center justify-center rounded-md p-1.5 text-[var(--color-ink-muted)] transition-colors hover:bg-[var(--color-status-failed)]/10 hover:text-[var(--color-status-failed)]"
+                  >
+                    <SignOutIcon />
+                  </button>
+                </form>
+              </div>
+
+              {/*
+               * Your standing in this organisation, which nothing else in the sidebar says.
+               *
+               * The whole app is role-gated — half the nav is absent for a viewer — so "why
+               * can I not upload here?" is answered by a word that was previously only in the
+               * header, and only above the `sm` breakpoint. Platform admin is called out
+               * separately because it is not a role in this organisation at all: it comes
+               * from configuration and spans every one of them.
+               */}
+              {currentOrg || viewer.isPlatformAdmin ? (
+                <p className="mt-2 flex items-center gap-1.5 text-[10px] tracking-[0.14em] uppercase">
+                  {currentOrg ? (
+                    <span className="truncate text-[var(--color-ink-muted)]">
+                      {currentOrg.role}
+                    </span>
+                  ) : null}
+                  {currentOrg && viewer.isPlatformAdmin ? (
+                    <span aria-hidden className="text-[var(--color-ink-muted)]/40">
+                      /
+                    </span>
+                  ) : null}
+                  {/*
+                   * Set apart by weight, not by a second colour.
+                   *
+                   * These are not two facts of the same kind — one is a seat in this
+                   * organisation, the other is configuration that outranks every organisation
+                   * at once — so they should not look interchangeable. Hue was the obvious
+                   * way to say that and the wrong one here: there is no accent token that
+                   * clears contrast against a near-white sidebar *and* a near-black one, and
+                   * the chrome indigo only passes on the light theme. Full-strength ink at a
+                   * heavier weight is legible on both, and it still reads as the stronger
+                   * claim beside a muted role.
+                   */}
+                  {viewer.isPlatformAdmin ? (
+                    <span
+                      className="font-semibold text-[var(--color-ink)]"
+                      title="Set in TESTCENTER_ADMIN_EMAILS — spans every organisation"
+                    >
+                      superadmin
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+
+              {/*
+               * The credit, now a footnote to the account rather than its own block.
+               *
+               * Still prefixed, because the line above it is also a person's name and an
+               * unlabelled second one reads as a second account. Smaller and unbordered so it
+               * is plainly the quietest thing in the shell — a credit earns its place by being
+               * present, not by competing with the navigation.
+               */}
+              <p className="mt-2.5 truncate border-t border-[var(--color-border-subtle)] pt-2.5 text-[10px] text-[var(--color-ink-muted)]">
+                Built by <span className="text-[var(--color-ink)]">{CREDIT.name}</span>
+              </p>
+            </>
           )}
         </div>
       </aside>
@@ -685,6 +807,24 @@ function PanelIcon({ collapsed }: { collapsed: boolean }) {
       <path d="M6.5 2.5v11" />
       {/* The chevron points where the panel will go, not where it is. */}
       <path d={collapsed ? "M9.5 6.5 11.5 8l-2 1.5" : "M11.5 6.5 9.5 8l2 1.5"} />
+    </svg>
+  );
+}
+
+/** A door with an arrow leaving it — the same mark the collapsed rail used. */
+function SignOutIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      className="size-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6 2.5H3.5v11H6M9.5 8h4.5M11.5 5.5 14 8l-2.5 2.5" />
     </svg>
   );
 }

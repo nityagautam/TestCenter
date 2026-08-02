@@ -4,7 +4,7 @@ Two lists. **Part A** records defects that were found and fixed, with the root c
 they are recognisable if they recur — most of them failed *silently*, which is why they
 are written down rather than just closed. **Part B** is outstanding work.
 
-Last updated 2026-07-31.
+Last updated 2026-08-02.
 
 ---
 
@@ -478,6 +478,39 @@ Verified by running the suite twelve consecutive times: no failures, no skips.
 
 ---
 
+### A26. Turbo's strict env mode silently revoked platform admin
+
+**Symptom** `TESTCENTER_ADMIN_EMAILS` listed three addresses, but `admin@testcenter.dev`
+had `is_platform_admin = false` and no "Platform admin" entry in the nav. `.env` was
+sourced, the variable was exported, and the address was spelled correctly.
+
+**Cause** `turbo.json` declared nineteen variables in `globalEnv`, and Turbo 2.x defaults to
+`envMode: "strict"` — the task environment is filtered down to what is declared, so anything
+missing from that list never reaches the process. Six variables the code reads were absent:
+`TESTCENTER_ADMIN_EMAILS`, `AUTH_DEV_LOGIN`, both `TESTCENTER_DEFAULT_ORG_*`,
+`TESTCENTER_PARTITION_LOOKAHEAD` and `TESTCENTER_RETENTION_MONTHS`.
+
+**Why it was dangerous** Not merely "the flag did not apply". Platform status is re-derived
+from the environment on *every* sign-in, so signing in with the variable missing **wrote
+`false`** over an existing admin. The revocation was silent, persistent, and survived fixing
+the environment — the account stayed demoted until it signed in again. A deploy that forgot
+one line in a Turbo config would quietly strip every platform admin as they logged in.
+
+**Fix** All six declared in `globalEnv`. Verified by `turbo run --summarize`, which reports
+`envMode: strict` and now twenty-five specified keys, and end to end: after the change a
+fresh sign-in restored `is_platform_admin = true` and the nav entry and badge reappeared.
+
+**Guard** The environment a codebase reads is derivable, so the drift is checkable:
+
+```sh
+grep -rhoE "process\.env\.[A-Z0-9_]+" $(find apps packages -name '*.ts' -o -name '*.tsx' \
+  | grep -v node_modules) | sed 's/process\.env\.//' | sort -u
+```
+
+against `globalEnv`. Anything in the first list and not the second is stripped at runtime.
+
+---
+
 ## Part B — outstanding
 
 ### B13. Reports can carry credentials into the database *(found in real data)*
@@ -610,5 +643,5 @@ Recorded so they are not mistaken for oversights.
 | Local passwords | Anyone reaching `localhost` can reach the database; a password would imply protection it does not provide. Production identity is Google's. See the user guide §2. |
 | ClickHouse / columnar store | At <50k tests/day this is ~18M rows/year. Postgres with monthly partitions serves it indefinitely; queries measure 2–6ms at 400k rows. |
 | Row-level security | Isolation is enforced in one access module and tested from the outside. RLS becomes worthwhile with untrusted tenants in one database. |
-| Deleting projects | Archiving instead — test results are evidence, and a project someone stopped using is usually still worth reading. |
+| Deleting projects *by default* | Archiving is the ordinary path — test results are evidence, and a project someone stopped using is usually still worth reading. Permanent deletion exists but is restricted to admins and owners (see A23), because a mistyped project key at onboarding should not be undeletable. |
 | Editing a project key | It is what CI sends. Changing it breaks every pipeline, and the failure looks like "results stopped arriving". |
