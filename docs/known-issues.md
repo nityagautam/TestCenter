@@ -412,73 +412,69 @@ indistinguishable-from-deletion action with a reassuring name.
 
 Found because two projects in the development organisation were already archived and stuck.
 
+### A24. insights.ts had no tests, and every id it returned was a string
 
-### A24. Percent-encoding in the CI publish script corrupted every non-ASCII character
+`insights.ts` is the read path behind every dashboard tile, every chart, the test history
+page, the flaky leaderboard and test search — around 1,100 lines, of which 496 had just been
+added. No test file imported it.
 
-`--name "Nightly sanity — via script"` was stored as
-`Nightly sanity \xFFFFFFFFFFFFE2\x80\x94 via script`.
+That is the same exposure that produced A-register entries already: these queries are built
+by string composition, so a syntax or semantics error appears only when the query runs.
+`runFilterOptions` shipped with a bare `ORDER BY` inside a `UNION` branch and took the run
+list down with a 500; `queries.test.ts` exists to stop that recurring, and covered
+`queries.ts` only.
 
-bash's `printf "'$char"` yields a **signed** char, so a UTF-8 continuation byte such as
-`0xE2` comes back as `-30` and `%02X` renders it sign-extended. The encoder had been
-unit-tested — but only with ASCII (`&`, space, `/`), which all pass. Any accented character
-in a tag, environment or run name was silently mangled the same way.
+`insights.test.ts` now covers all nineteen exported functions against a real Postgres, with a
+fixture of a known shape — a steady test, a consistently broken one, a genuinely flaky one, a
+test with two distinct failure signatures, a permanently skipped one and a duration outlier —
+so the assertions check arithmetic rather than merely that nothing threw. Pass-rate
+denominators exclude skips, the broken test scores zero for flakiness and stays off the flaky
+list, two signatures group as two modes, and every function is exercised against an empty
+project because that is the state a new project is in.
 
-Fixed by masking to the low byte: `$(( $(printf '%d' "'$char") & 0xFF ))`. Verified `—` →
-`%E2%80%94` and `módulo:búsqueda` → `m%C3%B3dulo%3Ab%C3%BAsqueda`.
+Writing it surfaced a latent defect immediately: **ten fields declared `number` were strings
+at runtime.** postgres.js decodes `int8` as a string, and every id in this module is a
+bigserial. Nothing was visibly broken because both sides were consistently wrong —
+`searchTests` returned string ids and `recentOutcomes` keyed its map by string, so the
+lookups matched. That is a trap rather than a bug: the types lie, so TypeScript cannot catch
+the first caller who does `Number(id)` and then silently misses every lookup, and the
+test-detail page already calls `Number(testId)` on its route param.
 
-### A25. A long test name pushed the run panel's controls outside the card
+Fixed once, in `client.ts`, by parsing `int8` to a number where values are decoded rather
+than asking nineteen queries to remember to coerce. Casting to `int4` in SQL would have been
+the cheaper-looking fix and is wrong — that ceiling is 2.1 billion results, which a busy
+install could reach; the JS number limit of 2^53 needs quadrillions.
 
-A flex item defaults to `min-width: auto` and will not shrink below its min-content width.
-With a 151-character test name containing unbroken tokens like `"<CASE_LABEL>"`, the panel
-heading rendered **1130px wide inside an 884px card**, pushing its action links 323px past
-the card edge and giving the page 341px of horizontal scroll. The `truncate` already on the
-name could never engage — it had no bound to resolve against, and measured
-`scrollWidth === clientWidth`.
+### A25. The db suite deadlocked on itself about one run in eight
 
-Fixed in the shared `CardHeader` (`min-w-0` on the title, `shrink-0` on the action) plus the
-same on the panel's inner flex, since the min-content width otherwise propagates back up one
-level and undoes it. Pre-existing; adding a second action to that header is what made it
-visible.
+Captured after ten attempts:
 
-### A26. A per-branch series compressed its own x-axis
+```
+delete from "organizations" where "organizations"."slug" = $1
+PostgresError: deadlock detected (40P01)
+Process 60709 waits for RowExclusiveLock on relation 16740; blocked by process 60714
+```
 
-`dailySeriesByBranch` returned only the days that had rows, so a branch with one day of
-history and a branch with thirty were drawn across the same width and read as directly
-comparable — and a single point landed mid-plot instead of on its date. Exactly the failure
-`dailySeries` documents avoiding with its `generate_series` calendar fill, reintroduced in a
-new query.
+Each suite tears down by deleting its throwaway organisation, which cascades through runs,
+test_results across every monthly partition, test_cases, memberships and api_tokens. Vitest
+runs test files in parallel, so two of those cascades overlapped, took the same partition
+locks in different orders, and Postgres broke the tie. It had been rare enough to look like
+noise; adding a fourth test file made it frequent enough to catch.
 
-Fixed with a branch × calendar cross join. The chart it fed was later replaced by bars (a
-one-day multi-line series is two dots in an empty plot), and the query was removed.
+Two changes, both narrowing what a test can reach beyond itself:
 
-### A27. A summed `bigint` was typed `number` and was a string at runtime
+- `packages/db/vitest.config.ts` sets `fileParallelism: false`. This is a property of sharing
+  one database, not of any single test, so it belongs in the runner rather than in a retry
+  wrapped around each teardown. Cost is about 3.5s parallel against 6s serial.
+- `failStalledRuns` takes an optional `orgId`. Unscoped it reaps every stalled run in the
+  database — correct for the scheduled janitor, and a sharp edge for a test, which was
+  sweeping runs belonging to other files. The reaper test now scopes to its own organisation.
 
-`total_duration_ms` came back from postgres.js as `"2687693"`. postgres.js does not silently
-narrow `int8`, so the value satisfied `number` at compile time and was a string at runtime:
-`formatDuration` rendered nonsense and any arithmetic on it concatenated. Coerced at the
-query boundary, and verified with a summation asserting `typeof === "number"`.
+The reaper test also used to `ALTER TABLE runs DISABLE TRIGGER`, which takes ACCESS EXCLUSIVE
+on `runs` and blocks every other file writing runs. The trigger is BEFORE UPDATE only, so the
+test now backdates `updated_at` in its INSERT and nothing needs suspending.
 
-### A28. Time-range links discarded the chart view toggles
-
-The dashboard's 7d/30d/90d links were built by hand as `?days=N`, so changing the range
-dropped `volume`, `rate` and `duration` — silently resetting every chart to its default
-view. Routed through the same href builder the toggles use.
-
-Also in the same pass: `days` was **clamped** rather than snapped to the offered set, so
-`?days=45` was accepted and measured 45 days with no button highlighted — the URL and the
-control disagreed about what was on screen. Unrecognised values now fall back to the default.
-
-### A29. A wrapping grid lost the divider between its rows
-
-The run metadata strip copied `lg:divide-y-0` from the stat-tile row, which is correct there
-because six tiles fill exactly six columns — one row, so only vertical dividers are needed.
-The strip has seven cells, so a second row genuinely exists and the border that would
-separate it had been switched off.
-
-Re-enabling `divide-y` was not the fix: Tailwind's `divide-*` borders children by **DOM
-order, not grid position**, so it would have drawn a stray left border on the first cell of
-row two. Tailwind cannot express "border between grid rows" for a wrapping grid. The tags
-cell became its own full-width band with an explicit `border-t` instead.
+Verified by running the suite twelve consecutive times: no failures, no skips.
 
 ---
 

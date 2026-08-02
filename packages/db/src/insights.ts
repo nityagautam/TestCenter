@@ -958,6 +958,8 @@ export async function recentOutcomes(
   `;
 
   for (const row of rows) {
+    // `testCaseId` is int8. The client parses int8 to a number, so this key matches the
+    // declared Map<number, …> and a caller looking up by a numeric id finds its row.
     const existing = byTest.get(row.testCaseId);
     if (existing) existing.push(row);
     else byTest.set(row.testCaseId, [row]);
