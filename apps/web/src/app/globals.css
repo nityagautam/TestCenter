@@ -260,6 +260,34 @@ thead.tc-sticky th {
 }
 
 /*
+ * A scroll container with no visible scrollbar.
+ *
+ * Only for the ranked charts, which sit in narrow cards where a persistent scrollbar is a
+ * meaningful slice of the plot: on Windows and most Linux setups it reserves ~15px of the
+ * card's width permanently, and it overlays the bars' data-ends, so the thing meant to help
+ * you read the chart is covering it.
+ *
+ * Safe *here* specifically because those lists already say they continue: the box is sized to
+ * overshoot its last visible row, so a partial row is always cut off at the bottom. That peek
+ * is the affordance, and it works identically on every platform — unlike a scrollbar, which
+ * macOS hides until you scroll anyway.
+ *
+ * Deliberately not applied to the stack-trace and captured-output blocks. A monospace block
+ * has no equivalent cue that it continues, so hiding its scrollbar would hide the content.
+ *
+ * Scrolling itself is untouched: wheel, trackpad, touch, and the arrow keys via the
+ * focusable region all still work.
+ */
+.tc-no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge */
+}
+
+.tc-no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari */
+}
+
+/*
  * Help-page motion.
  *
  * Two loops, and only two: a run being parsed, and a flaky test disagreeing with itself.

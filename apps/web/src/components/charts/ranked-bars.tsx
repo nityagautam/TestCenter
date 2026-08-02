@@ -29,12 +29,26 @@ export interface RankedBar {
 }
 
 /**
- * One row: an 11px label, a 4px gap, a 6px track, and the 6px list gap under it.
+ * Row height, in rem so it tracks the root font size — a reader who has scaled their text up
+ * gets whole rows, not rows and a sliver.
  *
- * Expressed in rem so it tracks the root font size — a reader who has scaled their text up
- * gets five whole rows, not four and a sliver.
+ * Two constants because there are two row shapes. A plain row is an 11px label, a 4px gap, a
+ * 6px track and the 6px list gap; a row with a `detail` line carries a second 10px line
+ * between the two. Deriving one height and applying it to both was the previous behaviour,
+ * and it clipped the detailed lists mid-row — the pass-rate-by-branch chart is exactly that
+ * case, since every branch names its run count underneath.
  */
 const ROW_HEIGHT_REM = 2.3;
+/*
+ * Slightly more than a detailed row actually measures (45.5px against 3.45rem ≈ 55px), so the
+ * box ends part-way through the next row instead of flush against the last visible one.
+ *
+ * That overshoot is the affordance. Measured at exactly three rows the list ended cleanly and
+ * looked like a list of three — and macOS hides overlay scrollbars until you scroll, so there
+ * was nothing at all to say four more branches were below. A half-row of something cut off is
+ * what tells a reader to scroll.
+ */
+const ROW_WITH_DETAIL_HEIGHT_REM = 3.45;
 
 export function RankedBars({
   bars,
@@ -60,9 +74,13 @@ export function RankedBars({
    * bad test or forty mediocre ones. Truncating to six hid that; showing forty buried the
    * answer under a wall of bars. Five visible with the rest a scroll away keeps both.
    *
-   * The height is derived from a row rather than measured, which is safe *because* the rows
-   * are uniform: no `detail` line on the lists that use this. Add one and the fifth row will
-   * be clipped mid-way rather than sitting flush.
+   * The height is derived from a row rather than measured, which is safe because the rows in
+   * any one list are uniform — every bar either carries a `detail` line or none does, so the
+   * taller constant is picked for the whole list rather than per row.
+   *
+   * A sliver of the next row stays visible on purpose. A list clipped exactly at a row
+   * boundary looks like a list that simply ends, and nobody scrolls something they cannot
+   * tell is scrollable.
    */
   maxVisible?: number;
   /**
@@ -79,6 +97,8 @@ export function RankedBars({
   // between the rows rather than against an absolute ceiling.
   const max = domainMax ?? Math.max(...bars.map((bar) => bar.value), 1);
   const scrolls = maxVisible !== undefined && bars.length > maxVisible;
+  // A list is detailed or it is not; the rows within one are the same shape either way.
+  const rowHeightRem = bars.some((bar) => bar.detail) ? ROW_WITH_DETAIL_HEIGHT_REM : ROW_HEIGHT_REM;
 
   return (
     <figure className="min-w-0">
@@ -107,10 +127,12 @@ export function RankedBars({
                 tabIndex: 0,
                 role: "region" as const,
                 "aria-label": `${title} — scrollable, ${bars.length} rows`,
-                style: { maxHeight: `${maxVisible! * ROW_HEIGHT_REM}rem` },
+                style: { maxHeight: `${maxVisible! * rowHeightRem}rem` },
               }
             : {})}
-          className={scrolls ? "overflow-y-auto pr-1" : undefined}
+          /* `pr-1` went with the scrollbar it was making room for; with the bar hidden
+             that padding would just narrow the bars for no reason. */
+          className={scrolls ? "tc-no-scrollbar overflow-y-auto" : undefined}
         >
           <ol className="space-y-1.5">
             {bars.map((bar) => {

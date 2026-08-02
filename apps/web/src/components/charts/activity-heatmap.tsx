@@ -147,125 +147,143 @@ export function ActivityHeatmap({
       <Caption title={title} action={action} />
 
       {/*
-       * Rail and grid are siblings so the rail stretches to the grid's height, and each of
-       * its seven labels takes an equal share of it. The row heights are set by the cells'
-       * aspect ratio and are not known here — anything that hard-coded a height would drift
+       * Two nested flex rows, and the nesting is the point.
+       *
+       * The rail's seven labels take an equal share of the rail's height, so they only line
+       * up with the seven rows of cells if the rail is exactly as tall as the grid. The grid's
+       * height is set by the cells' aspect ratio and is not known here, so the rail has to
+       * take it from the grid by stretching — anything that hard-coded a height would drift
        * out of alignment the moment the card resized.
+       *
+       * The outer row centres the chart in whatever vertical space the card gives it, since a
+       * square 24 × 7 grid is much shorter than a card sized by the chart beside it. But
+       * `items-center` is precisely what stops a child stretching: it was applied to the same
+       * row that holds the rail, so the rail was sized by its own content instead of the
+       * grid's, and the labels drifted out of step with the rows they name.
+       *
+       * So the centring and the stretching are now separate rows. The inner row is only as
+       * tall as the grid, the rail stretches to it, and the outer row centres the pair.
        */}
-      <div className="flex flex-1 items-center gap-1.5 py-1" role="img" aria-label={label}>
-        <div
-          className="flex shrink-0 flex-col"
-          style={{ gap: CELL_GAP, width: RAIL_WIDTH }}
-          aria-hidden
-        >
-          <span style={{ height: HEADER_HEIGHT }} />
-          {WEEKDAYS.map((weekday, weekdayIdx) => (
-            <span
-              key={weekday}
-              className={`flex flex-1 items-center justify-end text-[9px] leading-none font-medium tracking-wider uppercase ${
-                hover?.weekday === weekdayIdx
-                  ? "text-[var(--color-ink)]"
-                  : "text-[var(--color-ink-muted)]"
-              }`}
-            >
-              {weekday}
-            </span>
-          ))}
-        </div>
-
-        <div
-          className="relative flex min-w-0 flex-1 flex-col"
-          style={{ gap: CELL_GAP }}
-          onMouseLeave={() => setHover(null)}
-        >
-          {/* Hour scale, every sixth hour. Twenty-four labels do not fit a nine-pixel
-              column, and quarters of the day are the unit people actually reason in —
-              "overnight", "morning", "after lunch". The gaps read off the printed ones. */}
-          <div className="flex" style={{ gap: CELL_GAP, height: HEADER_HEIGHT }} aria-hidden>
-            {Array.from({ length: HOURS }, (_, hour) => (
+      <div className="flex flex-1 items-center py-1" role="img" aria-label={label}>
+        <div className="flex w-full min-w-0 items-stretch gap-1.5">
+          <div
+            className="flex shrink-0 flex-col"
+            style={{ gap: CELL_GAP, width: RAIL_WIDTH }}
+            aria-hidden
+          >
+            <span style={{ height: HEADER_HEIGHT }} />
+            {WEEKDAYS.map((weekday, weekdayIdx) => (
               <span
-                key={hour}
-                className={`min-w-0 flex-1 text-center text-[8px] leading-none ${
-                  hover?.hour === hour ? "text-[var(--color-ink)]" : "text-[var(--color-ink-muted)]"
+                key={weekday}
+                className={`flex flex-1 items-center justify-end text-[9px] leading-none font-medium tracking-wider uppercase ${
+                  hover?.weekday === weekdayIdx
+                    ? "text-[var(--color-ink)]"
+                    : "text-[var(--color-ink-muted)]"
                 }`}
               >
-                {hour % 6 === 0 ? String(hour).padStart(2, "0") : ""}
+                {weekday}
               </span>
             ))}
           </div>
 
-          {grid.map((hours, weekdayIdx) => (
-            <div key={weekdayIdx} className="flex" style={{ gap: CELL_GAP }} aria-hidden>
-              {hours.map((value, hour) => {
-                const tone = step(value);
-                const active = hover?.weekday === weekdayIdx && hover.hour === hour;
-                return (
-                  <span
-                    key={hour}
-                    onMouseEnter={() => setHover({ weekday: weekdayIdx, hour })}
-                    // `aspect-square` is what makes a cell a cell: the width comes from the
-                    // flex share of the row, and the height follows it, so the grid stays
-                    // square at every card width instead of stretching into bricks.
-                    className="block aspect-square min-w-0 flex-1 rounded-[3px]"
-                    style={{
-                      /*
-                       * An empty hour is a pale fill, not an outline.
-                       *
-                       * Outlining 168 cells draws a grid of boxes and the eye reads the
-                       * lattice instead of the data in it. A wash keeps every cell present —
-                       * which matters, because "nothing ran here" is half of what this chart
-                       * says — while staying quiet enough that the populated cells are the
-                       * only thing with weight.
-                       */
-                      background:
-                        tone < 0
-                          ? "color-mix(in srgb, var(--color-border-subtle) 45%, transparent)"
-                          : STEPS[tone],
-                      boxShadow: active ? "inset 0 0 0 1.5px var(--color-ink)" : undefined,
-                      // Crosshair: the hovered row and column stay lit so a cell can be
-                      // traced back to its axes among 168 near-identical squares.
-                      opacity:
-                        hover === null || hover.weekday === weekdayIdx || hover.hour === hour
-                          ? 1
-                          : 0.45,
-                    }}
-                  />
-                );
-              })}
+          <div
+            className="relative flex min-w-0 flex-1 flex-col"
+            style={{ gap: CELL_GAP }}
+            onMouseLeave={() => setHover(null)}
+          >
+            {/* Hour scale, every sixth hour. Twenty-four labels do not fit a nine-pixel
+              column, and quarters of the day are the unit people actually reason in —
+              "overnight", "morning", "after lunch". The gaps read off the printed ones. */}
+            <div className="flex" style={{ gap: CELL_GAP, height: HEADER_HEIGHT }} aria-hidden>
+              {Array.from({ length: HOURS }, (_, hour) => (
+                <span
+                  key={hour}
+                  className={`min-w-0 flex-1 text-center text-[8px] leading-none ${
+                    hover?.hour === hour
+                      ? "text-[var(--color-ink)]"
+                      : "text-[var(--color-ink-muted)]"
+                  }`}
+                >
+                  {hour % 6 === 0 ? String(hour).padStart(2, "0") : ""}
+                </span>
+              ))}
             </div>
-          ))}
 
-          {hover ? (
-            /*
-             * Anchored to the hovered cell, flipping below the top rows and above the rest,
-             * so it never covers the cell it describes. Percentages rather than pixels: the
-             * row height is the cells' aspect ratio and changes with the card width.
-             */
-            <div
-              className="pointer-events-none absolute z-10 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1 shadow-md"
-              style={{
-                left: `${Math.min(Math.max(((hover.hour + 0.5) / HOURS) * 100, 12), 88)}%`,
-                top: `${((hover.weekday + (hover.weekday < 3 ? 1 : 0)) / WEEKDAYS.length) * 100}%`,
-                transform:
-                  hover.weekday < 3 ? "translate(-50%, 8px)" : "translate(-50%, calc(-100% - 8px))",
-              }}
-            >
-              <div className="font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
-                {WEEKDAYS[hover.weekday]} {formatHour(hover.hour)}–
-                {formatHour((hover.hour + 1) % 24)}
+            {grid.map((hours, weekdayIdx) => (
+              <div key={weekdayIdx} className="flex" style={{ gap: CELL_GAP }} aria-hidden>
+                {hours.map((value, hour) => {
+                  const tone = step(value);
+                  const active = hover?.weekday === weekdayIdx && hover.hour === hour;
+                  return (
+                    <span
+                      key={hour}
+                      onMouseEnter={() => setHover({ weekday: weekdayIdx, hour })}
+                      // `aspect-square` is what makes a cell a cell: the width comes from the
+                      // flex share of the row, and the height follows it, so the grid stays
+                      // square at every card width instead of stretching into bricks.
+                      className="block aspect-square min-w-0 flex-1 rounded-[3px]"
+                      style={{
+                        /*
+                         * An empty hour is a pale fill, not an outline.
+                         *
+                         * Outlining 168 cells draws a grid of boxes and the eye reads the
+                         * lattice instead of the data in it. A wash keeps every cell present —
+                         * which matters, because "nothing ran here" is half of what this chart
+                         * says — while staying quiet enough that the populated cells are the
+                         * only thing with weight.
+                         */
+                        background:
+                          tone < 0
+                            ? "color-mix(in srgb, var(--color-border-subtle) 45%, transparent)"
+                            : STEPS[tone],
+                        boxShadow: active ? "inset 0 0 0 1.5px var(--color-ink)" : undefined,
+                        // Crosshair: the hovered row and column stay lit so a cell can be
+                        // traced back to its axes among 168 near-identical squares.
+                        opacity:
+                          hover === null || hover.weekday === weekdayIdx || hover.hour === hour
+                            ? 1
+                            : 0.45,
+                      }}
+                    />
+                  );
+                })}
               </div>
-              <div className="font-mono text-[11px] whitespace-nowrap tabular-nums">
-                {grid[hover.weekday]?.[hover.hour] ?? 0} {unit}
-                {(grid[hover.weekday]?.[hover.hour] ?? 0) === 1 ? "" : "s"}
-              </div>
-              {/* The denominator, so a total can be read as a rate. Without it two equally
+            ))}
+
+            {hover ? (
+              /*
+               * Anchored to the hovered cell, flipping below the top rows and above the rest,
+               * so it never covers the cell it describes. Percentages rather than pixels: the
+               * row height is the cells' aspect ratio and changes with the card width.
+               */
+              <div
+                className="pointer-events-none absolute z-10 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-2 py-1 shadow-md"
+                style={{
+                  left: `${Math.min(Math.max(((hover.hour + 0.5) / HOURS) * 100, 12), 88)}%`,
+                  top: `${((hover.weekday + (hover.weekday < 3 ? 1 : 0)) / WEEKDAYS.length) * 100}%`,
+                  transform:
+                    hover.weekday < 3
+                      ? "translate(-50%, 8px)"
+                      : "translate(-50%, calc(-100% - 8px))",
+                }}
+              >
+                <div className="font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
+                  {WEEKDAYS[hover.weekday]} {formatHour(hover.hour)}–
+                  {formatHour((hover.hour + 1) % 24)}
+                </div>
+                <div className="font-mono text-[11px] whitespace-nowrap tabular-nums">
+                  {grid[hover.weekday]?.[hover.hour] ?? 0} {unit}
+                  {(grid[hover.weekday]?.[hover.hour] ?? 0) === 1 ? "" : "s"}
+                </div>
+                {/* The denominator, so a total can be read as a rate. Without it two equally
                   bright cells can quietly mean different things. */}
-              <div className="font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
-                across {occurrences[hover.weekday]} {WEEKDAYS[hover.weekday]}
-                {occurrences[hover.weekday] === 1 ? "" : "s"}
+                <div className="font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)]">
+                  across {occurrences[hover.weekday]} {WEEKDAYS[hover.weekday]}
+                  {occurrences[hover.weekday] === 1 ? "" : "s"}
+                </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
       </div>
 

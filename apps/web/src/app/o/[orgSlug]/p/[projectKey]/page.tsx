@@ -351,6 +351,10 @@ export default async function ProjectOverview({
                 <RankedBars
                   title="Pass rate by branch"
                   domainMax={100}
+                  /* Three branches answer the question — main, and whichever two are worst.
+                     The rest stay reachable by scrolling rather than making this card three
+                     times the height of the two beside it. */
+                  maxVisible={3}
                   bars={branchRates.map((row) => ({
                     label: row.branch,
                     value: row.passRate ?? 0,
