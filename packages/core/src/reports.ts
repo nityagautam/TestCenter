@@ -47,10 +47,11 @@ export interface RankedPanelData {
   bars: {
     label: string;
     /**
-     * The project a row belongs to, printed before the label. Set only at organisation
-     * scope: every question here runs at both, and inside one project the same key repeated
-     * down the list says nothing. Structurally identical to the web `RankedBar` field of the
-     * same name — this package cannot import from the app, so the shape is restated.
+     * The project a row belongs to, captioning the label alongside `detail`. Set only at
+     * organisation scope: every question here runs at both, and inside one project the same
+     * key repeated down the list says nothing. Structurally identical to the web `RankedBar`
+     * field of the same name — this package cannot import from the app, so the shape is
+     * restated.
      */
     scope?: string | null;
     value: number;

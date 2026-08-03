@@ -455,16 +455,16 @@ export default async function OrgDashboard({
                 title="Slowest tests (p95)"
                 maxVisible={5}
                 /*
-                 * The name and its project, on one line. The suite path used to sit under
-                 * each row as a second line of 10px mono, which doubled the height of the
-                 * list to answer a question nobody asks of a ranking — you are looking for
-                 * *which test*, and the path is one click away on the test's own page.
+                 * The project captions each name. The suite path used to sit here instead and
+                 * was removed, because it answered a question nobody asks of a ranking — you
+                 * are looking for *which test*, and the path is one click away on the test's
+                 * own page.
                  *
-                 * The project is not that: this list spans every project in the organisation,
+                 * The project is not that. This list spans every project in the organisation,
                  * so without it a row names a test the reader cannot place, and two projects
-                 * with a similarly-named test are indistinguishable. It goes inline for the
-                 * same reason the suite path came out — a second line here costs the whole
-                 * grid row its height.
+                 * with a similarly-named test are indistinguishable — `orders-api` and
+                 * `checkout-web` both have a `test_case_7`. That is worth the second line the
+                 * suite path was not.
                  */
                 bars={slowest.map((test) => ({
                   label: test.name,

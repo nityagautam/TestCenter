@@ -522,12 +522,19 @@ organisation scope. They are different tests in different projects — `orders-a
 Every one of these lists is read at organisation scope, where test names are drawn from every
 project at once and are not unique.
 
-**Fix** A `scope` field on `RankedBar`, printed before the label in mono. Inline rather than
-as a `detail` line: `detail` is a second line, `rowHeightRem` is derived from whether any bar
-has one, and these charts sit three-across, so one short string would have cost the whole
-dashboard row about 90px. Inline it costs nothing and truncation helps — the project stays
-pinned at the left and the long test name elides. Passed only where the view spans projects,
-matching the rule the flaky leaderboard and test search already followed.
+**Fix** A `scope` field on `RankedBar`, captioning the label on the sub-line it shares with
+`detail`, joined as `ext_api_test · JCP Bulk Upload` — the same shape the flaky leaderboard
+and test search already use for this pair of facts, so the three lists read alike. Under the
+name rather than inline with it so every test name starts at the same x and the eye can run
+down the column of names.
+
+That makes the row two lines, which `rowHeightRem` accounts for via `hasSubLine`, and costs
+the dashboard's three-across grid row about 90px of height. Worth stating plainly because the
+note above the slowest-tests list rejects a second line for the *suite path* on exactly that
+ground: the difference is that the suite path answers a question nobody asks of a ranking,
+while without the project a row names a test the reader cannot place at all.
+
+Passed only where the view spans projects, matching the rule those two lists already followed.
 
 **Guard** `reports.test.ts` asserts both directions per question: every ranked bar carries a
 scope at organisation scope, and none does when the report already names one project. The

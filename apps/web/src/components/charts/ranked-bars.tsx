@@ -22,21 +22,21 @@ export interface RankedBar {
   /** What to print at the end of the bar, e.g. "1.4s" or "6 (19%)". */
   display: string;
   /**
-   * Where the row comes from — in practice the project key — printed *before* the label on
-   * the same line.
+   * Where the row comes from — in practice the project key — printed on the sub-line beneath
+   * the label, ahead of `detail`.
    *
-   * On the same line rather than as a `detail`, because `detail` is a second line and a
-   * second line changes `rowHeightRem` for the whole list: these charts sit three-across in
-   * a grid, so every card in the row would grow by roughly 90px to carry one short string.
-   * Inline it costs nothing vertically, and truncation then works in its favour — the scope
-   * is pinned at the left where the eye scans for it and the long test name is what elides.
+   * Under the name rather than inline with it so the test name starts at the same x on every
+   * row and the eye can run straight down the list of names; the project is then a caption
+   * rather than a prefix competing for the start of the line. This is the shape the flaky
+   * leaderboard and test search already use for the same pair of facts, so the three read
+   * alike. It does make the row two lines, which `rowHeightRem` accounts for.
    *
    * Pass it only when the surrounding view actually spans projects. On a project's own
    * dashboard every row has the same value, and repeating it five times says nothing while
-   * taking width from the names. Same rule as the flaky leaderboard and test search.
+   * taking width from the suite path beside it.
    */
   scope?: string | null;
-  /** Optional second line under the label. */
+  /** Optional second line under the label, after `scope` when both are present. */
   detail?: string | null;
   href?: string;
   /** Overrides the chart colour for this bar, e.g. a pass-rate health tone. */
@@ -64,6 +64,11 @@ const ROW_HEIGHT_REM = 2.3;
  * what tells a reader to scroll.
  */
 const ROW_WITH_DETAIL_HEIGHT_REM = 3.45;
+
+/** A row is two lines when it carries either a project or a detail; both share the sub-line. */
+function hasSubLine(bar: RankedBar): boolean {
+  return Boolean(bar.detail) || Boolean(bar.scope);
+}
 
 export function RankedBars({
   bars,
@@ -113,7 +118,7 @@ export function RankedBars({
   const max = domainMax ?? Math.max(...bars.map((bar) => bar.value), 1);
   const scrolls = maxVisible !== undefined && bars.length > maxVisible;
   // A list is detailed or it is not; the rows within one are the same shape either way.
-  const rowHeightRem = bars.some((bar) => bar.detail) ? ROW_WITH_DETAIL_HEIGHT_REM : ROW_HEIGHT_REM;
+  const rowHeightRem = bars.some(hasSubLine) ? ROW_WITH_DETAIL_HEIGHT_REM : ROW_HEIGHT_REM;
 
   return (
     <figure className="min-w-0">
@@ -152,20 +157,18 @@ export function RankedBars({
           <ol className="space-y-1.5">
             {bars.map((bar, index) => {
               const label = (
-                <span
-                  className="block truncate text-[11px]"
-                  /* The tooltip carries the scope too, since that is the copy of the row a
-                     reader falls back to when the visible one has been elided. */
-                  title={bar.scope ? `${bar.scope} · ${bar.label}` : bar.label}
-                >
-                  {bar.scope ? (
-                    <span className="mr-1.5 font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {bar.scope}
-                    </span>
-                  ) : null}
+                <span className="block truncate text-[11px]" title={bar.label}>
                   {bar.label}
                 </span>
               );
+              /*
+               * Project and detail share one caption line, joined the way the flaky
+               * leaderboard joins them — `ext_api_test · JCP Bulk Upload` — rather than
+               * stacking into a third line. Both are secondary to the name above them, so
+               * they get one line between them, and its `title` carries the untruncated text
+               * because the suite path is usually what gets elided.
+               */
+              const subLine = [bar.scope, bar.detail].filter(Boolean).join(" · ");
               return (
                 /*
                  * Hover feedback in CSS, so this stays a server component.
@@ -199,9 +202,12 @@ export function RankedBars({
                       ) : (
                         label
                       )}
-                      {bar.detail ? (
-                        <span className="block truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
-                          {bar.detail}
+                      {subLine ? (
+                        <span
+                          className="block truncate font-mono text-[10px] text-[var(--color-ink-muted)]"
+                          title={subLine}
+                        >
+                          {subLine}
                         </span>
                       ) : null}
                     </span>
