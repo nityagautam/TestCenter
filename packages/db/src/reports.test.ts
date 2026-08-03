@@ -358,9 +358,13 @@ describeIfDb("reports", () => {
       return result.panels.flatMap((panel) => (panel.data.kind === "table" ? panel.data.rows : []));
     }
 
-    function barsOf(
-      result: Awaited<ReturnType<typeof runReport>>,
-    ): { label: string; value: number; display: string; detail?: string | null }[] {
+    function barsOf(result: Awaited<ReturnType<typeof runReport>>): {
+      label: string;
+      value: number;
+      display: string;
+      detail?: string | null;
+      scope?: string | null;
+    }[] {
       return result.panels.flatMap((panel) =>
         panel.data.kind === "ranked" ? panel.data.bars : [],
       );
@@ -369,6 +373,58 @@ describeIfDb("reports", () => {
     function textOf(result: Awaited<ReturnType<typeof runReport>>): string {
       return JSON.stringify(result.panels);
     }
+
+    /*
+     * Which project a ranked row belongs to.
+     *
+     * A ranked list of test names read at organisation scope spans every project, so a row
+     * naming `test_login` identifies a test the reader cannot place — and two projects each
+     * having one are indistinguishable. Inside a single project the same key repeated down
+     * twelve rows says nothing and takes width from the names, which are what differ.
+     *
+     * Both halves are asserted because both are silent when wrong: a missing key renders as
+     * the name alone, and a redundant one as a slightly narrower name. Neither throws.
+     */
+    describe("the project on a ranked row", () => {
+      /*
+       * The four questions whose ranked panel lists tests, each with the filters widened.
+       *
+       * `paramsFor` supplies deliberately arbitrary defaults — a suite of `specs/a.spec.ts`
+       * that this fixture does not contain — which is fine for the well-formedness sweep but
+       * would leave these panels empty, and an assertion over no bars proves nothing. The
+       * override is the same one the flipping-tests answer test already uses.
+       */
+      const TEST_LISTING: [string, Record<string, string>][] = [
+        ["most-failing-tests", { branch: "" }],
+        ["newly-failing", {}],
+        ["ci-time", {}],
+        ["flipping-tests", { suite: "" }],
+      ];
+
+      it.each(TEST_LISTING)("%s names the project at organisation scope", async (id, overrides) => {
+        const question = findQuestion(id)!;
+        const result = await runReport(
+          sql,
+          question,
+          { ...paramsFor(question), ...overrides },
+          { orgId, scopeLabel: "Reports Test", orgSlug: testOrgSlug },
+        );
+
+        const bars = barsOf(result);
+        expect(bars.length).toBeGreaterThan(0);
+        for (const bar of bars) expect(bar.scope).toBeTruthy();
+      });
+
+      it.each(REPORT_QUESTIONS.map((question) => [question.id, question] as const))(
+        "%s omits it when the report is already about one project",
+        async (_id, question) => {
+          // `ctx()` carries a projectId, so this covers every question rather than the four
+          // that list tests — a new one that hardcodes the key instead of asking fails here.
+          const bars = barsOf(await runReport(sql, question, paramsFor(question), ctx()));
+          for (const bar of bars) expect(bar.scope).toBeFalsy();
+        },
+      );
+    });
 
     it("names the consistently-failing test as the most-failing", async () => {
       const result = await report("most-failing-tests", { branch: "" });

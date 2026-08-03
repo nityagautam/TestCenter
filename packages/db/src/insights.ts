@@ -499,7 +499,7 @@ export async function slowestTests(
 }
 
 export interface FailureConcentration {
-  tests: { id: number; name: string; failures30d: number; share: number }[];
+  tests: { id: number; name: string; projectKey: string; failures30d: number; share: number }[];
   /** Failures across every test in scope, so the listed share means something. */
   totalFailures: number;
   /** How many distinct tests failed at all. */
@@ -520,9 +520,13 @@ export async function failureConcentration(
 ): Promise<FailureConcentration> {
   const limit = Math.min(Math.max(input.limit ?? 6, 1), 20);
 
-  const rows = await sql<{ id: number; name: string; failures30d: number }[]>`
-    SELECT tc.id, tc.name, tc.failures_30d AS "failures30d"
+  const rows = await sql<{ id: number; name: string; projectKey: string; failures30d: number }[]>`
+    -- The project is joined because this list is read at organisation scope, where two
+    -- projects can each contribute a test of the same name and the ranking is then
+    -- unreadable. slowestTests already returns it for the same reason.
+    SELECT tc.id, tc.name, p.key AS "projectKey", tc.failures_30d AS "failures30d"
     FROM test_cases tc
+    JOIN projects p ON p.id = tc.project_id
     WHERE tc.org_id = ${input.orgId}
       ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
       AND tc.failures_30d > 0
@@ -545,6 +549,7 @@ export async function failureConcentration(
     tests: rows.map((row) => ({
       id: row.id,
       name: row.name,
+      projectKey: row.projectKey,
       failures30d: row.failures30d,
       share: totalFailures === 0 ? 0 : (row.failures30d * 100) / totalFailures,
     })),

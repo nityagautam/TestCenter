@@ -338,6 +338,17 @@ describeIfDb("insights read path", () => {
       // Shares are a proportion of the total, so they cannot exceed it.
       const shareSum = concentration.tests.reduce((sum, test) => sum + Number(test.share), 0);
       expect(shareSum).toBeLessThanOrEqual(100.01);
+
+      /*
+       * Every row names its project, because this list is read at organisation scope where
+       * two projects can each contribute a test of the same name. A missing key would render
+       * as a blank gap before the name rather than failing, so it is asserted rather than
+       * eyeballed.
+       */
+      for (const test of concentration.tests) {
+        expect(test.projectKey).toBeTruthy();
+        expect(typeof test.projectKey).toBe("string");
+      }
     });
 
     it("buckets tests by flake score", async () => {

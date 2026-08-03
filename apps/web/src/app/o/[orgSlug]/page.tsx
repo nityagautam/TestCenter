@@ -455,13 +455,20 @@ export default async function OrgDashboard({
                 title="Slowest tests (p95)"
                 maxVisible={5}
                 /*
-                 * The name alone. The suite path under each row was a second line of 10px
-                 * mono that doubled the height of the list and answered a question nobody
-                 * asks of a ranking — you are looking for *which test*, and the path is one
-                 * click away on the test's own page.
+                 * The name and its project, on one line. The suite path used to sit under
+                 * each row as a second line of 10px mono, which doubled the height of the
+                 * list to answer a question nobody asks of a ranking — you are looking for
+                 * *which test*, and the path is one click away on the test's own page.
+                 *
+                 * The project is not that: this list spans every project in the organisation,
+                 * so without it a row names a test the reader cannot place, and two projects
+                 * with a similarly-named test are indistinguishable. It goes inline for the
+                 * same reason the suite path came out — a second line here costs the whole
+                 * grid row its height.
                  */
                 bars={slowest.map((test) => ({
                   label: test.name,
+                  scope: test.projectKey,
                   value: test.p95DurationMs,
                   display: formatDuration(test.p95DurationMs),
                   href: `/o/${orgSlug}/tests/${test.id}`,
@@ -477,6 +484,7 @@ export default async function OrgDashboard({
                 color="var(--color-status-failed)"
                 bars={concentration.tests.map((test) => ({
                   label: test.name,
+                  scope: test.projectKey,
                   value: test.failures30d,
                   display: `${test.failures30d} · ${Math.round(test.share)}%`,
                   href: `/o/${orgSlug}/tests/${test.id}`,

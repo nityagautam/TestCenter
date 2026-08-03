@@ -44,7 +44,20 @@ export interface TrendPanelData {
 
 /** Magnitude compared across named things, biggest first. */
 export interface RankedPanelData {
-  bars: { label: string; value: number; display: string; detail?: string | null; href?: string }[];
+  bars: {
+    label: string;
+    /**
+     * The project a row belongs to, printed before the label. Set only at organisation
+     * scope: every question here runs at both, and inside one project the same key repeated
+     * down the list says nothing. Structurally identical to the web `RankedBar` field of the
+     * same name — this package cannot import from the app, so the shape is restated.
+     */
+    scope?: string | null;
+    value: number;
+    display: string;
+    detail?: string | null;
+    href?: string;
+  }[];
   /** Set for ratios so a small gap is drawn as a small gap. */
   domainMax?: number;
 }

@@ -511,6 +511,50 @@ against `globalEnv`. Anything in the first list and not the second is stripped a
 
 ---
 
+### A27. Ranked charts named a test without saying which project it was in
+
+**Symptom** Two rows reading `test_case_7`, one above the other, in "Failures by test" at
+organisation scope. They are different tests in different projects — `orders-api` and
+`checkout-web` — and nothing on screen said so.
+
+**Cause** `slowestTests` already selected `projectKey` and no caller rendered it;
+`failureConcentration` and the four test-listing report queries never selected it at all.
+Every one of these lists is read at organisation scope, where test names are drawn from every
+project at once and are not unique.
+
+**Fix** A `scope` field on `RankedBar`, printed before the label in mono. Inline rather than
+as a `detail` line: `detail` is a second line, `rowHeightRem` is derived from whether any bar
+has one, and these charts sit three-across, so one short string would have cost the whole
+dashboard row about 90px. Inline it costs nothing and truncation helps — the project stays
+pinned at the left and the long test name elides. Passed only where the view spans projects,
+matching the rule the flaky leaderboard and test search already followed.
+
+**Guard** `reports.test.ts` asserts both directions per question: every ranked bar carries a
+scope at organisation scope, and none does when the report already names one project. The
+second half runs over the whole catalogue, so a new question that hardcodes the key fails.
+
+---
+
+### A28. RankedBars keyed its rows by label, and dropped them
+
+**Symptom** React's "Encountered two children with the same key" on the dashboard.
+
+**Cause** `key={`${bar.label}-${bar.display}`}`. Neither part is unique: two projects can
+each have a `test_case_7`, and two tests can easily share a formatted duration — `33m 36s`
+appears twice in the seeded slowest-tests list. This is the repo's own documented
+anti-pattern, "never key a chart's marks by their label", violated in a chart.
+
+**Why it was dangerous** A key collision is not only a console warning. React is free to drop
+one of the colliding siblings, so a ranking silently renders one row short — the failure mode
+is a missing row in a chart whose entire purpose is to rank things, with nothing on screen
+saying a row is absent. Adding the project key to these lists (A27) made same-name rows
+*more* likely to sit next to each other, not less.
+
+**Fix** Keyed by index. In an ordered series position is the identity, which is what the
+convention in `CLAUDE.md` says.
+
+---
+
 ## Part B — outstanding
 
 ### B13. Reports can carry credentials into the database *(found in real data)*

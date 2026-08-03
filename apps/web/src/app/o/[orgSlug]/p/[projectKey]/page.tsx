@@ -460,6 +460,15 @@ export default async function ProjectOverview({
             </Card>
           </div>
 
+          {/*
+           * No `scope` on these two, unlike the organisation dashboard's copies.
+           *
+           * Every row here belongs to the project named in the page heading, so printing that
+           * key five times down the list says nothing and takes width from the test names,
+           * which are what actually differ. Same rule the flaky leaderboard and test search
+           * already follow: the project appears when the view spans projects, and not when it
+           * does not.
+           */}
           <div className="mb-5 grid gap-5 lg:grid-cols-3">
             <Card className="p-4">
               <RankedBars

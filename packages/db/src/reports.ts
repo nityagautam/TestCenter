@@ -266,6 +266,18 @@ export interface ReportContext {
 }
 
 /**
+ * The project key to print on a row, or nothing when the report already names one project.
+ *
+ * Every question here runs at both scopes. At organisation scope a ranked list of test names
+ * spans projects, so a row identifies a test the reader cannot place — and two projects with a
+ * similarly-named test become indistinguishable. Inside one project the same string repeated
+ * down the list says nothing and takes width from the names, which are what differ.
+ */
+function rowScope(ctx: ReportContext, projectKey: string): string | undefined {
+  return ctx.projectId ? undefined : projectKey;
+}
+
+/**
  * Runs a question and returns finished panels.
  *
  * Every question produces a chart *and* a table over the same rows. The chart carries the
@@ -346,22 +358,31 @@ async function mostFailingTests(
   ctx: ReportContext,
 ): Promise<ReportPanel[]> {
   const rows = await sql<
-    { id: number; name: string; suite: string | null; failures: number; runs: number }[]
+    {
+      id: number;
+      name: string;
+      suite: string | null;
+      projectKey: string;
+      failures: number;
+      runs: number;
+    }[]
   >`
     SELECT
       tc.id,
       tc.name,
       tc.suite,
+      p.key AS "projectKey",
       count(*) FILTER (WHERE r.status IN ('failed', 'error'))::int AS failures,
       count(*)::int AS runs
     FROM test_results r
     JOIN test_cases tc ON tc.id = r.test_case_id
+    JOIN projects p ON p.id = tc.project_id
     JOIN runs run ON run.id = r.run_id
     WHERE r.org_id = ${ctx.orgId}
       ${ctx.projectId ? sql`AND r.project_id = ${ctx.projectId}` : sql``}
       ${input.branch ? sql`AND run.branch = ${input.branch}` : sql``}
       AND r.started_at >= now() - (${input.days} || ' days')::interval
-    GROUP BY tc.id, tc.name, tc.suite
+    GROUP BY tc.id, tc.name, tc.suite, p.key
     HAVING count(*) FILTER (WHERE r.status IN ('failed', 'error')) > 0
     ORDER BY failures DESC, tc.name ASC
     LIMIT 15
@@ -394,6 +415,7 @@ async function mostFailingTests(
         kind: "ranked",
         bars: rows.slice(0, 10).map((row) => ({
           label: row.name,
+          scope: rowScope(ctx, row.projectKey),
           value: row.failures,
           display: `${row.failures} of ${row.runs}`,
           detail: row.suite,
@@ -566,7 +588,14 @@ async function newlyFailing(
   ctx: ReportContext,
 ): Promise<ReportPanel[]> {
   const rows = await sql<
-    { id: number; name: string; suite: string | null; failures: number; runs: number }[]
+    {
+      id: number;
+      name: string;
+      suite: string | null;
+      projectKey: string;
+      failures: number;
+      runs: number;
+    }[]
   >`
     WITH windowed AS (
       SELECT r.test_case_id,
@@ -580,9 +609,11 @@ async function newlyFailing(
         AND r.started_at >= now() - (${input.days * 2} || ' days')::interval
       GROUP BY r.test_case_id
     )
-    SELECT tc.id, tc.name, tc.suite, w.failures_now AS failures, w.runs_now AS runs
+    SELECT tc.id, tc.name, tc.suite, p.key AS "projectKey",
+           w.failures_now AS failures, w.runs_now AS runs
     FROM windowed w
     JOIN test_cases tc ON tc.id = w.test_case_id
+    JOIN projects p ON p.id = tc.project_id
     -- Clean before, failing now. Both halves matter: without the first this is just
     -- "failing tests", and the question is specifically about what changed.
     WHERE w.failures_now > 0 AND w.failures_before = 0
@@ -611,6 +642,7 @@ async function newlyFailing(
         kind: "ranked",
         bars: rows.slice(0, 12).map((row) => ({
           label: row.name,
+          scope: rowScope(ctx, row.projectKey),
           value: row.failures,
           display: `${row.failures} of ${row.runs}`,
           detail: row.suite,
@@ -755,24 +787,26 @@ async function ciTime(sql: Sql, input: RunnerInput, ctx: ReportContext): Promise
       id: number;
       name: string;
       suite: string | null;
+      projectKey: string;
       totalMs: number;
       executions: number;
       avgMs: number;
     }[]
   >`
-    SELECT tc.id, tc.name, tc.suite,
+    SELECT tc.id, tc.name, tc.suite, p.key AS "projectKey",
            -- float8 so a multi-hour total is a JS number rather than an int8 string.
            sum(r.duration_ms)::float8 AS "totalMs",
            count(*)::int AS executions,
            avg(r.duration_ms)::float8 AS "avgMs"
     FROM test_results r
     JOIN test_cases tc ON tc.id = r.test_case_id
+    JOIN projects p ON p.id = tc.project_id
     JOIN runs run ON run.id = r.run_id
     WHERE ${orgScope(sql, ctx)}
       ${environment ? sql`AND run.environment = ${environment}` : sql``}
       AND r.started_at >= now() - (${input.days} || ' days')::interval
       AND r.duration_ms IS NOT NULL
-    GROUP BY tc.id, tc.name, tc.suite
+    GROUP BY tc.id, tc.name, tc.suite, p.key
     ORDER BY "totalMs" DESC
     LIMIT 25
   `;
@@ -806,6 +840,7 @@ async function ciTime(sql: Sql, input: RunnerInput, ctx: ReportContext): Promise
         kind: "ranked",
         bars: rows.slice(0, 12).map((row) => ({
           label: row.name,
+          scope: rowScope(ctx, row.projectKey),
           value: row.totalMs,
           display: formatMs(row.totalMs),
           detail: `${row.executions} runs · ${formatMs(row.avgMs)} avg`,
@@ -921,6 +956,7 @@ async function flippingTests(
       id: number;
       name: string;
       suite: string | null;
+      projectKey: string;
       flips: number;
       executions: number;
       failures: number;
@@ -936,7 +972,7 @@ async function flippingTests(
         ${suite ? sql`AND tc.suite = ${suite}` : sql``}
         AND r.started_at >= now() - (${input.days} || ' days')::interval
     )
-    SELECT tc.id, tc.name, tc.suite,
+    SELECT tc.id, tc.name, tc.suite, p.key AS "projectKey",
            count(*) FILTER (
              WHERE h.prev_status IS NOT NULL AND h.prev_status <> h.status
                AND h.status IN ('passed','failed','error')
@@ -946,7 +982,8 @@ async function flippingTests(
            count(*) FILTER (WHERE h.status IN ('failed','error'))::int AS failures
     FROM history h
     JOIN test_cases tc ON tc.id = h.test_case_id
-    GROUP BY tc.id, tc.name, tc.suite
+    JOIN projects p ON p.id = tc.project_id
+    GROUP BY tc.id, tc.name, tc.suite, p.key
     HAVING count(*) FILTER (
       WHERE h.prev_status IS NOT NULL AND h.prev_status <> h.status
         AND h.status IN ('passed','failed','error') AND h.prev_status IN ('passed','failed','error')
@@ -977,6 +1014,7 @@ async function flippingTests(
         kind: "ranked",
         bars: rows.slice(0, 12).map((row) => ({
           label: row.name,
+          scope: rowScope(ctx, row.projectKey),
           value: row.flips,
           display: `${row.flips} flips`,
           detail: `${row.executions} executions · ${row.failures} failed`,

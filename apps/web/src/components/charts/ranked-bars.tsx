@@ -21,6 +21,21 @@ export interface RankedBar {
   value: number;
   /** What to print at the end of the bar, e.g. "1.4s" or "6 (19%)". */
   display: string;
+  /**
+   * Where the row comes from — in practice the project key — printed *before* the label on
+   * the same line.
+   *
+   * On the same line rather than as a `detail`, because `detail` is a second line and a
+   * second line changes `rowHeightRem` for the whole list: these charts sit three-across in
+   * a grid, so every card in the row would grow by roughly 90px to carry one short string.
+   * Inline it costs nothing vertically, and truncation then works in its favour — the scope
+   * is pinned at the left where the eye scans for it and the long test name is what elides.
+   *
+   * Pass it only when the surrounding view actually spans projects. On a project's own
+   * dashboard every row has the same value, and repeating it five times says nothing while
+   * taking width from the names. Same rule as the flaky leaderboard and test search.
+   */
+  scope?: string | null;
   /** Optional second line under the label. */
   detail?: string | null;
   href?: string;
@@ -135,9 +150,19 @@ export function RankedBars({
           className={scrolls ? "tc-no-scrollbar overflow-y-auto" : undefined}
         >
           <ol className="space-y-1.5">
-            {bars.map((bar) => {
+            {bars.map((bar, index) => {
               const label = (
-                <span className="block truncate text-[11px]" title={bar.label}>
+                <span
+                  className="block truncate text-[11px]"
+                  /* The tooltip carries the scope too, since that is the copy of the row a
+                     reader falls back to when the visible one has been elided. */
+                  title={bar.scope ? `${bar.scope} · ${bar.label}` : bar.label}
+                >
+                  {bar.scope ? (
+                    <span className="mr-1.5 font-mono text-[10px] text-[var(--color-ink-muted)]">
+                      {bar.scope}
+                    </span>
+                  ) : null}
                   {bar.label}
                 </span>
               );
@@ -151,8 +176,18 @@ export function RankedBars({
                  * gives the same affordance for nothing, because the only state involved is
                  * "the pointer is here", which CSS already tracks.
                  */
+                /*
+                 * Keyed by position, not by content.
+                 *
+                 * This was `${bar.label}-${bar.display}` and it collided in practice: two
+                 * projects each having a `test_login` that failed the same number of times
+                 * produce one key twice, React warns, and it is then free to drop one of them
+                 * — a row silently missing from a chart whose entire job is ranking. Labels
+                 * were never unique here and adding the project made the collision likelier,
+                 * not rarer. In an ordered series position *is* the identity.
+                 */
                 <li
-                  key={`${bar.label}-${bar.display}`}
+                  key={index}
                   className="group/bar -mx-1.5 min-w-0 rounded px-1.5 py-0.5 transition-colors hover:bg-[var(--color-surface)]"
                 >
                   <div className="flex items-baseline justify-between gap-3">
