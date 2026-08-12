@@ -476,7 +476,7 @@ function ActFour() {
       <RunVersusDay />
 
       <P>
-        Three charts carry a toggle, and the toggle changes the <em>question</em>, not the drawing:
+        Two charts carry a toggle, and the toggle changes the <em>question</em>, not the drawing:
       </P>
 
       <Table
@@ -484,9 +484,13 @@ function ActFour() {
         rows={[
           ["Execution over time", "counts / share", "how much did we run · what proportion failed"],
           ["Pass rate", "over time / by branch", "is the org healthy · is main healthy"],
-          ["Run duration", "average / total", "per-run speed · what CI is spending"],
         ]}
       />
+
+      <P>
+        <Term>CI time per run</Term> needs no toggle: its bars show each publish exactly, while the
+        line shows the trailing five-run average on the same duration axis.
+      </P>
 
       <P>
         Beside it, <Term>when runs happen</Term> folds the same window into a punchcard — hour of

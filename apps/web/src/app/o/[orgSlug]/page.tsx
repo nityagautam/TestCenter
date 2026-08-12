@@ -2,7 +2,6 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { RUN_VERDICT_LABELS, type RunVerdict } from "@testcenter/core";
 import {
-  dailySeries,
   branchPassRates,
   failureConcentration,
   flakeDistribution,
@@ -65,9 +64,8 @@ export const dynamic = "force-dynamic";
  *
  * One control drives every chart on the page, so the set has to serve all of them: 7 answers
  * "how is this week going", 90 answers "is the trend real", and the middle three are the
- * sprint lengths people actually plan in. `dailySeries` caps at 365 and `runSeries` at 300
- * points, so the widest window degrades by dropping the oldest runs rather than by getting
- * slower.
+ * sprint lengths people actually plan in. `runSeries` caps at 300 points, so the widest
+ * window degrades by dropping the oldest runs rather than by getting slower.
  */
 const DAY_OPTIONS = [7, 15, 30, 45, 90] as const;
 
@@ -80,16 +78,10 @@ export default async function OrgDashboard({
     days?: string;
     volume?: string;
     rate?: string;
-    duration?: string;
   }>;
 }) {
   const { orgSlug } = await params;
-  const {
-    days: daysParam,
-    volume: volumeParam,
-    rate: rateParam,
-    duration: durationParam,
-  } = await searchParams;
+  const { days: daysParam, volume: volumeParam, rate: rateParam } = await searchParams;
   const context = await requirePageContext(orgSlug);
   const { sql } = getServices();
 
@@ -108,11 +100,9 @@ export default async function OrgDashboard({
   // ChartToggle. Unknown values fall back to the default rather than erroring.
   const shareView = volumeParam === "share";
   const branchView = rateParam === "branch";
-  const totalDurationView = durationParam === "total";
 
   const [
     summary,
-    series,
     projects,
     recent,
     flaky,
@@ -124,7 +114,6 @@ export default async function OrgDashboard({
     runPoints,
   ] = await Promise.all([
     orgSummary(sql, { orgId }),
-    dailySeries(sql, { orgId, days }),
     listProjects(sql, orgId),
     listRuns(sql, { orgId }, { limit: 6 }),
     flakyLeaderboard(sql, { orgId, limit: 6 }),
@@ -161,7 +150,6 @@ export default async function OrgDashboard({
     if (daysParam) next.set("days", String(days));
     if (volumeParam) next.set("volume", volumeParam);
     if (rateParam) next.set("rate", rateParam);
-    if (durationParam) next.set("duration", durationParam);
     for (const [key, value] of Object.entries(changes)) {
       if (value === null) next.delete(key);
       else next.set(key, value);
@@ -194,7 +182,7 @@ export default async function OrgDashboard({
     );
   }
 
-  const hasHistory = series.some((point) => point.runs > 0);
+  const hasHistory = runPoints.length > 0;
   // Newest first, so the head of the list the "Recent runs" card already fetched is also
   // the run the donut is about. No extra query.
   const lastRun = recent.runs[0] ?? null;
@@ -356,11 +344,10 @@ export default async function OrgDashboard({
               ) : (
                 <TrendChart
                   title="Pass rate"
-                  points={series.map((point) => ({
-                    label: point.day,
-                    value: point.passRate,
-                    detail:
-                      point.runs > 0 ? `${point.runs} run(s), ${point.tests} tests` : undefined,
+                  points={runPoints.map((run) => ({
+                    label: run.label,
+                    value: run.passRate,
+                    detail: [run.name ?? run.status, run.branch].filter(Boolean).join(" · "),
                   }))}
                   unit="%"
                   yMax={100}
@@ -418,31 +405,15 @@ export default async function OrgDashboard({
               {/* Separate chart, never a second axis on the pass-rate plot: aligning two
                 scales would imply a relationship the data does not contain. */}
               <TrendChart
-                title={totalDurationView ? "Total CI time" : "Average run duration"}
-                points={series.map((point) => ({
-                  label: point.day,
-                  value: totalDurationView ? point.totalDurationMs : point.avgDurationMs,
-                  detail: point.runs > 0 ? `${point.runs} run(s)` : undefined,
+                title="CI time per run"
+                points={runPoints.map((run) => ({
+                  label: run.label,
+                  value: run.durationMs,
+                  detail: [run.name ?? run.status, run.branch].filter(Boolean).join(" · "),
                 }))}
                 color="var(--color-series-2)"
                 format="duration"
-                action={
-                  <ChartToggle
-                    label="Duration view"
-                    options={[
-                      {
-                        label: "average",
-                        href: viewHref({ duration: null }),
-                        active: !totalDurationView,
-                      },
-                      {
-                        label: "total",
-                        href: viewHref({ duration: "total" }),
-                        active: totalDurationView,
-                      },
-                    ]}
-                  />
-                }
+                shape="bars-line"
               />
             </Card>
           </div>

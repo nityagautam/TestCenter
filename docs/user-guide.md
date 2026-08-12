@@ -360,15 +360,17 @@ is why the legend says *fewer → more* instead of printing numbers on it. Every
 is one hover away.
 
 **The last run** is a donut beside the pass-rate trend: all four outcomes, always listed,
-even at zero. Hover a slice and the centre reports it.
+even at zero. Hover a slice and the centre reports it. The pass-rate trend and **CI time per
+run** chart plot every published run separately, so a bad or slow execution cannot hide
+inside a daily average. CI time uses bars for exact runs and a line for the trailing five-run
+average, on one shared duration axis.
 
-Three charts carry a **view toggle** which changes the *question*, not the drawing:
+Two charts carry a **view toggle** which changes the *question*, not the drawing:
 
 | Chart | Toggle | The two questions |
 | --- | --- | --- |
 | Execution over time | counts / share | "how much did we run" vs "what proportion failed" |
 | Pass rate | over time / by branch | "is the org healthy" vs "is *main* healthy" |
-| Run duration | average / total | per-run speed vs what CI is spending |
 
 Below them: **slowest tests** (p95, because a test that is usually fast and occasionally
 slow is the one worth finding), **failure concentration** (one bad test or systemic?), and

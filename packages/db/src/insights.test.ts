@@ -297,6 +297,9 @@ describeIfDb("insights read path", () => {
       for (const point of points) {
         expect(point.label).toBeTruthy();
         expect(point.total).toBeGreaterThan(0);
+        expect(point.passRate).toBeGreaterThanOrEqual(0);
+        expect(point.passRate).toBeLessThanOrEqual(100);
+        expect(point.durationMs).toBe(5_000);
       }
       expect(points.some((point) => point.branch === "release/1.0")).toBe(true);
     });

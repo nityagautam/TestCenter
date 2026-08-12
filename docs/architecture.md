@@ -374,7 +374,7 @@ table.
 
 ### Conventions
 
-- **URL is the state store.** `?days=`, `?volume=share`, `?rate=branch`, `?duration=total`,
+- **URL is the state store.** `?days=`, `?volume=share`, `?rate=branch`,
   `?show=all`, `?search=`, `?status=`, `?suite=`, `?tag=k:v` (repeatable), `?result=`,
   `?cursor=`. Range and toggle links must carry the other selections — building them by
   hand is how they get dropped.

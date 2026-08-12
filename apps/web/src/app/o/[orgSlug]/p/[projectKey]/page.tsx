@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  dailySeries,
   branchPassRates,
   failureConcentration,
   flakeDistribution,
@@ -81,7 +80,6 @@ export default async function ProjectOverview({
     ok?: string;
     volume?: string;
     rate?: string;
-    duration?: string;
   }>;
 }) {
   const { orgSlug, projectKey } = await params;
@@ -92,7 +90,6 @@ export default async function ProjectOverview({
     ok,
     volume: volumeParam,
     rate: rateParam,
-    duration: durationParam,
   } = await searchParams;
   const context = await requirePageContext(orgSlug);
   const tz = await viewerTimeZone();
@@ -112,36 +109,24 @@ export default async function ProjectOverview({
   const days = DAY_OPTIONS.find((option) => option === Number(daysParam)) ?? 7;
   const scope = { orgId: context.org.id, projectId: project.id };
 
-  // Same three view selections as the org dashboard, so the two pages behave alike.
+  // Same view selections as the org dashboard, so the two pages behave alike.
   const shareView = volumeParam === "share";
   const branchView = rateParam === "branch";
-  const totalDurationView = durationParam === "total";
 
-  const [
-    summary,
-    series,
-    recent,
-    flaky,
-    failing,
-    slowest,
-    concentration,
-    flakeBands,
-    activity,
-    runPoints,
-  ] = await Promise.all([
-    orgSummary(sql, scope),
-    dailySeries(sql, { ...scope, days }),
-    listRuns(sql, { orgId: context.org.id, projectId: project.id }, { limit: 8 }),
-    flakyLeaderboard(sql, { ...scope, limit: 5 }),
-    topFailingTests(sql, { ...scope, limit: 5 }),
-    // Twenty, not six: both lists scroll, and the tail says whether this is one bad test
-    // or something systemic.
-    slowestTests(sql, { ...scope, limit: 20 }),
-    failureConcentration(sql, { ...scope, limit: 20 }),
-    flakeDistribution(sql, scope),
-    runActivity(sql, { ...scope, days, timeZone: tz.zone }),
-    runSeries(sql, { ...scope, days, timeZone: tz.zone }),
-  ]);
+  const [summary, recent, flaky, failing, slowest, concentration, flakeBands, activity, runPoints] =
+    await Promise.all([
+      orgSummary(sql, scope),
+      listRuns(sql, { orgId: context.org.id, projectId: project.id }, { limit: 8 }),
+      flakyLeaderboard(sql, { ...scope, limit: 5 }),
+      topFailingTests(sql, { ...scope, limit: 5 }),
+      // Twenty, not six: both lists scroll, and the tail says whether this is one bad test
+      // or something systemic.
+      slowestTests(sql, { ...scope, limit: 20 }),
+      failureConcentration(sql, { ...scope, limit: 20 }),
+      flakeDistribution(sql, scope),
+      runActivity(sql, { ...scope, days, timeZone: tz.zone }),
+      runSeries(sql, { ...scope, days, timeZone: tz.zone }),
+    ]);
 
   // One verdict query for both consumers — the recent-runs list and the execution chart's
   // ribbon overlap, and two calls would fetch the newest runs twice.
@@ -167,7 +152,6 @@ export default async function ProjectOverview({
     if (daysParam) next.set("days", String(days));
     if (volumeParam) next.set("volume", volumeParam);
     if (rateParam) next.set("rate", rateParam);
-    if (durationParam) next.set("duration", durationParam);
     for (const [key, value] of Object.entries(changes)) {
       if (value === null) next.delete(key);
       else next.set(key, value);
@@ -379,10 +363,10 @@ export default async function ProjectOverview({
               ) : (
                 <TrendChart
                   title="Pass rate"
-                  points={series.map((point) => ({
-                    label: point.day,
-                    value: point.passRate,
-                    detail: point.runs > 0 ? `${point.runs} run(s)` : undefined,
+                  points={runPoints.map((run) => ({
+                    label: run.label,
+                    value: run.passRate,
+                    detail: [run.name ?? run.status, run.branch].filter(Boolean).join(" · "),
                   }))}
                   unit="%"
                   yMax={100}
@@ -432,30 +416,15 @@ export default async function ProjectOverview({
             </Card>
             <Card className="p-4">
               <TrendChart
-                title={totalDurationView ? "Total CI time" : "Average run duration"}
-                points={series.map((point) => ({
-                  label: point.day,
-                  value: totalDurationView ? point.totalDurationMs : point.avgDurationMs,
+                title="CI time per run"
+                points={runPoints.map((run) => ({
+                  label: run.label,
+                  value: run.durationMs,
+                  detail: [run.name ?? run.status, run.branch].filter(Boolean).join(" · "),
                 }))}
                 color="var(--color-series-2)"
                 format="duration"
-                action={
-                  <ChartToggle
-                    label="Duration view"
-                    options={[
-                      {
-                        label: "average",
-                        href: viewHref({ duration: null }),
-                        active: !totalDurationView,
-                      },
-                      {
-                        label: "total",
-                        href: viewHref({ duration: "total" }),
-                        active: totalDurationView,
-                      },
-                    ]}
-                  />
-                }
+                shape="bars-line"
               />
             </Card>
           </div>

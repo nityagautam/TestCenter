@@ -406,6 +406,9 @@ export interface RunPoint {
   failed: number;
   skipped: number;
   flaky: number;
+  /** Per-execution rate; skips are excluded from the denominator at ingest. */
+  passRate: number;
+  durationMs: number | null;
 }
 
 export async function runSeries(
@@ -432,7 +435,9 @@ export async function runSeries(
   const limit = Math.min(Math.max(input.limit ?? 300, 1), 1000);
 
   const rows = await sql<RunPoint[]>`
-    SELECT id, label, name, branch, status, total, passed, failed, skipped, flaky
+    SELECT
+      id, label, name, branch, status, total, passed, failed, skipped, flaky,
+      "passRate", "durationMs"
     FROM (
       SELECT
         r.id,
@@ -440,7 +445,9 @@ export async function runSeries(
         to_char(r.started_at AT TIME ZONE ${zone}, 'Mon DD HH24:MI') AS label,
         r.name, r.branch, r.status,
         r.total, r.passed, r.skipped, r.flaky,
-        (r.failed + r.errored) AS failed
+        (r.failed + r.errored) AS failed,
+        r.pass_rate::float8 AS "passRate",
+        r.duration_ms AS "durationMs"
       FROM runs r
       WHERE r.org_id = ${input.orgId}
         ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}

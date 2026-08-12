@@ -162,8 +162,9 @@ as B3.
 **Cause** `project_daily_stats.avg_duration_ms` is `AVG(runs.duration_ms)`. The tile
 labelled it as a per-test figure, making a ~19s value look absurd for a unit test.
 
-**Fix** Relabelled to "Average run duration", and the meaning documented where it is
-computed. A mislabelled metric is worse than a missing one.
+**Fix** Relabelled to "Average run duration", then replaced with the per-publish "CI time
+per run" chart when the dashboard moved away from daily aggregation. A mislabelled metric
+is worse than a missing one.
 
 ---
 
