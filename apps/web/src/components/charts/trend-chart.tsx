@@ -307,7 +307,7 @@ export function TrendChart({
                   coordinate.point.value === null ? "no data" : formatted(coordinate.point.value)
                 }${
                   shape === "bars-line" && coordinate.lineValue !== null
-                    ? `, five-run average ${formatted(coordinate.lineValue)}`
+                    ? `, five-run rolling average ${formatted(coordinate.lineValue)}`
                     : ""
                 }`}
               />
@@ -337,7 +337,7 @@ export function TrendChart({
               </div>
               {shape === "bars-line" && hovered.lineValue !== null ? (
                 <div className="font-mono text-[10px] whitespace-nowrap text-[var(--color-ink-muted)] tabular-nums">
-                  5-run avg {formatted(hovered.lineValue)}
+                  5-run rolling avg {formatted(hovered.lineValue)}
                 </div>
               ) : null}
               {hovered.point.detail ? (
@@ -358,7 +358,7 @@ export function TrendChart({
           </li>
           <li className="flex items-center gap-1.5 text-[10px] text-[var(--color-ink-muted)]">
             <span className="h-0.5 w-3 rounded-full" style={{ background: color }} />
-            5-run average
+            5-run rolling average
           </li>
         </ul>
       ) : null}
