@@ -378,6 +378,14 @@ the **flake score distribution**.
 
 The toggles live in the URL, so a view is shareable and survives a reload.
 
+The runs list also filters by the latest human verdict: Pass, Product bug, Infra, Flaky,
+Investigating, or TODO / unreviewed. The exact URL values are `pass`, `product-bug`, `infra`,
+`flaky`, `investigating` and `todo`. TODO includes only runs ready for review, not uploads
+that are still pending or parsing. Because filtering uses the newest append-only verdict, a
+run corrected from Infra to Product bug appears only under Product bug. The selection lives
+in `?verdict=` like the other filters, so it survives search, facets and pagination and the
+narrowed review queue is shareable.
+
 **Times follow your machine.** Every timestamp, and both time axes, render in your own zone
 and say which one — `IST`, `PDT`, `UTC`. The very first page load renders in UTC and
 corrects itself once the browser has reported its zone.
@@ -484,8 +492,9 @@ who gets handed the problem.
 | **Flaky** | Non-deterministic, so not a real signal | the test's author |
 | **Investigating** | Seen, not yet judged | you, later |
 
-A run nobody has judged shows a blue dashed **TODO** badge — so "what still needs review?"
-is answerable at a glance from the runs list, the dashboards and the run itself. TODO is
+A complete, partial or failed run nobody has judged shows a blue dashed **TODO** badge — so
+"what still needs review?" is answerable at a glance from the runs list, the dashboards and
+the run itself. Pending and parsing runs are not ready for review and show no TODO. TODO is
 never stored; it simply means no verdict exists yet, which is why it is distinct from
 *Investigating* (someone looked and has not finished).
 
@@ -495,7 +504,8 @@ infra, and when?" has to stay answerable after the call changes. The log shows f
 and scrolls.
 
 They deliberately **do not** change any number: pass rates, trends and flake scores ignore
-verdicts entirely, so no chart shifts meaning because someone labelled a run.
+verdicts entirely, so no chart shifts meaning because someone labelled a run. Filtering the
+runs list by the latest verdict changes which rows are shown, not how any metric is computed.
 
 ### Creating a project
 

@@ -24,8 +24,8 @@ for project-scoped ones — so every link is shareable and unambiguous.
 
 | Page | What it does |
 | --- | --- |
-| `/o/:org` | Dashboard: outcome per run over time, when runs happen (hour × weekday heatmap), pass rate, last-run donut, duration, slowest tests, failure concentration, flake distribution, leaderboards |
-| `/o/:org/runs` | Filterable run list — search, branch/env/framework/tag facets, keyset pagination |
+| `/o/:org` | Dashboard: outcome per run over time, when runs happen (hour × weekday heatmap), per-run pass rate, last-run donut, exact CI-time bars with a five-run rolling average, slowest tests, failure concentration, flake distribution, leaderboards |
+| `/o/:org/runs` | Filterable run list — search, branch/env/framework/tag facets, latest-verdict/TODO filter, keyset pagination |
 | `/o/:org/runs/:id` | Metadata strip, summary tiles, verdict log, suite tree, failures-first results, captured output |
 | `/o/:org/tests` | Search by name fragment; filter by failing / flaky / slow / quarantined |
 | `/o/:org/tests/:id` | **Test history** — outcome strip, distinct failure modes, every failure in full (`?show=all` for passed output too) |
@@ -45,7 +45,8 @@ than one file, or the shots stop agreeing with each other.
 ### Organisation dashboard
 
 Execution over time — one point per run, not per day — beside the activity punchcard, then
-pass rate, the last run, and duration. Every filter and toggle lives in the URL.
+per-run pass rate, the last run, and CI time per run: exact bars plus a five-run rolling
+average line. Every filter and toggle lives in the URL.
 
 ![Organisation dashboard](docs/screenshots/dashboard.png)
 
@@ -59,6 +60,10 @@ after the project is created.
 ### Runs and one run
 
 ![Run list](docs/screenshots/runs.png)
+
+The verdict menu narrows this list by each run's latest human judgement. Choose **TODO /
+unreviewed** for completed, partial or failed runs that have no verdict yet; the selection is
+stored in `?verdict=` and survives search, facets and keyset pagination.
 
 Failures first, with captured stdout/stderr, the suite tree, and the append-only verdict log.
 
@@ -278,11 +283,13 @@ distinguish a regression from a UAT cluster being down, and that distinction dec
 gets handed the problem — so admins record one of `pass` / `product-bug` / `infra` /
 `flaky` / `investigating` against a run, with an optional note. The table is append-only: a
 correction is a new row, because "who called this infra, and when?" has to stay answerable
-after someone changes their mind. A run with no verdict renders **TODO**, derived rather
-than stored — writing a machine row would put a NULL author in an audit trail and make
-"nobody looked" indistinguishable from `investigating`, which means someone did look.
+after someone changes their mind. A reviewable complete, partial or failed run with no
+verdict renders **TODO**, derived rather than stored — writing a machine row would put a
+NULL author in an audit trail and make "nobody looked" indistinguishable from
+`investigating`, which means someone did look.
 Verdicts are inert with respect to every metric, so no chart changes meaning when a run is
-labelled.
+labelled. The runs list can still be narrowed by the latest verdict — or by derived
+**TODO / unreviewed** — without changing the underlying pass-rate and trend definitions.
 
 **Rollups are maintained at write time and nothing recomputes them on read.** A bare
 `DELETE FROM runs` therefore leaves `project_daily_stats` and the `test_cases` aggregates

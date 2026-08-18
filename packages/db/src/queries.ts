@@ -1,4 +1,4 @@
-import type { Tags } from "@testcenter/core";
+import type { RunVerdict, Tags } from "@testcenter/core";
 import type { Sql } from "./client.js";
 
 /**
@@ -30,6 +30,8 @@ export interface RunListFilter {
   since?: Date | undefined;
   until?: Date | undefined;
   onlyFailed?: boolean | undefined;
+  /** `todo` is derived from the absence of a verdict on a reviewable run. */
+  verdict?: RunVerdict | "todo" | undefined;
 }
 
 export interface RunCursor {
@@ -86,6 +88,28 @@ function runFilterConditions(sql: Sql, filter: RunListFilter) {
   if (filter.since) conditions.push(sql`r.started_at >= ${filter.since}`);
   if (filter.until) conditions.push(sql`r.started_at < ${filter.until}`);
   if (filter.onlyFailed) conditions.push(sql`(r.failed > 0 OR r.errored > 0)`);
+  if (filter.verdict === "todo") {
+    conditions.push(sql`
+      r.status IN ('complete', 'partial', 'failed')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM run_verdicts rv
+        WHERE rv.org_id = ${filter.orgId} AND rv.run_id = r.id
+      )
+    `);
+  } else if (filter.verdict) {
+    conditions.push(sql`
+      (
+        SELECT rv.verdict
+        FROM run_verdicts rv
+        WHERE rv.org_id = ${filter.orgId} AND rv.run_id = r.id
+        -- Verdicts are append-only. Filtering any matching historical row would keep a run
+        -- under infra after a reviewer corrected its latest verdict to product-bug.
+        ORDER BY rv.created_at DESC, rv.id DESC
+        LIMIT 1
+      ) = ${filter.verdict}
+    `);
+  }
 
   // @> containment is what the GIN jsonb_path_ops index on runs.tags serves.
   if (filter.tags && Object.keys(filter.tags).length > 0) {

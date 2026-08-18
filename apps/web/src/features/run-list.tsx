@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { normalizeTags, type Tags } from "@testcenter/core";
+import {
+  normalizeTags,
+  RUN_VERDICT_LABELS,
+  RUN_VERDICTS,
+  type RunVerdict,
+  type Tags,
+} from "@testcenter/core";
 import {
   findProjectByKey,
   latestRunVerdicts,
@@ -9,6 +15,7 @@ import {
   tagFacets,
 } from "@testcenter/db";
 import { RunActions } from "@/components/run-actions";
+import { FilterMenu } from "@/components/filter-menu";
 import { SearchBox } from "@/components/search-box";
 import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import { Button, Card, EmptyState, ResultBar, StatusBadge, TagChip } from "@/components/ui";
@@ -42,8 +49,14 @@ export interface RunListParams {
   search?: string;
   tag?: string | string[];
   failed?: string;
+  verdict?: string;
   cursor?: string;
 }
+
+const VERDICT_FILTERS: { value: RunVerdict | "todo"; label: string }[] = [
+  { value: "todo", label: "TODO / unreviewed" },
+  ...RUN_VERDICTS.map((value) => ({ value, label: RUN_VERDICT_LABELS[value] })),
+];
 
 function parseTagParams(tag: string | string[] | undefined): Tags {
   const entries = (Array.isArray(tag) ? tag : tag ? [tag] : [])
@@ -138,7 +151,7 @@ export async function RunList({
   orgSlug,
   basePath,
   scopedProjectKey,
-  params,
+  params: rawParams,
 }: {
   orgSlug: string;
   /** Where filter, facet and pagination links point. */
@@ -152,7 +165,13 @@ export async function RunList({
   const { sql } = getServices();
   const base = basePath;
   const scoped = scopedProjectKey !== null;
+  const verdict = VERDICT_FILTERS.find((option) => option.value === rawParams.verdict)?.value;
+  const params: RunListParams = { ...rawParams };
+  if (verdict) params.verdict = verdict;
+  else delete params.verdict;
   const tags = parseTagParams(params.tag);
+  // Unknown URL values fall back to All and are omitted from every link the page generates,
+  // so the control, results and next URL cannot disagree about the active predicate.
   // Hoisted out of the row loop: the role does not change per run.
   const canRename = can(context, "run:rename");
   const canDelete = can(context, "run:delete");
@@ -179,6 +198,7 @@ export async function RunList({
     search: params.search,
     tags: Object.keys(tags).length > 0 ? tags : undefined,
     onlyFailed: params.failed === "true",
+    verdict,
   };
 
   const [page, facets, options] = await Promise.all([
@@ -215,6 +235,12 @@ export async function RunList({
       : null,
     params.failed === "true"
       ? { label: "has failures", href: buildHref(base, params, { failed: null }, scoped) }
+      : null,
+    verdict
+      ? {
+          label: `verdict:${VERDICT_FILTERS.find((option) => option.value === verdict)?.label ?? verdict}`,
+          href: buildHref(base, params, { verdict: null }, scoped),
+        }
       : null,
     params.search
       ? { label: `"${params.search}"`, href: buildHref(base, params, { search: null }, scoped) }
@@ -296,6 +322,21 @@ export async function RunList({
             ) as [string, string | string[]][],
           )}
           className="min-w-0 flex-1 basis-[16rem]"
+        />
+        <FilterMenu
+          label="Verdict"
+          options={[
+            {
+              label: "All",
+              href: buildHref(base, params, { verdict: null }, scoped),
+              active: verdict === undefined,
+            },
+            ...VERDICT_FILTERS.map((option) => ({
+              label: option.label,
+              href: buildHref(base, params, { verdict: option.value }, scoped),
+              active: verdict === option.value,
+            })),
+          ]}
         />
       </div>
 

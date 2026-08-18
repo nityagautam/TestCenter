@@ -111,7 +111,7 @@ Each of these cost real debugging time. They are in the code as comments too.
 
 - **Filter, sort and view state lives in the URL**, never client state — views are then
   shareable, survive reload, and the back button works. `?days=`, `?volume=share`,
-  `?rate=branch`, `?show=all`, `?search=`, `?tag=k:v` (repeatable).
+  `?rate=branch`, `?verdict=`, `?show=all`, `?search=`, `?tag=k:v` (repeatable).
 - **Comments explain *why*, not what.** The existing density is high and deliberate,
   especially where a decision looks arbitrary or a previous approach failed. Match it.
 - **Destructive actions confirm by typing the target's name**, not a yes/no dialog.

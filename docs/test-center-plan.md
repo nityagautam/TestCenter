@@ -396,15 +396,16 @@ re-architecture. Do not build for it now.
 
 ## 7. Feature catalog
 
-Shipped items are marked ✅ as of 2026-07-31; see [`architecture.md`](architecture.md) for
+Shipped items are marked ✅ as of 2026-08-18; see [`architecture.md`](architecture.md) for
 how each works. Unmarked entries remain outstanding, and the concrete ones are tracked in
 [`known-issues.md`](known-issues.md) Part B.
 
 ### Tier 1 — table stakes (Phases 1–2)
 1. ✅ Multi-format ingest via UI upload + API + CI integrations (JUnit/xUnit family;
    further parsers outstanding). Runs can be named at upload time.
-2. ✅ Run list with rich filters: project, branch, env, status, framework, **tags**, plus
-   free-text search over run name, branch and commit. Date-range filtering outstanding.
+2. ✅ Run list with rich filters: project, branch, env, status, framework, **tags**, latest
+   verdict (including derived TODO / unreviewed), plus free-text search over run name,
+   branch and commit. Date-range filtering outstanding.
 3. ✅ Run detail: metadata strip, summary tiles, verdict log, suite tree, result table,
    failure details, stack traces, stdout/stderr (including for *passed* tests, via
    `?show=all`). Attachments are modelled but the viewer is outstanding.
@@ -419,7 +420,8 @@ how each works. Unmarked entries remain outstanding, and the concrete ones are t
 8. ✅ Full-text search across test names; trigram matching for mid-token fragments.
 9. ✅ **Run verdicts** — an admin records why a run looked the way it did
    (`pass` / `product-bug` / `infra` / `flaky` / `investigating`), append-only with an audit
-   trail. Not in the original catalog; added 2026-07-31.
+   trail. The runs list filters on the latest judgement or on derived TODO before keyset
+   pagination. Not in the original catalog; added 2026-07-31, filtering added 2026-08-18.
 
 ### Tier 2 — intelligence (Phase 3)
 9. **Test history & timeline** — per-test sparkline of last N runs, pass/fail heat strip,
@@ -508,7 +510,8 @@ Sub-tasks:
 - Streaming JUnit/xUnit XML parser + format detection registry.
 - Worker: parse → normalize → fingerprint → bulk persist → run rollups. DLQ + replay.
 - Browser upload UI with drag-and-drop, multi-file, live SSE progress.
-- Run list page: filters (project/branch/status/date), keyset pagination.
+- Run list page: filters (project/branch/status/date/latest verdict or TODO), keyset
+  pagination.
 - Run detail page: summary tiles, suite tree, virtualized result table, failure panel
   (message, stack trace, stdout/stderr).
 - **Tagging v1**: tags on upload (API params + UI), tag chips, filter by tag, facet counts,

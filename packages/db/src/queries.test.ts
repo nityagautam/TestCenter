@@ -116,6 +116,15 @@ describeIfDb("read-path queries", () => {
       ],
     });
     runIds.push(green, red);
+
+    // Two judgements on the green run prove the filter reads the latest append-only row,
+    // not any historical verdict that happens to match. The red run remains TODO.
+    await sql`
+      INSERT INTO run_verdicts (org_id, run_id, verdict, created_at)
+      VALUES
+        (${orgId}, ${green}, 'infra', now() - interval '1 minute'),
+        (${orgId}, ${green}, 'pass', now())
+    `;
   });
 
   afterAll(async () => {
@@ -210,6 +219,17 @@ describeIfDb("read-path queries", () => {
 
     const none = await listRuns(sql, { orgId, projectId, tags: { suite: "does-not-exist" } });
     expect(none.runs).toHaveLength(0);
+  });
+
+  it("filters by the latest verdict and derived TODO state", async () => {
+    const passed = await listRuns(sql, { orgId, projectId, verdict: "pass" });
+    expect(passed.runs.map((run) => run.id)).toEqual([runIds[0]]);
+
+    const superseded = await listRuns(sql, { orgId, projectId, verdict: "infra" });
+    expect(superseded.runs).toHaveLength(0);
+
+    const todo = await listRuns(sql, { orgId, projectId, verdict: "todo" });
+    expect(todo.runs.map((run) => run.id)).toEqual([runIds[1]]);
   });
 
   it("computes tag facets ignoring the tag filter itself", async () => {

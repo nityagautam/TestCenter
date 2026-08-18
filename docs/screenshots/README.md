@@ -21,7 +21,7 @@ so this cannot be pointed at a real deployment by accident.
 | --- | --- |
 | `dashboard.png` | `/o/:org` — organisation dashboard |
 | `project-overview.png` | `/o/:org/p/:project` — project overview |
-| `runs.png` | `/o/:org/runs` — run list |
+| `runs.png` | `/o/:org/runs` — run list with search, verdict filter and facets |
 | `run-detail.png` | `/o/:org/runs/:id` — one run |
 | `tests.png` | `/o/:org/tests` — test search |
 | `test-detail.png` | `/o/:org/tests/:id` — test history |

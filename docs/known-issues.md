@@ -4,7 +4,7 @@ Two lists. **Part A** records defects that were found and fixed, with the root c
 they are recognisable if they recur — most of them failed *silently*, which is why they
 are written down rather than just closed. **Part B** is outstanding work.
 
-Last updated 2026-08-02.
+Last updated 2026-08-18.
 
 ---
 
@@ -563,6 +563,29 @@ convention in `CLAUDE.md` says.
 
 ---
 
+### A29. The runs list could not filter by the latest verdict
+
+**Symptom** The verdict badge made unreviewed runs visible one page at a time, but there was
+no way to ask “what still needs review?” across the retained run history.
+
+**Cause** The runs list resolved its page first and fetched verdicts afterwards for those 25
+ids. Filtering that map in the web layer would break keyset pagination: a page could render
+three matches while older matching runs remained hidden behind a cursor chosen from the
+unfiltered rows. Append-only corrections also mean “any Infra verdict exists” is not the
+same question as “the latest verdict is Infra.”
+
+**Fix** Added the URL-backed `?verdict=` menu to both organisation- and project-scoped runs
+lists. Recorded values are filtered in SQL by the newest `(created_at DESC, id DESC)` row.
+`todo` is derived with `NOT EXISTS` and limited to complete, partial or failed runs, so an
+upload still parsing does not enter the review queue. The predicate is applied before list
+pagination and is preserved by search, facets and older-page links.
+
+**Guard** `queries.test.ts` gives one run an Infra verdict followed by Pass and leaves a
+second run unreviewed. It asserts Pass finds only the corrected run, Infra finds nothing,
+and TODO finds only the unreviewed run.
+
+---
+
 ## Part B — outstanding
 
 ### B13. Reports can carry credentials into the database *(found in real data)*
@@ -656,12 +679,6 @@ Phase 4 as planned. Nothing started.
 ### B12. SSE progress polls the database
 One indexed row per second for the seconds a parse takes. Fine now; if many concurrent
 viewers ever make it measurable, the poll body is the only thing that changes.
-
-### B15. No way to filter runs by verdict
-
-`?verdict=todo` — "what still needs my review?" — is the obvious companion to the verdict
-feature and is not implemented. Cheap now: it is a `NOT EXISTS` against `run_verdicts`, and
-`run_verdicts_org_verdict_idx` already exists for the recorded-value case.
 
 ### B16. The publish script does not send a CI job URL
 

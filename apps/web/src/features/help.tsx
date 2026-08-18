@@ -333,6 +333,14 @@ function ActTwo() {
         <em>Investigating</em>, where somebody did look and has not finished.
       </P>
 
+      <P>
+        On the runs list, the <Term>Verdict</Term> filter selects the latest judgement or{" "}
+        <Term>TODO / unreviewed</Term>. TODO includes only runs ready for review — complete, partial
+        or failed — rather than uploads that are still parsing. The choice lives in{" "}
+        <Code>?verdict=</Code>, so the review queue is a shareable link and stays applied when
+        loading older runs.
+      </P>
+
       <Note title="Verdicts are append-only, and change no number">
         Changing your mind records a new entry; the previous one stays in the run&rsquo;s verdict
         log, marked superseded, because <em>&ldquo;who called this infra, and when?&rdquo;</em> has
@@ -543,7 +551,7 @@ function ActFour() {
         which is a deliberate constraint rather than an implementation detail: a view you can paste
         into Slack, reload, and reach with the back button is worth more than one that animates
         nicely. <Code>?days=</Code>, <Code>?volume=share</Code>, <Code>?rate=branch</Code>,{" "}
-        <Code>?tag=k:v</Code>.
+        <Code>?tag=k:v</Code>, <Code>?verdict=todo</Code>.
       </P>
 
       <P>

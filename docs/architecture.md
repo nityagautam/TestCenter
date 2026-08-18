@@ -202,6 +202,10 @@ Query shapes worth knowing (`packages/db/src/insights.ts`, `queries.ts`):
   query fetches the extras keyed by id.
 - **Keyset pagination** on the run list (`(started_at, id) < (…)`), so ties never skip or
   repeat a row across pages.
+- **Latest-verdict filtering happens before pagination.** Recorded values use a correlated
+  latest-row lookup ordered by `(created_at DESC, id DESC)`; `todo` is a reviewable run with
+  no verdict row. Filtering after the newest page was selected would silently omit matching
+  older runs.
 
 ---
 
@@ -251,10 +255,19 @@ to the test's author.
 "latest" arbitrary, and `id` is uuidv7 so it breaks the tie in the direction the timestamps
 intend.
 
-A run with no verdict row renders **TODO**, derived and never stored: writing a machine row
-would put a NULL author in an audit trail and make "nobody looked" indistinguishable from
-the `investigating` verdict, which means someone did look and has not finished. Verdicts are
-**inert with respect to every metric** — no chart changes meaning when someone labels a run.
+A complete, partial or failed run with no verdict row renders **TODO**, derived and never
+stored: writing a machine row would put a NULL author in an audit trail and make "nobody
+looked" indistinguishable from the `investigating` verdict, which means someone did look and
+has not finished. Pending and parsing runs are not ready for review and show no TODO.
+Verdicts are **inert with respect to every metric** — no chart changes meaning when someone
+labels a run.
+
+The runs list exposes the latest judgement through
+`?verdict=pass|product-bug|infra|flaky|investigating|todo`. A recorded-value predicate reads
+only the newest append-only row, so correcting `infra` to `product-bug` removes the run from
+the former filter. `todo` uses `NOT EXISTS` and is limited to `complete`, `partial` and
+`failed` runs; an upload still parsing is not review work. The predicate is part of the SQL
+filter before keyset pagination and is carried through search, facets and older-page links.
 
 ---
 
@@ -292,8 +305,8 @@ project-scoped ones — so every link is shareable and unambiguous.
 
 | Route | Contents |
 | --- | --- |
-| `/o/:org` | dashboard: KPI tiles; outcome-per-run area chart (2/3) beside the activity heatmap (1/3); pass rate, last-run donut and duration; slowest tests, failure concentration, flake distribution; leaderboards; recent runs |
-| `/o/:org/runs` | filterable run list — search, branch/env/framework/tag facets, keyset pagination |
+| `/o/:org` | dashboard: KPI tiles; outcome-per-run area chart (2/3) beside the activity heatmap (1/3); per-run pass rate, last-run donut and CI time per run (exact bars + five-run rolling average); slowest tests, failure concentration, flake distribution; leaderboards; recent runs |
+| `/o/:org/runs` | filterable run list — search, branch/env/framework/tag facets, latest verdict/TODO, keyset pagination |
 | `/o/:org/runs/:id` | run detail: metadata strip, KPI tiles, verdict log, suite tree, failures-first results, output |
 | `/o/:org/tests` | test search + per-test outcome strips |
 | `/o/:org/tests/:id` | test history: outcome strip, duration trend, failure modes, executions (`?show=all` for passed output) |
@@ -353,7 +366,7 @@ there is no saved-report table: the report *is* the link.
 | `search-box` | GET-form search; `name`/`label` configurable, multi-valued hidden fields |
 | `upload-form` | drag-and-drop; one request per file, each its own run |
 | `run-progress` | SSE parse progress |
-| `charts/trend-chart` | single-measure line + area |
+| `charts/trend-chart` | line + area, or exact per-run bars with a five-run rolling-average line on one axis |
 | `charts/volume-chart` | stacked columns; `mode="counts"\|"share"` |
 | `charts/ranked-bars` | horizontal magnitude bars; `domainMax` for ratios (server component) |
 | `charts/history-strip` | one test's outcomes, each cell a link (detail pages) |
@@ -374,7 +387,7 @@ table.
 
 ### Conventions
 
-- **URL is the state store.** `?days=`, `?volume=share`, `?rate=branch`,
+- **URL is the state store.** `?days=`, `?volume=share`, `?rate=branch`, `?verdict=`,
   `?show=all`, `?search=`, `?status=`, `?suite=`, `?tag=k:v` (repeatable), `?result=`,
   `?cursor=`. Range and toggle links must carry the other selections — building them by
   hand is how they get dropped.
