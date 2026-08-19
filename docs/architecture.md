@@ -318,9 +318,13 @@ falls back safely instead of producing a phantom selection or granting access.
 | `/o/:org/tests/:id` | test history: outcome strip, duration trend, failure modes, executions (`?show=all` for passed output) |
 | `/o/:org/flaky` | flaky leaderboard with CI time burned |
 | `/o/:org/projects`, `/projects/new` | projects; creation mints a CI token and shows the recipe |
+| `/o/:org/settings` | organisation display name; slug stays immutable so links and integrations survive |
 | `/o/:org/settings/members`, `/settings/tokens` | access and tokens |
 | `/o/:org/reports` | a catalog of 12 vetted questions with blanks (`?q=` plus one parameter per blank: `days`, `branch`, `environment`, `suite`, `project`, `topN`, `verdict`), answered as panels; print for PDF |
 | `/o/:org/p/:project/*` | project-scoped dashboard, runs, tests, flaky, reports, upload, settings |
+| `/organizations/new` | authenticated creation of an additional team organisation; rendered in the remembered org's full application shell |
+| `/onboarding` | no-org creation/skip flow; intentionally outside the shell because there is no tenant scope to navigate yet |
+| `/admin` | platform-wide organisation access management; full application shell, with platform-admin authorization rechecked in every action |
 | `/help` | the narrative guide — five acts, illustrated with the app's own components. Outside `/o/:org` because that layout is the authorisation gate; unauthenticated and reads no tenant data, so it works in an invitation mail and during an outage |
 
 `/o/:org/p/:key/runs` and `/o/:org/runs?project=` render the *same* component
@@ -359,6 +363,8 @@ there is no saved-report table: the report *is* the link.
 | Component | Role |
 | --- | --- |
 | `app-shell` | nav, scope switcher, command palette, theme toggle |
+| `org-app-shell` | server composition that loads one authorised org's chrome; reused by org routes, Platform Admin and additional-org creation |
+| `organization-creation-form` | shared create mutation for no-org onboarding and authenticated team-org creation |
 | `action-menu` | generic ⋯ overflow menu (`menuitem` semantics, arrow keys, Escape restores focus) |
 | `filter-menu` | single-choice dropdown of links (`menuitemradio`) — the choice lives in the URL |
 | `run-actions` | rename / edit tags / verdict / delete, expanding in place |

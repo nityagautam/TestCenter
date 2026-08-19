@@ -7,7 +7,8 @@ How to sign in, what each role can do, and how to work through the app.
 > decides whose problem it is, in five acts — a run arrives, something is red, is it always
 > red, how are we doing, who can do what. It illustrates itself with the app's own live
 > components rather than screenshots, so it cannot go stale, and it renders without a
-> session, so it is the link to put in an invitation mail. Press `?` anywhere in the app.
+> session, so it is the link to put in an invitation mail. Open **Support → Help** in the
+> sidebar, or press `?` anywhere in the app.
 >
 > This document is the reference the guide points back to: every role boundary measured
 > rather than described, the seeded accounts, the scenario projects, troubleshooting.
@@ -148,7 +149,9 @@ first time somebody edits that variable.
 
 Sign in as `admin@testcenter.dev` and you get **Platform admin** in the left nav: every
 organisation, with the ability to grant access to ones you are not a member of. That is
-how a new user gets into an existing team.
+how a new user gets into an existing team. The page keeps the normal Test Center header and
+sidebar, and its **New organisation** action opens the same in-app creation page as the organisation
+switcher.
 
 ### Try any address at all
 
@@ -156,12 +159,22 @@ Type any valid email — e.g. `you@example.com` — and you get a brand-new acco
 access, which is exactly what a real new user experiences. You will be offered a choice:
 create your own organisation, or skip and be told what to ask an administrator for.
 
+`/onboarding` is specifically this no-organisation flow. Once you already belong to an
+organisation, use **Org → New organisation** (or `/organizations/new`) to create another team
+space without leaving the application shell. If you skipped onboarding and later change your mind,
+the **Create an organisation** action on the no-access page takes you back to onboarding.
+
 ---
 
 ## 4. Roles: what each one can do
 
 Organisation membership grants access to **every project** in that organisation. Roles
 control what you can *do*, and are ordered — each includes everything below it.
+
+Names are editable without changing identity. Organisation admins rename the organisation under
+**Settings → Organisation**; project maintainers use **Projects → Settings** or the selected
+project's Settings section. The organisation slug and project key are deliberately read-only
+because shared URLs and CI publishes use them.
 
 | | viewer<br>`qa@` | member<br>`sdet@` | maintainer<br>`qalead@` | admin | owner<br>`admin@` |
 | --- | :-: | :-: | :-: | :-: | :-: |
@@ -217,8 +230,10 @@ stops:
 | `/o/:org/projects/new` | ✓ | ✓ | refused | refused |
 | `/o/:org/p/:key/upload` | ✓ | ✓ | ✓ | **refused** |
 | `/o/:org/p/:key/settings` | ✓ | ✓ | refused | refused |
+| `/o/:org/settings` | ✓ | **refused** | refused | refused |
 | `/o/:org/settings/members` | ✓ | **refused** | refused | refused |
 | `/o/:org/settings/tokens` | ✓ | **refused** | refused | refused |
+| `/organizations/new` | ✓ | ✓ | ✓ | ✓ |
 | `/admin` | ✓ *(superadmin)* | refused | refused | refused |
 
 "refused" is a page explaining *"requires the admin role, yours is viewer"* — not a 500,
@@ -308,7 +323,8 @@ to the database — including a seed script or a compromised app — could mint 
 
 The palette searches tests by name fragment against the database, so `case_7` finds every
 matching test across all projects with its status. Collapsed, the sidebar keeps the
-failing and flaky counts as badges — it narrows to icons without losing the signal.
+failing and flaky counts as badges and exposes icon labels as tooltips — it narrows to icons
+without losing the signal. Help lives under **Support** and remains available through `?`.
 
 ### Theme
 

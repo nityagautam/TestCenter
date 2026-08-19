@@ -50,7 +50,12 @@ export interface AppShellProps {
   orgs: ShellOrg[];
   projects: ShellProject[];
   viewer: { email: string; name: string | null; isPlatformAdmin: boolean };
-  capabilities: { canCreateProject: boolean; canUpload: boolean; canManageMembers: boolean };
+  capabilities: {
+    canCreateProject: boolean;
+    canUpload: boolean;
+    canManageMembers: boolean;
+    canEditOrg: boolean;
+  };
   /** Live counts so the collapsed rail still carries signal. */
   signals: { failing: number; flaky: number };
   /** Last organisation stored by the shell, so it only writes when the URL changes it. */
@@ -334,6 +339,11 @@ export function AppShell({
       ) : null}
 
       <NavSection title="Settings" collapsed={collapsed}>
+        {capabilities.canEditOrg ? (
+          <NavLink href={`/o/${orgSlug}/settings`} icon="settings" exact collapsed={collapsed}>
+            Organisation
+          </NavLink>
+        ) : null}
         {capabilities.canManageMembers ? (
           <NavLink href={`/o/${orgSlug}/settings/members`} icon="members" collapsed={collapsed}>
             Members
@@ -347,6 +357,15 @@ export function AppShell({
             Platform admin
           </NavLink>
         ) : null}
+      </NavSection>
+
+      {/* Help is navigation, not a chrome control. Keeping it labelled here makes the
+          destination discoverable without spending permanent header space; the collapsed
+          rail supplies the same label through NavLink's tooltip and accessible name. */}
+      <NavSection title="Support" collapsed={collapsed}>
+        <NavLink href="/help" icon="help" collapsed={collapsed}>
+          Help
+        </NavLink>
       </NavSection>
     </nav>
   );
@@ -633,7 +652,7 @@ export function AppShell({
             options={orgOptions}
             hrefFor={(slug) => `/o/${slug}`}
             emptyLabel="Select"
-            createHref="/onboarding"
+            createHref="/organizations/new"
             createLabel="New organisation"
           />
 
@@ -697,33 +716,6 @@ export function AppShell({
                 ⌘K
               </kbd>
             </button>
-
-            {/* Beside Search rather than buried in a menu, and it states its shortcut for
-                the same reason Search does. Help that has to be found is help nobody reads,
-                and this is the one page that has to work on somebody's first day. */}
-            <Link
-              href="/help"
-              title="Help  ?"
-              aria-label="Help — how Test Center works. Keyboard shortcut: question mark"
-              className="flex items-center gap-1.5 rounded-md border border-[var(--color-border-subtle)] px-2 py-1.5 text-xs text-[var(--color-ink-muted)] hover:border-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
-            >
-              <svg
-                viewBox="0 0 16 16"
-                className="size-3.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                aria-hidden
-              >
-                <circle cx="8" cy="8" r="6.25" />
-                <path d="M6.2 6.1a1.9 1.9 0 1 1 2.1 2.5v1.1" />
-                <path d="M8.3 11.6h.01" strokeWidth="1.8" />
-              </svg>
-              <kbd className="hidden rounded border border-[var(--color-border-subtle)] px-1 font-mono text-[10px] sm:inline">
-                ?
-              </kbd>
-            </Link>
 
             <ThemeToggle initial={initialTheme} />
             {capabilities.canUpload ? (

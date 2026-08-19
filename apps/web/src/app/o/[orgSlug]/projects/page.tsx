@@ -118,6 +118,14 @@ export default async function ProjectsPage({
                     Upload
                   </Link>
                 ) : null}
+                {can(context, "project:edit") ? (
+                  <Link
+                    href={`/o/${orgSlug}/p/${project.key}/settings`}
+                    className="shrink-0 text-[11px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+                  >
+                    Settings
+                  </Link>
+                ) : null}
               </li>
             ))}
           </ul>

@@ -28,7 +28,8 @@ export type NavIcon =
   | "upload"
   | "settings"
   | "overview"
-  | "reports";
+  | "reports"
+  | "help";
 
 export function NavLink({
   href,
@@ -230,6 +231,13 @@ function NavGlyph({ icon }: { icon: NavIcon }) {
       <>
         <circle cx="8" cy="8" r="5.5" />
         <path d="M8 8 L8 4.5 M8 8 L11 9.5" />
+      </>
+    ),
+    help: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M6.2 6.1 a1.9 1.9 0 1 1 2.1 2.5 v1.1" />
+        <path d="M8.3 11.7 h.01" strokeWidth="1.8" />
       </>
     ),
   };

@@ -1,6 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { schema } from "@testcenter/db";
 import { archiveProject, deleteProject, restoreProject } from "@/app/actions/projects";
 import { PermissionDenied } from "@/components/permission-denied";
@@ -79,7 +79,7 @@ export default async function ProjectSettingsPage({
       ) : null}
 
       <Card className="mb-5 p-5">
-        <h2 className="mb-3 text-sm font-medium">Details</h2>
+        <h2 className="mb-3 text-sm font-medium">Project details</h2>
         <form
           action={async (formData: FormData) => {
             "use server";
@@ -124,8 +124,11 @@ export default async function ProjectSettingsPage({
                 retentionDays: retention,
                 artifactRetentionDays: artifactRetention,
               })
-              .where(eq(schema.projects.id, project.id));
+              .where(
+                and(eq(schema.projects.id, project.id), eq(schema.projects.orgId, current.org.id)),
+              );
 
+            revalidatePath(`/o/${orgSlug}`, "layout");
             revalidatePath(`/o/${orgSlug}/p/${projectKey}/settings`);
             redirect(`/o/${orgSlug}/p/${projectKey}/settings?ok=Saved`);
           }}
@@ -134,6 +137,7 @@ export default async function ProjectSettingsPage({
           <Field label="Name">
             <input
               name="name"
+              required
               defaultValue={project.name}
               maxLength={120}
               className="w-full rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-2 text-xs outline-none focus:border-[var(--color-ink-muted)]"
@@ -208,7 +212,7 @@ export default async function ProjectSettingsPage({
             type="submit"
             className="rounded-md bg-[var(--color-ink)] px-4 py-2 text-sm font-medium text-[var(--color-surface)] hover:opacity-90"
           >
-            Save
+            Save changes
           </button>
         </form>
       </Card>

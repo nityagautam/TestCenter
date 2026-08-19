@@ -148,6 +148,14 @@ Each of these cost real debugging time. They are in the code as comments too.
   as artwork. It renders unauthenticated and reads no tenant data, which is what lets it go
   in an invitation mail and survive an outage; keep it that way. `docs/user-guide.md` stays
   the exhaustive reference.
+- **Authenticated utility pages reuse `OrgAppShell`; onboarding does not.** `/admin` and
+  `/organizations/new` have no org segment in their own URL, but resolve the remembered accessible
+  org as chrome context so they retain the normal header and sidebar. `/onboarding` is only for a
+  viewer with no organisations, where rendering tenant navigation would be fiction.
+- **Names are labels; slugs and keys are identity.** Organisation and project display names may be
+  edited with the appropriate capability. Organisation slugs and project keys stay immutable
+  because shared URLs and CI publishes use them; changing either needs a migration and redirects,
+  not another text field.
 
 ## Testing
 

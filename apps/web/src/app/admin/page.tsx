@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -25,6 +26,7 @@ import { requireViewer } from "@/lib/viewer";
  * would make it easy to modify the wrong tenant by accident.
  */
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "Platform administration" };
 
 const ROLES: MembershipRole[] = ["viewer", "member", "maintainer", "admin", "owner"];
 
@@ -40,7 +42,7 @@ export default async function AdminPage({
   // check cannot be satisfied by anything a user can change from inside the app.
   if (!viewer.isPlatformAdmin) {
     return (
-      <main className="mx-auto max-w-lg px-6 py-14">
+      <div className="mx-auto max-w-lg px-6 py-14">
         <Card className="p-6 text-center">
           <h1 className="text-sm font-semibold">Not permitted</h1>
           <p className="mt-2 text-xs leading-relaxed text-[var(--color-ink-muted)]">
@@ -52,7 +54,7 @@ export default async function AdminPage({
             Go back
           </Link>
         </Card>
-      </main>
+      </div>
     );
   }
 
@@ -89,7 +91,7 @@ export default async function AdminPage({
   const userCount = await db.select({ id: schema.users.id }).from(schema.users);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-8">
+    <div className="mx-auto max-w-5xl px-6 py-8">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Platform administration</h1>
@@ -99,8 +101,11 @@ export default async function AdminPage({
             <span className="font-mono">{viewer.email}</span>
           </p>
         </div>
-        <Link href="/" className="text-xs underline">
-          Back to app
+        <Link
+          href="/organizations/new"
+          className="rounded-md bg-[var(--color-ink)] px-3 py-2 text-xs font-medium text-[var(--color-surface)] hover:opacity-90"
+        >
+          New organisation
         </Link>
       </div>
 
@@ -121,7 +126,7 @@ export default async function AdminPage({
           {orgs.length === 0 ? (
             <EmptyState
               title="No organisations"
-              description="None exist yet. One is created when a user completes onboarding."
+              description="None exist yet. Create one here, or let a new user create a personal space during onboarding."
             />
           ) : (
             <ul className="divide-y divide-[var(--color-border-subtle)]">
@@ -162,6 +167,12 @@ export default async function AdminPage({
                       className="shrink-0 rounded border border-[var(--color-border-subtle)] px-2 py-1 text-[10px] hover:border-[var(--color-ink-muted)]"
                     >
                       open
+                    </Link>
+                    <Link
+                      href={`/o/${entry.slug}/settings`}
+                      className="shrink-0 text-[10px] text-[var(--color-ink-muted)] underline hover:text-[var(--color-ink)]"
+                    >
+                      settings
                     </Link>
                   </div>
                 </li>
@@ -314,6 +325,6 @@ export default async function AdminPage({
           )}
         </Card>
       </div>
-    </main>
+    </div>
   );
 }

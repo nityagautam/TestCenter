@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /**
  * The CI recipe, with a real token inlined.
@@ -23,7 +23,19 @@ export function CiSnippet({
   baseUrl?: string;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
-  const origin = baseUrl ?? (typeof window === "undefined" ? "" : window.location.origin);
+  const [browserOrigin, setBrowserOrigin] = useState("");
+
+  /*
+   * The server cannot know window.location.origin, so both the server and the client's
+   * first render use a relative URL. Reading window during render made those two trees
+   * disagree and caused React to discard this section during hydration. Once hydration
+   * has completed, replacing the relative URL with the real origin is a normal update.
+   */
+  useEffect(() => {
+    if (baseUrl === undefined) setBrowserOrigin(window.location.origin);
+  }, [baseUrl]);
+
+  const origin = (baseUrl ?? browserOrigin).replace(/\/$/, "");
   const shown = token ?? "$TESTCENTER_TOKEN";
 
   const curl = `curl -X POST "${origin}/api/v1/ingest?project=${projectKey}&branch=$BRANCH&tag=suite:regression" \\

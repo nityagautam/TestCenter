@@ -109,6 +109,15 @@ Platform admins (`TESTCENTER_ADMIN_EMAILS`) see and can grant access to every
 organisation. That list is re-asserted on every sign-in, so privilege cannot be
 escalated from inside the app and removing an address actually revokes it.
 
+Signed-in users who already have access create another team organisation from the org switcher or
+`/organizations/new`; the page stays inside the normal header and sidebar. `/onboarding` is reserved
+for viewers who have no organisation yet, including someone returning after they previously skipped.
+Platform administration uses the same application shell at `/admin`.
+
+Organisation admins can change the organisation display name under **Settings → Organisation**;
+project maintainers can change a project display name from the project list or project settings.
+Organisation slugs and project keys remain fixed so shared links and CI configuration do not break.
+
 ## Architecture in one paragraph
 
 Uploads go **direct to object storage** via presigned URLs and are stored immutably — the raw

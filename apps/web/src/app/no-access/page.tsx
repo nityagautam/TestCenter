@@ -1,8 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createOrganization } from "@testcenter/db";
 import { Card } from "@/components/ui";
-import { getServices } from "@/lib/services";
 import { currentOrgs, requireViewer } from "@/lib/viewer";
 
 /**
@@ -54,36 +52,12 @@ export default async function NoAccessPage() {
         <p className="mt-1 mb-3 text-xs leading-relaxed text-[var(--color-ink-muted)]">
           Useful for trying the product out with your own test results.
         </p>
-        <form
-          action={async (formData: FormData) => {
-            "use server";
-            const name = String(formData.get("name") ?? "").trim();
-            if (!name) return;
-            const { db } = getServices();
-            const { requireViewer: resolve } = await import("@/lib/viewer");
-            const created = await createOrganization(db, {
-              name,
-              createdBy: await resolve(),
-              personal: true,
-            });
-            redirect(`/o/${created.slug}`);
-          }}
-          className="flex gap-2"
+        <Link
+          href="/onboarding"
+          className="inline-flex rounded-md border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs font-medium hover:border-[var(--color-ink-muted)]"
         >
-          <input
-            name="name"
-            required
-            placeholder="My Organisation"
-            maxLength={120}
-            className="flex-1 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface)] px-3 py-1.5 text-xs outline-none focus:border-[var(--color-ink-muted)]"
-          />
-          <button
-            type="submit"
-            className="rounded-md border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs font-medium hover:border-[var(--color-ink-muted)]"
-          >
-            Create
-          </button>
-        </form>
+          Create an organisation
+        </Link>
       </div>
 
       {viewer.isPlatformAdmin ? (

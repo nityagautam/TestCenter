@@ -607,6 +607,49 @@ organisation, and the web tests plus production build cover the server/client bo
 
 ---
 
+### A31. Organisation creation and Platform Admin fell out of the application shell
+
+**Symptom** **New organisation** in the scope switcher sent every signed-in user back to the
+first-run onboarding screen, while `/admin` rendered as a detached page with no application header
+or sidebar. The product had a database mutation for creating an organisation, but no in-app UI for
+adding a second team organisation.
+
+**Cause** The tenant shell lived directly in `/o/:org/layout.tsx`, so a route without `:org` could
+not reuse it. Onboarding's inline creation form then became the accidental destination for both
+first-run setup and ordinary administration.
+
+**Fix** Extracted the server-side `OrgAppShell` composition and reused it for `/admin` and
+`/organizations/new`, resolving the viewer's remembered accessible org as the chrome context.
+Creation itself is one shared form: onboarding creates the initial personal space, while the
+authenticated route creates an additional team organisation. `/onboarding` now remains available
+to no-access viewers who previously skipped, and users who already have an org are redirected back
+to the app.
+
+**Guard** Both mutations still call `requireViewer`; Platform Admin actions recheck
+`isPlatformAdmin` on every request; the shared shell resolves through `requirePageContext`; and the
+new organisation is written as the remembered scope before redirecting to it.
+
+---
+
+### A32. Organisation names could not be edited, and project renaming was hidden
+
+**Symptom** Creating an organisation made its first name effectively permanent. Project names were
+technically editable inside a large settings form, but the active-project list exposed only
+**Upload**, so the rename path was easy to miss.
+
+**Fix** Added **Settings → Organisation** for admin-scoped display-name changes and exposed a
+**Settings** link on every active project row for maintainers. Platform Admin organisation rows also
+link to the same settings page. Project settings continues to edit the display name alongside its
+other details.
+
+The org slug and project key stay read-only. They are identity used by URLs and CI, not labels; a
+rename changes what people read without breaking integrations. Both mutations re-resolve access,
+recheck their capability, and invalidate the shared shell so switchers and navigation update on the
+redirect. The project write is additionally constrained by `org_id` rather than trusting its id
+alone.
+
+---
+
 ## Part B — outstanding
 
 ### B13. Reports can carry credentials into the database *(found in real data)*
@@ -649,7 +692,8 @@ reports do, and in `parameters` — so the difference is visible in the product.
 Ordered by my view of value. None are known to be broken; they are absent or thin.
 
 ### B1. Platform admin area is minimal *(built, could go further)*
-Lists organisations and grants/revokes access. Does not yet offer: a user directory with
+Lists organisations, creates a new one, and grants/revokes access in the full app shell. Does not
+yet offer: a user directory with
 last-seen and org membership, disabling an account, per-org quota editing, or an audit log
 of admin actions. The last is the most valuable — cross-tenant grants should be traceable.
 
