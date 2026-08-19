@@ -362,6 +362,10 @@ clear the remembered project.
 Headline numbers first — pass rate, runs, tests, failing, flaky, quarantined — then the
 two lead charts, then a row of trends, then two rows of detail and two named lists.
 
+The organisation dashboard and project overview offer **1, 7, 15, 30, 45 and 90 day**
+windows. Seven days remains the default; choose **1d** when a busy current day contains too
+many executions to read clearly in a wider window. The selected range is stored in `?days=`.
+
 **Execution over time is one point per run, not per day.** A daily rollup averages the
 executions inside it, so a single run at 40% beside four at 100% reads as a mildly bad day
 and the bad run disappears. Every execution in the window is a point, oldest left; hover for

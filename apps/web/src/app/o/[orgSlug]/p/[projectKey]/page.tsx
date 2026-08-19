@@ -36,6 +36,7 @@ import {
   StatTile,
   StatusBadge,
 } from "@/components/ui";
+import { DASHBOARD_DAY_OPTIONS, resolveDashboardDays } from "@/lib/dashboard-range";
 import { passRateTone, TONE_COLOR } from "@/lib/health";
 import {
   formatAbsoluteTime,
@@ -56,17 +57,6 @@ import { can, requirePageContext, requirePageProject } from "@/lib/viewer";
  * pipeline. Afterwards it becomes the project's dashboard.
  */
 export const dynamic = "force-dynamic";
-
-/*
- * The same five windows as the organisation dashboard.
- *
- * This page used to offer only 7/15/30, on the reasoning that a quarter of history says
- * little about whether a suite is healthy *now*. That is still true of the pass-rate tiles,
- * but it stopped being a good trade once the page gained an execution series and a
- * punchcard: both need repetition to show a shape at all, and a fortnight of nightlies is
- * ten cells. Offering a wider window costs nothing to a reader who does not pick it.
- */
-const DAY_OPTIONS = [7, 15, 30, 45, 90] as const;
 
 export default async function ProjectOverview({
   params,
@@ -106,7 +96,7 @@ export default async function ProjectOverview({
   // Defaults to a week. The page is opened to answer "how are we doing right now",
   // and a 30-day window dilutes a bad Tuesday into a rounding error — the reader who
   // wants the longer view asks for it, and the URL then carries the choice.
-  const days = DAY_OPTIONS.find((option) => option === Number(daysParam)) ?? 7;
+  const days = resolveDashboardDays(daysParam);
   const scope = { orgId: context.org.id, projectId: project.id };
 
   // Same view selections as the org dashboard, so the two pages behave alike.
@@ -202,7 +192,7 @@ export default async function ProjectOverview({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <TimeRangeNav
-            options={DAY_OPTIONS.map((option) => ({
+            options={DASHBOARD_DAY_OPTIONS.map((option) => ({
               days: option,
               href: viewHref({ days: String(option) }),
               active: days === option,

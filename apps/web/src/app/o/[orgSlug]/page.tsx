@@ -37,6 +37,7 @@ import {
   StatTile,
   StatusBadge,
 } from "@/components/ui";
+import { DASHBOARD_DAY_OPTIONS, resolveDashboardDays } from "@/lib/dashboard-range";
 import { passRateTone, TONE_COLOR } from "@/lib/health";
 import {
   formatDuration,
@@ -58,16 +59,6 @@ import { can, requirePageContext } from "@/lib/viewer";
  * whether to care.
  */
 export const dynamic = "force-dynamic";
-
-/**
- * A week, a fortnight, a month, six weeks, a quarter.
- *
- * One control drives every chart on the page, so the set has to serve all of them: 7 answers
- * "how is this week going", 90 answers "is the trend real", and the middle three are the
- * sprint lengths people actually plan in. `runSeries` caps at 300 points, so the widest
- * window degrades by dropping the oldest runs rather than by getting slower.
- */
-const DAY_OPTIONS = [7, 15, 30, 45, 90] as const;
 
 export default async function OrgDashboard({
   params,
@@ -93,7 +84,7 @@ export default async function OrgDashboard({
   // Defaults to a week. The page is opened to answer "how are we doing right now",
   // and a 30-day window dilutes a bad Tuesday into a rounding error — the reader who
   // wants the longer view asks for it, and the URL then carries the choice.
-  const days = DAY_OPTIONS.find((option) => option === Number(daysParam)) ?? 7;
+  const days = resolveDashboardDays(daysParam);
   const orgId = context.org.id;
 
   // View selections. Each names a different question, not a different drawing — see
@@ -202,7 +193,7 @@ export default async function OrgDashboard({
         {/* Through viewHref, so changing the range keeps the chart views. These links
             used to be built by hand and reset volume/rate/duration on every click. */}
         <TimeRangeNav
-          options={DAY_OPTIONS.map((option) => ({
+          options={DASHBOARD_DAY_OPTIONS.map((option) => ({
             days: option,
             href: viewHref({ days: String(option) }),
             active: days === option,
