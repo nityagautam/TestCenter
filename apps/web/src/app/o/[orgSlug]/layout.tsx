@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { listProjects, orgSummary } from "@testcenter/db";
+import { ORG_SCOPE_COOKIE, readOrgScope } from "@/lib/org-scope";
 import { PROJECT_SCOPE_COOKIE, readProjectScope } from "@/lib/project-scope";
 import { readSidebarState, SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { readThemePreference, THEME_COOKIE } from "@/lib/theme";
@@ -52,6 +53,7 @@ export default async function OrgLayout({
   const remembered = readProjectScope(store.get(PROJECT_SCOPE_COOKIE)?.value, orgSlug);
   const rememberedProjectKey =
     remembered && projects.some((project) => project.key === remembered) ? remembered : null;
+  const rememberedOrgSlug = readOrgScope(store.get(ORG_SCOPE_COOKIE)?.value);
 
   return (
     <AppShell
@@ -75,6 +77,7 @@ export default async function OrgLayout({
         canManageMembers: can(context, "member:manage"),
       }}
       signals={{ failing: summary.failing30d, flaky: summary.flakyTests }}
+      rememberedOrgSlug={rememberedOrgSlug}
       rememberedProjectKey={rememberedProjectKey}
       initialSidebar={sidebar}
       initialTheme={theme}

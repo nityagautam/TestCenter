@@ -1,8 +1,8 @@
 /**
  * Who built this.
  *
- * Kept as data in one place rather than inline in the shell, so it can also be used on the
- * sign-in page or an about panel later without the two copies drifting.
+ * Kept as data in one place rather than inline in the shell, so the application rail and
+ * public Help footer cannot drift into crediting different names.
  *
  * `INITIALS` exists because the sidebar collapses to a 56px rail where a full name has
  * nowhere to go. Derived by hand rather than computed: initials are a naming decision, and

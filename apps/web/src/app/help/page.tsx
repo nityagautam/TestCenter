@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { RUN_VERDICTS, type RunVerdict } from "@testcenter/core";
 import { Help } from "@/features/help";
 import { readThemePreference, THEME_COOKIE } from "@/lib/theme";
 import { resolveLandingPath } from "@/lib/viewer";
@@ -26,9 +27,20 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
-export default async function HelpPage() {
+export default async function HelpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ verdict?: string; search?: string }>;
+}) {
   const store = await cookies();
   const theme = readThemePreference(store.get(THEME_COOKIE)?.value);
+  const query = await searchParams;
+  const sampleVerdict: "all" | "todo" | RunVerdict =
+    query.verdict === "all" ||
+    query.verdict === "todo" ||
+    RUN_VERDICTS.includes(query.verdict as RunVerdict)
+      ? (query.verdict as "all" | "todo" | RunVerdict)
+      : "todo";
 
   /*
    * Signed in, so the link says "open the app" and goes where they belong; signed out, so
@@ -53,7 +65,13 @@ export default async function HelpPage() {
       >
         Skip to content
       </a>
-      <Help appHref={landing} appLabel={signedOut ? "Sign in" : "Open Test Center"} theme={theme} />
+      <Help
+        appHref={landing}
+        appLabel={signedOut ? "Sign in" : "Open Test Center"}
+        theme={theme}
+        sampleVerdict={sampleVerdict}
+        sampleSearch={query.search ?? ""}
+      />
     </>
   );
 }

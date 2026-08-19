@@ -9,9 +9,8 @@ import { StatusBadge } from "@/components/ui";
  * column, and nothing in CI will ever tell us. Everything here is either a real component
  * from the app rendered with sample props — `StatusBadge` below, `OutcomeStrip`,
  * `VerdictBadge`, `ResultBar` and `RankedBars` in the narrative itself — or a diagram of a
- * *concept* that has no screen of its own: how a fingerprint is computed, why failures
- * cluster, what a per-run column shows that a per-day column cannot. Concepts do not go
- * stale when the layout changes; screens do.
+ * *concept* that has no screen of its own: how a fingerprint is computed and why failures
+ * cluster. Concepts do not go stale when the layout changes; screens do.
  *
  * **Motion only where it teaches.** Two loops in the whole page, both animating something
  * static art cannot state: results arriving progressively, and a test disagreeing with
@@ -285,7 +284,6 @@ const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
 const INK = { fill: "var(--color-ink)" };
 const MUTED = { fill: "var(--color-ink-muted)" };
 const FAILED = { fill: "var(--color-status-failed)" };
-const PASSED = { fill: "var(--color-status-passed)" };
 const IDENTITY = { fill: "var(--color-series-1)" };
 const PANEL = { fill: "var(--color-surface-raised)", stroke: "var(--color-border-subtle)" };
 const RULE = { stroke: "var(--color-border-subtle)" };
@@ -466,116 +464,6 @@ export function FingerprintPipeline() {
         fingerprint_version is stored on every row, so the algorithm can change without a
         stop-the-world rebuild.
       </text>
-    </Diagram>
-  );
-}
-
-/**
- * Why the dashboard's first chart is one column per run and not one per day.
- *
- * Someone watching a suite finish is asking "is this run worse than the last one?" — a
- * daily rollup cannot answer that until tomorrow, and by then it has averaged the bad run
- * into the good ones.
- */
-export function RunVersusDay() {
-  // Per-run: five healthy runs and one bad one. The same results, rolled into two days.
-  const runs = [
-    { passed: 46, failed: 1 },
-    { passed: 47, failed: 0 },
-    { passed: 45, failed: 2 },
-    { passed: 20, failed: 27 },
-    { passed: 46, failed: 1 },
-    { passed: 47, failed: 0 },
-  ];
-  const scale = 96; // px for a full 47-result column
-
-  return (
-    <Diagram
-      width={560}
-      height={196}
-      label="The same six runs drawn two ways. One column per run makes a single run with twenty-seven failures unmissable. Rolled into two daily columns, that run is averaged with its neighbours and reads as a mildly bad day."
-    >
-      <text x="0" y="12" fontSize="11" fontWeight="600" style={INK}>
-        one column per run
-      </text>
-      {runs.map((run, index) => {
-        const x = index * 34;
-        const failHeight = (run.failed / 47) * scale;
-        const passHeight = (run.passed / 47) * scale;
-        return (
-          <g key={index}>
-            {/* Fixed segment order — failed above passed — with a 2px surface gap, the same
-                rule the real charts follow so the two cannot read differently. */}
-            <rect
-              x={x}
-              y={130 - failHeight - passHeight - 2}
-              width="22"
-              height={failHeight}
-              style={FAILED}
-            />
-            <rect x={x} y={130 - passHeight} width="22" height={passHeight} style={PASSED} />
-            <text
-              x={x + 11}
-              y="144"
-              fontSize="10"
-              fontFamily={MONO}
-              textAnchor="middle"
-              style={run.failed > 5 ? FAILED : MUTED}
-            >
-              {run.failed}
-            </text>
-          </g>
-        );
-      })}
-      {/* Same baseline as the caption in the right-hand group, and short enough that it
-          cannot reach the divider at x=248 — the two captions are meant to be compared. */}
-      <text x="0" y="178" fontSize="10" style={MUTED}>
-        run 4 is unmissable, while it is running
-      </text>
-
-      <line x1="248" y1="0" x2="248" y2="180" style={RULE} strokeDasharray="3 3" />
-
-      <g transform="translate(286 0)">
-        <text x="0" y="12" fontSize="11" fontWeight="600" style={INK}>
-          one column per day
-        </text>
-        {[
-          { passed: 138, failed: 3, total: 141, label: "Mon" },
-          { passed: 113, failed: 28, total: 141, label: "Tue" },
-        ].map((day, index) => {
-          const x = index * 60;
-          const failHeight = (day.failed / day.total) * scale;
-          const passHeight = (day.passed / day.total) * scale;
-          return (
-            <g key={day.label}>
-              <rect
-                x={x}
-                y={130 - failHeight - passHeight - 2}
-                width="44"
-                height={failHeight}
-                style={FAILED}
-              />
-              <rect x={x} y={130 - passHeight} width="44" height={passHeight} style={PASSED} />
-              <text
-                x={x + 22}
-                y="144"
-                fontSize="10"
-                fontFamily={MONO}
-                textAnchor="middle"
-                style={MUTED}
-              >
-                {day.failed}
-              </text>
-              <text x={x + 22} y="158" fontSize="10" textAnchor="middle" style={MUTED}>
-                {day.label}
-              </text>
-            </g>
-          );
-        })}
-        <text x="0" y="178" fontSize="10" style={MUTED}>
-          the same failures, averaged into &quot;a mildly bad Tuesday&quot;
-        </text>
-      </g>
     </Diagram>
   );
 }

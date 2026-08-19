@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { ORG_SCOPE_COOKIE } from "@/lib/org-scope";
 import { PROJECT_SCOPE_COOKIE, encodeProjectScope } from "@/lib/project-scope";
 import { SIDEBAR_COOKIE, type SidebarState } from "@/lib/sidebar";
 import { THEME_COOKIE, type ThemePreference } from "@/lib/theme";
@@ -37,6 +38,17 @@ export async function setThemePreference(preference: ThemePreference): Promise<v
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 365,
+  });
+}
+
+/** Remembers the organisation named by the current URL for neutral return paths. */
+export async function setOrgScope(orgSlug: string): Promise<void> {
+  const store = await cookies();
+  store.set(ORG_SCOPE_COOKIE, orgSlug, {
+    httpOnly: false,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
   });
 }
 

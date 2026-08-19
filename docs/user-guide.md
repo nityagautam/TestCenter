@@ -336,6 +336,11 @@ Scope is in the URL, so every link is shareable and unambiguous:
 Pasting a link into Slack lands the recipient on exactly what you were looking at,
 provided they have access.
 
+Test Center also remembers the last organisation and project you selected. Opening Help, visiting
+the root page, or returning after sign-in takes you back to that scope; a shared URL that names a
+different organisation or project still wins. Choosing **All projects** is the explicit way to
+clear the remembered project.
+
 ### The dashboard
 
 Headline numbers first — pass rate, runs, tests, failing, flaky, quarantined — then the

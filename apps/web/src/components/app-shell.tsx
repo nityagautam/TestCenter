@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { orgScopeHref, projectKeyFromPath, projectScopeHref } from "@/lib/scope";
 import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import { signOutAction } from "@/app/actions/auth";
-import { clearProjectScope, setProjectScope, setSidebarState } from "@/app/actions/ui";
+import { clearProjectScope, setOrgScope, setProjectScope, setSidebarState } from "@/app/actions/ui";
 import type { SidebarState } from "@/lib/sidebar";
 import { CREDIT } from "@/lib/credit";
 import { CommandPalette } from "@/components/command-palette";
@@ -53,6 +53,8 @@ export interface AppShellProps {
   capabilities: { canCreateProject: boolean; canUpload: boolean; canManageMembers: boolean };
   /** Live counts so the collapsed rail still carries signal. */
   signals: { failing: number; flaky: number };
+  /** Last organisation stored by the shell, so it only writes when the URL changes it. */
+  rememberedOrgSlug: string | null;
   /**
    * The project the user last selected, when the current URL does not name one.
    *
@@ -73,6 +75,7 @@ export function AppShell({
   viewer,
   capabilities,
   signals,
+  rememberedOrgSlug,
   rememberedProjectKey,
   initialSidebar,
   initialTheme,
@@ -155,6 +158,17 @@ export function AppShell({
   useEffect(() => setMobileOpen(false), [pathname]);
 
   const currentOrg = orgs.find((org) => org.slug === orgSlug) ?? null;
+
+  /*
+   * `/help` and `/` carry no organisation in their path. Remember the org from every
+   * org-scoped page so those neutral routes can return to the place the viewer actually left.
+   * The landing resolver validates the cookie against current access, so a revoked membership
+   * can never turn stale preference into access.
+   */
+  useEffect(() => {
+    if (rememberedOrgSlug === orgSlug) return;
+    startTransition(() => void setOrgScope(orgSlug));
+  }, [orgSlug, rememberedOrgSlug]);
 
   /*
    * The selected project: what the URL says, or failing that what the user last chose.

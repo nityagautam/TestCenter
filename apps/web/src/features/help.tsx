@@ -1,19 +1,23 @@
 import type { ReactNode } from "react";
 import type { RecentOutcome } from "@testcenter/db";
-import { RUN_VERDICTS, RUN_VERDICT_LABELS } from "@testcenter/core";
+import { RUN_VERDICTS, RUN_VERDICT_LABELS, type RunVerdict } from "@testcenter/core";
 import { OutcomeStrip } from "@/components/charts/outcome-strip";
 import { RankedBars } from "@/components/charts/ranked-bars";
+import { TrendChart } from "@/components/charts/trend-chart";
+import { VolumeChart } from "@/components/charts/volume-chart";
 import { CiSnippet } from "@/components/ci-snippet";
+import { FilterMenu } from "@/components/filter-menu";
 import {
   FingerprintPipeline,
   FlakeFlip,
   IngestFlow,
-  RunVersusDay,
   SignatureClustering,
 } from "@/components/help-illustrations";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SearchBox } from "@/components/search-box";
 import { Card, CardHeader, ResultBar, StatTile, StatusBadge, TagChip } from "@/components/ui";
 import { VerdictBadge } from "@/components/verdict-badge";
+import { CREDIT } from "@/lib/credit";
 import type { ThemePreference } from "@/lib/theme";
 
 /**
@@ -31,8 +35,7 @@ import type { ThemePreference } from "@/lib/theme";
  * nothing tells us. The badges, strips, bars and charts below are the same components the
  * app renders, given sample props — if `VerdictBadge` changes shape, this page changes with
  * it. What remains as artwork is only what has no screen of its own: how a fingerprint is
- * computed, why failures cluster, what a per-run column shows that a per-day column
- * cannot. Those are ideas, and ideas do not drift.
+ * computed and why failures cluster. Those are ideas, and ideas do not drift.
  *
  * It renders unauthenticated on purpose. The most valuable moment for this page is before
  * someone has an account — in the invitation mail, in a pipeline's README — and a help page
@@ -52,11 +55,16 @@ export function Help({
   appHref,
   appLabel,
   theme,
+  sampleVerdict,
+  sampleSearch,
 }: {
   appHref: string;
   appLabel: string;
   /** Read from the same cookie the app uses, so arriving here does not change the theme. */
   theme: ThemePreference;
+  /** URL-backed state for the live runs-list example; no tenant data is read. */
+  sampleVerdict: "all" | "todo" | RunVerdict;
+  sampleSearch: string;
 }) {
   return (
     <>
@@ -78,7 +86,7 @@ export function Help({
         <Contents />
 
         <ActOne />
-        <ActTwo />
+        <ActTwo sampleVerdict={sampleVerdict} sampleSearch={sampleSearch} />
         <ActThree />
         <ActFour />
         <ActFive />
@@ -90,11 +98,12 @@ export function Help({
 }
 
 /**
- * Its own chrome, not the `AppShell`.
+ * The same header chrome as the application, without tenant controls.
  *
  * The shell needs an organisation, a project list and a signed-in viewer to render its
- * switchers and counts, and this page has none of those guaranteed. It borrows the shell's
- * colour tokens so it still reads as the same product rather than a detached microsite.
+ * switchers and counts, and this page has none of those guaranteed. The height, full-width
+ * spacing, borders, colour tokens and control treatment still match the app header so Help
+ * reads as part of Test Center rather than a detached microsite.
  */
 function HelpHeader({
   appHref,
@@ -107,7 +116,7 @@ function HelpHeader({
 }) {
   return (
     <header
-      className="tc-print-hide sticky top-0 z-30 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)]"
+      className="tc-print-hide sticky top-0 z-30 h-12 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)]"
       style={{
         ["--color-surface" as string]: "var(--color-chrome)",
         ["--color-surface-raised" as string]: "var(--color-chrome-raised)",
@@ -116,10 +125,10 @@ function HelpHeader({
         ["--color-ink-muted" as string]: "var(--color-chrome-ink-muted)",
       }}
     >
-      <div className="mx-auto flex h-12 max-w-3xl items-center gap-3 px-5 lg:px-6">
+      <div className="flex h-full items-center gap-2 px-3 lg:px-4">
         <a
           href="/"
-          className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight"
+          className="flex h-9 min-w-0 items-center gap-2 rounded-md border border-[var(--color-border-subtle)] px-3 text-xs font-semibold tracking-tight hover:border-[var(--color-ink-muted)]"
         >
           <span
             className="inline-block size-2.5 shrink-0 rounded-full bg-[var(--color-chrome-ink)]"
@@ -130,7 +139,7 @@ function HelpHeader({
         <span className="text-[var(--color-chrome-ink-muted)]" aria-hidden>
           /
         </span>
-        <h1 className="text-sm">Help</h1>
+        <h1 className="text-xs font-medium">Help</h1>
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle initial={theme} />
           <a
@@ -249,7 +258,13 @@ function ActOne() {
 
 /* ── Act 2 ─────────────────────────────────────────────────────────────────── */
 
-function ActTwo() {
+function ActTwo({
+  sampleVerdict,
+  sampleSearch,
+}: {
+  sampleVerdict: "all" | "todo" | RunVerdict;
+  sampleSearch: string;
+}) {
   return (
     <Act id="triage" number={2} title="Something is red">
       <P>
@@ -341,6 +356,8 @@ function ActTwo() {
         loading older runs.
       </P>
 
+      <VerdictFilterExample verdict={sampleVerdict} search={sampleSearch} />
+
       <Note title="Verdicts are append-only, and change no number">
         Changing your mind records a new entry; the previous one stays in the run&rsquo;s verdict
         log, marked superseded, because <em>&ldquo;who called this infra, and when?&rdquo;</em> has
@@ -348,6 +365,127 @@ function ActTwo() {
         verdicts entirely — no chart shifts meaning because somebody labelled a run.
       </Note>
     </Act>
+  );
+}
+
+type HelpVerdictSelection = "all" | "todo" | RunVerdict;
+
+const HELP_VERDICT_OPTIONS: { value: HelpVerdictSelection; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "todo", label: "TODO / unreviewed" },
+  ...RUN_VERDICTS.map((value) => ({ value, label: RUN_VERDICT_LABELS[value] })),
+];
+
+function helpVerdictHref(verdict: HelpVerdictSelection, search: string): string {
+  const params = new URLSearchParams({ verdict });
+  if (search) params.set("search", search);
+  return `/help?${params.toString()}#triage`;
+}
+
+/**
+ * The actual runs-list controls and badges, fed sample rows rather than tenant data.
+ *
+ * The filter is deliberately URL-backed even here. A decorative menu would teach the right
+ * appearance and the wrong behaviour: on the real page the choice survives reloads, can be
+ * shared, and composes with search. Keeping those semantics in the example makes the help page
+ * demonstrate the product instead of merely resembling it.
+ */
+function VerdictFilterExample({
+  verdict,
+  search,
+}: {
+  verdict: HelpVerdictSelection;
+  search: string;
+}) {
+  const selectedVerdict = verdict === "todo" ? null : verdict === "all" ? undefined : verdict;
+  const rows = [
+    {
+      name: "Checkout · Playwright",
+      branch: "main",
+      commit: "a91f0c2",
+      tests: 248,
+      verdict: selectedVerdict ?? null,
+    },
+    {
+      name: "Payments API · pytest",
+      branch: "release/4.8",
+      commit: "d371be8",
+      tests: 96,
+      verdict: selectedVerdict ?? (verdict === "all" ? "product-bug" : null),
+    },
+  ].filter((run) => {
+    const needle = search.trim().toLocaleLowerCase();
+    return (
+      !needle ||
+      run.name.toLocaleLowerCase().includes(needle) ||
+      run.branch.toLocaleLowerCase().includes(needle) ||
+      run.commit.includes(needle)
+    );
+  });
+
+  const summary =
+    verdict === "todo"
+      ? "Reviewable runs without a verdict"
+      : verdict === "all"
+        ? "Runs with any latest verdict"
+        : `Runs whose latest verdict is ${RUN_VERDICT_LABELS[verdict]}`;
+
+  return (
+    <Illustration caption="Filter the runs list by its latest verdict. Try the real controls below.">
+      <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchBox
+            action="/help#triage"
+            name="search"
+            label="Search sample runs"
+            defaultValue={search}
+            placeholder="Search run name, branch or commit…"
+            hidden={{ verdict }}
+            className="min-w-0 flex-1 basis-[16rem]"
+          />
+          <FilterMenu
+            label="Verdict"
+            options={HELP_VERDICT_OPTIONS.map((option) => ({
+              label: option.label,
+              href: helpVerdictHref(option.value, search),
+              active: verdict === option.value,
+            }))}
+          />
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-lg border border-[var(--color-border-subtle)]">
+          {rows.length === 0 ? (
+            <p className="px-4 py-6 text-center text-xs text-[var(--color-ink-muted)]">
+              No sample runs match that search.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-border-subtle)]">
+              {rows.map((run, index) => (
+                // Two sample names could eventually share a label; their ordered position is
+                // the identity, just as it is for marks in the real per-run charts.
+                <li key={index} className="px-4 py-3">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium">{run.name}</span>
+                    <StatusBadge status="complete" />
+                    <VerdictBadge verdict={run.verdict} size="sm" />
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-[var(--color-ink-muted)]">
+                    <span>{run.branch}</span>
+                    <span>{run.commit}</span>
+                    <span>{run.tests} tests</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <p className="mt-3 flex items-center gap-2 text-[11px] text-[var(--color-ink-muted)]">
+          <span className="size-1.5 shrink-0 rounded-full bg-[var(--color-series-1)]" aria-hidden />
+          {summary}
+        </p>
+      </div>
+    </Illustration>
   );
 }
 
@@ -456,6 +594,79 @@ function StripRow({
 
 /* ── Act 4 ─────────────────────────────────────────────────────────────────── */
 
+const HELP_RUN_POINTS = [
+  {
+    label: "09:08",
+    detail: "Checkout · main",
+    passed: 141,
+    failed: 3,
+    skipped: 2,
+    flaky: 1,
+    passRate: 96.6,
+    durationMs: 247_000,
+  },
+  {
+    label: "09:26",
+    detail: "Payments API · main",
+    passed: 146,
+    failed: 1,
+    skipped: 1,
+    flaky: 0,
+    passRate: 98.6,
+    durationMs: 222_000,
+  },
+  {
+    label: "10:01",
+    detail: "Checkout · feature/refunds",
+    passed: 132,
+    failed: 12,
+    skipped: 3,
+    flaky: 2,
+    passRate: 89.8,
+    durationMs: 318_000,
+  },
+  {
+    label: "10:38",
+    detail: "Billing · main",
+    passed: 145,
+    failed: 2,
+    skipped: 1,
+    flaky: 1,
+    passRate: 97.3,
+    durationMs: 259_000,
+  },
+  {
+    label: "11:12",
+    detail: "Checkout · main",
+    passed: 147,
+    failed: 0,
+    skipped: 1,
+    flaky: 0,
+    passRate: 99.3,
+    durationMs: 231_000,
+  },
+  {
+    label: "11:47",
+    detail: "Payments API · release/4.8",
+    passed: 143,
+    failed: 3,
+    skipped: 2,
+    flaky: 1,
+    passRate: 96.6,
+    durationMs: 274_000,
+  },
+  {
+    label: "12:19",
+    detail: "Checkout · main",
+    passed: 146,
+    failed: 1,
+    skipped: 1,
+    flaky: 0,
+    passRate: 98.6,
+    durationMs: 238_000,
+  },
+] as const;
+
 function ActFour() {
   return (
     <Act id="trends" number={4} title="How are we doing?">
@@ -481,7 +692,56 @@ function ActFour() {
         Every execution in the window is a point, and clicking one opens that run.
       </P>
 
-      <RunVersusDay />
+      <Illustration caption="The current dashboard charts, rendered from seven sample publishes. Hover or focus any run for its details.">
+        <div className="space-y-4">
+          <Card className="p-4">
+            <VolumeChart
+              title="Execution over time"
+              shape="area"
+              height={150}
+              days={HELP_RUN_POINTS.map((run) => ({
+                label: run.label,
+                detail: run.detail,
+                passed: run.passed,
+                failed: run.failed,
+                skipped: run.skipped,
+                flaky: run.flaky,
+                runs: 1,
+              }))}
+            />
+          </Card>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="p-4">
+              <TrendChart
+                title="Pass rate"
+                height={150}
+                points={HELP_RUN_POINTS.map((run) => ({
+                  label: run.label,
+                  value: run.passRate,
+                  detail: run.detail,
+                }))}
+                unit="%"
+                yMax={100}
+                format="percent"
+              />
+            </Card>
+            <Card className="p-4">
+              <TrendChart
+                title="CI time per run"
+                height={150}
+                points={HELP_RUN_POINTS.map((run) => ({
+                  label: run.label,
+                  value: run.durationMs,
+                  detail: run.detail,
+                }))}
+                color="var(--color-series-2)"
+                format="duration"
+                shape="bars-line"
+              />
+            </Card>
+          </div>
+        </div>
+      </Illustration>
 
       <P>
         Two charts carry a toggle, and the toggle changes the <em>question</em>, not the drawing:
@@ -680,11 +940,23 @@ function Footer({ appHref, appLabel }: { appHref: string; appLabel: string }) {
         <Code>docs/architecture.md</Code>.
       </p>
 
-      <p className="mt-4 text-[12px]">
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-subtle)] pt-4 text-[12px]">
         <a href={appHref} className="underline hover:text-[var(--color-ink)]">
           {appLabel}
         </a>
-      </p>
+        <p className="text-[var(--color-ink-muted)]">
+          Made with{" "}
+          <span
+            role="img"
+            aria-label="love"
+            className="text-[var(--color-status-failed)]"
+            title="love"
+          >
+            ♥
+          </span>{" "}
+          by <span className="text-[var(--color-ink)]">{CREDIT.name}</span>
+        </p>
+      </div>
     </section>
   );
 }

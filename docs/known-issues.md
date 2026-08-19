@@ -586,6 +586,27 @@ and TODO finds only the unreviewed run.
 
 ---
 
+### A30. Returning from Help forgot the selected organisation and project
+
+**Symptom** The shell remembered a project while moving between org-scoped pages, but **Open Test
+Center** on `/help` could return a platform admin to a different organisation and reset the project
+to **All projects**.
+
+**Cause** `/help`, `/`, and the sign-in return all use `resolveLandingPath()`. That resolver chose
+an organisation from membership preference order and never consulted the scope memory already used
+by the shell. Project memory was qualified by organisation, so choosing the wrong organisation also
+made the otherwise-correct project cookie inapplicable.
+
+**Fix** Every org layout now remembers its organisation alongside the existing project selection.
+Neutral landing resolution prefers that accessible organisation, validates the remembered project
+inside it, and returns `/o/:org/p/:project` when both remain valid. Explicit URLs still win, and a
+revoked organisation or archived project falls back to the normal safe destination.
+
+**Guard** The cookie parsers reject absent or blank values, project memory remains isolated by
+organisation, and the web tests plus production build cover the server/client boundary.
+
+---
+
 ## Part B — outstanding
 
 ### B13. Reports can carry credentials into the database *(found in real data)*

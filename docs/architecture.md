@@ -303,6 +303,12 @@ Query parameters accepted by ingest: `project` (required), `name`, `branch`, `co
 Scope lives in the URL — `/o/:org` for cross-project views, `/o/:org/p/:project` for
 project-scoped ones — so every link is shareable and unambiguous.
 
+The URL wins whenever it names a scope. The shell also remembers the last visited organisation
+and selected project in short-lived cookies so neutral routes (`/`, `/help`, and the sign-in
+return) can take the viewer back to the same place. The project value is qualified by organisation
+and both values are validated against current access before use; stale, archived, or revoked scope
+falls back safely instead of producing a phantom selection or granting access.
+
 | Route | Contents |
 | --- | --- |
 | `/o/:org` | dashboard: KPI tiles; outcome-per-run area chart (2/3) beside the activity heatmap (1/3); per-run pass rate, last-run donut and CI time per run (exact bars + five-run rolling average); slowest tests, failure concentration, flake distribution; leaderboards; recent runs |
@@ -362,7 +368,7 @@ there is no saved-report table: the report *is* the link.
 | `time-range-nav` | page-level day-range selector |
 | `report-panels` | renders any `ReportPanel` — one renderer for every question, so print, page breaks and empty states are solved once |
 | `print-button` | hands the page to the browser's own print pipeline, which is the PDF exporter |
-| `help-illustrations` | `/help` artwork: two CSS/SVG loops and three concept diagrams, no screenshots |
+| `help-illustrations` | `/help` artwork: two CSS/SVG loops and two concept diagrams, no screenshots; product screens use live components with sample props |
 | `search-box` | GET-form search; `name`/`label` configurable, multi-valued hidden fields |
 | `upload-form` | drag-and-drop; one request per file, each its own run |
 | `run-progress` | SSE parse progress |

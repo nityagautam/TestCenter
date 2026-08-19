@@ -48,6 +48,9 @@ Execution over time — one point per run, not per day — beside the activity p
 per-run pass rate, the last run, and CI time per run: exact bars plus a five-run rolling
 average line. Every filter and toggle lives in the URL.
 
+The last selected organisation and project are remembered for neutral routes such as `/` and
+`/help`, while a shared URL that names a scope always takes precedence.
+
 ![Organisation dashboard](docs/screenshots/dashboard.png)
 
 ### Project overview

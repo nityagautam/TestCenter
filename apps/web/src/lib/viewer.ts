@@ -1,8 +1,10 @@
 import "server-only";
 import { cache } from "react";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   AccessDeniedError,
+  findProjectByKey,
   findViewerByEmail,
   listAccessibleOrgs,
   requireOrgAccess,
@@ -15,6 +17,8 @@ import {
 } from "@testcenter/db";
 import { auth } from "@/auth";
 import { getServices } from "@/lib/services";
+import { ORG_SCOPE_COOKIE, preferredLandingOrg, readOrgScope } from "@/lib/org-scope";
+import { PROJECT_SCOPE_COOKIE, readProjectScope } from "@/lib/project-scope";
 
 /**
  * Page-side access resolution.
@@ -155,11 +159,31 @@ export async function resolveLandingPath(): Promise<string> {
    * So: an organisation they are really a member of wins; a shared one beats their
    * personal space; and orgs visible only through platform admin come last.
    */
-  const byPreference =
-    orgs.find((org) => !org.viaPlatformAdmin && !org.isPersonal) ??
-    orgs.find((org) => !org.viaPlatformAdmin) ??
-    orgs[0];
-  return `/o/${byPreference?.slug}`;
+  const store = await cookies();
+  const rememberedOrgSlug = readOrgScope(store.get(ORG_SCOPE_COOKIE)?.value);
+  const byPreference = preferredLandingOrg(orgs, rememberedOrgSlug);
+
+  if (!byPreference) return "/no-access";
+
+  /*
+   * Project memory is already qualified by organisation. Validate the key against the chosen
+   * org before putting it back in a path: a deleted, archived or newly-inaccessible project
+   * falls back to the organisation dashboard rather than producing a stale 404.
+   */
+  const rememberedProjectKey = readProjectScope(
+    store.get(PROJECT_SCOPE_COOKIE)?.value,
+    byPreference.slug,
+  );
+  if (rememberedProjectKey) {
+    const { sql } = getServices();
+    const project = await findProjectByKey(sql, {
+      orgId: byPreference.id,
+      key: rememberedProjectKey,
+    });
+    if (project) return `/o/${byPreference.slug}/p/${project.key}`;
+  }
+
+  return `/o/${byPreference.slug}`;
 }
 
 /**
