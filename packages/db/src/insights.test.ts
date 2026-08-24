@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createClient, type Database, type Sql } from "./client.js";
+import { resetOutputLimitsCache } from "@testcenter/core";
 import { bootstrap } from "./bootstrap.js";
 import {
   addRunTotals,
@@ -12,12 +13,15 @@ import {
 import {
   addRunVerdict,
   branchPassRates,
+  dashboardWindowSummary,
   dailySeries,
   failureConcentration,
   flakeDistribution,
   flakyLeaderboard,
   getTestCase,
   latestRunVerdicts,
+  listRunsForExport,
+  listTestsForExport,
   listSuites,
   orgSummary,
   recentOutcomes,
@@ -161,7 +165,9 @@ describeIfDb("insights read path", () => {
                         message: "ECONNREFUSED 10.0.0.1:5432",
                         stackTrace: "    at connect (specs/c.spec.ts:9:1)",
                       },
-                stdout: "step one ok\nstep two ok\n",
+                // Deliberately over 200 chars: the read path's output cap has a floor of 200,
+                // so a shorter log could not demonstrate truncation at all.
+                stdout: "step one ok\nstep two ok\n" + "trace line padding\n".repeat(80),
               },
             ]
           : []),
@@ -302,6 +308,89 @@ describeIfDb("insights read path", () => {
         expect(point.durationMs).toBe(5_000);
       }
       expect(points.some((point) => point.branch === "release/1.0")).toBe(true);
+      expect(points.every((point) => point.projectKey === "insights-test")).toBe(true);
+    });
+
+    it("summarizes the selected dashboard window without the run-series cap", async () => {
+      const summary = await dashboardWindowSummary(sql, { orgId, days: 1 });
+      expect(summary.runs).toBe(4);
+      expect(summary.tests).toBe(22);
+      expect(summary.avgDurationMs).toBe(5_000);
+      expect(summary.totalDurationMs).toBe(20_000);
+      expect(summary.passRate).not.toBeNull();
+    });
+
+    it("exports the window's runs as data rather than as chart labels", async () => {
+      const page = await listRunsForExport(sql, { orgId, days: 1 });
+      expect(page.total).toBe(4);
+      expect(page.truncated).toBe(false);
+      expect(page.runs.length).toBe(4);
+
+      for (const run of page.runs) {
+        /*
+         * The reason this query exists rather than reusing `runSeries`. A `RunPoint` carries
+         * `label` — `to_char(...)` output, a display string with no year — and a CSV built
+         * from it cannot be sorted or subtracted. These must be real values.
+         */
+        expect(run.startedAt).toBeInstanceOf(Date);
+        expect(run.finishedAt).toBeInstanceOf(Date);
+        expect(run.durationMs).toBe(5_000);
+        // numeric arrives from postgres.js as a *string*; ::float8 in the query is what stops
+        // a spreadsheet receiving a column of text it cannot average.
+        expect(typeof run.passRate).toBe("number");
+        expect(run.environment).toBe("staging");
+        expect(run.framework).toBe("playwright");
+        expect(run.projectKey).toBe("insights-test");
+        expect(run.total).toBeGreaterThan(0);
+      }
+
+      // Ascending, matching the order of the PDF's own detail table.
+      const times = page.runs.map((run) => run.startedAt.getTime());
+      expect([...times].sort((a, b) => a - b)).toEqual(times);
+      expect(page.runs.some((run) => run.branch === "release/1.0")).toBe(true);
+    });
+
+    it("reconciles exactly with the headline tiles", async () => {
+      /*
+       * The claim the export makes by sitting next to the PDF: same window, same predicate,
+       * `total > 0` included. If these drift, a reader sums the CSV, gets a different number
+       * from the tile above the chart, and is right to distrust both.
+       */
+      const [page, summary] = await Promise.all([
+        listRunsForExport(sql, { orgId, days: 1 }),
+        dashboardWindowSummary(sql, { orgId, days: 1 }),
+      ]);
+      expect(page.total).toBe(summary.runs);
+      expect(page.runs.reduce((sum, run) => sum + run.total, 0)).toBe(summary.tests);
+      expect(page.runs.reduce((sum, run) => sum + run.failed + run.errored, 0)).toBe(
+        summary.failed,
+      );
+    });
+
+    it("keeps the newest runs when capped, and says it was capped", async () => {
+      const capped = await listRunsForExport(sql, { orgId, days: 1, limit: 2 });
+      expect(capped.runs.length).toBe(2);
+      // The matched total is the pre-cap count, which is what makes the disclosure possible —
+      // the filename carries "partial-2-of-4" only because this is not just `runs.length`.
+      expect(capped.total).toBe(4);
+      expect(capped.truncated).toBe(true);
+
+      const all = await listRunsForExport(sql, { orgId, days: 1 });
+      const newest = all.runs.slice(-2).map((run) => run.runId);
+      expect(capped.runs.map((run) => run.runId)).toEqual(newest);
+    });
+
+    it("scopes an export to one project and never leaks another tenant's runs", async () => {
+      const scoped = await listRunsForExport(sql, { orgId, projectId, days: 1 });
+      expect(scoped.total).toBe(4);
+      // A valid project id under the wrong org must return nothing, not the project's rows.
+      const crossTenant = await listRunsForExport(sql, {
+        orgId: "00000000-0000-0000-0000-000000000000",
+        projectId,
+        days: 1,
+      });
+      expect(crossTenant.runs).toEqual([]);
+      expect(crossTenant.total).toBe(0);
     });
 
     it("ranks pass rate per branch", async () => {
@@ -418,6 +507,18 @@ describeIfDb("insights read path", () => {
       expect(page.tests).toEqual([]);
       expect(page.total).toBe(0);
     });
+
+    it("exports each matching test once and states when the inventory is capped", async () => {
+      const capped = await listTestsForExport(sql, { orgId, sort: "name" }, { limit: 2 });
+      expect(capped.tests).toHaveLength(2);
+      expect(capped.total).toBe(6);
+      expect(capped.truncated).toBe(true);
+
+      const focused = await listTestsForExport(sql, { orgId, query: "steady" });
+      expect(focused.tests.map((test) => test.name)).toEqual([STEADY]);
+      expect(focused.total).toBe(1);
+      expect(focused.truncated).toBe(false);
+    });
   });
 
   it("lists suites with their test counts", async () => {
@@ -518,6 +619,36 @@ describeIfDb("insights read path", () => {
       expect(everything.length).toBe(4);
       for (const detail of everything) {
         expect((detail.stdout ?? "").length).toBeLessThanOrEqual(10);
+      }
+    });
+
+    it("takes its default output slice from OUTPUT_READ_CHARS", async () => {
+      /*
+       * The other half of "no code change required": the row ceiling and the read slice are
+       * separate env vars, because a 200k row is fine while 100 × 200k in one response is not.
+       * `outputLimits` memoizes, so the cache is cleared on both sides of this.
+       */
+      const previous = process.env.OUTPUT_READ_CHARS;
+      try {
+        process.env.OUTPUT_READ_CHARS = "200";
+        resetOutputLimitsCache();
+
+        const details = await testExecutionDetails(sql, {
+          orgId,
+          testCaseId: await idOf(TWO_MODES),
+          limit: 5,
+        });
+        expect(details.length).toBeGreaterThan(0);
+        for (const detail of details) {
+          // No maxOutputChars passed, so the env default is what applied.
+          expect((detail.stdout ?? "").length).toBeLessThanOrEqual(200);
+        }
+        // And it is disclosed rather than silently short — the fixture's stdout is longer.
+        expect(details.some((detail) => detail.stdoutTruncated)).toBe(true);
+      } finally {
+        if (previous === undefined) delete process.env.OUTPUT_READ_CHARS;
+        else process.env.OUTPUT_READ_CHARS = previous;
+        resetOutputLimitsCache();
       }
     });
 

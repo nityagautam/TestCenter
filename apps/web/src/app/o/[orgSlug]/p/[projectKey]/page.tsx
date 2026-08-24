@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   branchPassRates,
+  dashboardWindowSummary,
   failureConcentration,
   flakeDistribution,
   flakyLeaderboard,
@@ -13,6 +14,7 @@ import {
   topFailingTests,
 } from "@testcenter/db";
 import { ChartToggle } from "@/components/charts/chart-toggle";
+import { DashboardStatTiles } from "@/components/dashboard-tiles";
 import { RUN_VERDICT_LABELS, type RunVerdict } from "@testcenter/core";
 import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { OutcomeDonut } from "@/components/charts/outcome-donut";
@@ -27,15 +29,7 @@ import {
   VERDICT_COLOR,
   VERDICT_TODO_COLOR,
 } from "@/components/verdict-badge";
-import {
-  Button,
-  Card,
-  CardHeader,
-  EmptyState,
-  ResultBar,
-  StatTile,
-  StatusBadge,
-} from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, ResultBar, StatusBadge } from "@/components/ui";
 import { DASHBOARD_DAY_OPTIONS, resolveDashboardDays } from "@/lib/dashboard-range";
 import { passRateTone, TONE_COLOR } from "@/lib/health";
 import {
@@ -103,20 +97,33 @@ export default async function ProjectOverview({
   const shareView = volumeParam === "share";
   const branchView = rateParam === "branch";
 
-  const [summary, recent, flaky, failing, slowest, concentration, flakeBands, activity, runPoints] =
-    await Promise.all([
-      orgSummary(sql, scope),
-      listRuns(sql, { orgId: context.org.id, projectId: project.id }, { limit: 8 }),
-      flakyLeaderboard(sql, { ...scope, limit: 5 }),
-      topFailingTests(sql, { ...scope, limit: 5 }),
-      // Twenty, not six: both lists scroll, and the tail says whether this is one bad test
-      // or something systemic.
-      slowestTests(sql, { ...scope, limit: 20 }),
-      failureConcentration(sql, { ...scope, limit: 20 }),
-      flakeDistribution(sql, scope),
-      runActivity(sql, { ...scope, days, timeZone: tz.zone }),
-      runSeries(sql, { ...scope, days, timeZone: tz.zone }),
-    ]);
+  const [
+    summary,
+    windowed,
+    recent,
+    flaky,
+    failing,
+    slowest,
+    concentration,
+    flakeBands,
+    activity,
+    runPoints,
+  ] = await Promise.all([
+    orgSummary(sql, scope),
+    // The headline tiles measure the selected window, not a fixed month — see
+    // DashboardStatTiles. `orgSummary` stays for the present-state counts and `lastRunAt`.
+    dashboardWindowSummary(sql, { ...scope, days }),
+    listRuns(sql, { orgId: context.org.id, projectId: project.id }, { limit: 8 }),
+    flakyLeaderboard(sql, { ...scope, limit: 5 }),
+    topFailingTests(sql, { ...scope, limit: 5 }),
+    // Twenty, not six: both lists scroll, and the tail says whether this is one bad test
+    // or something systemic.
+    slowestTests(sql, { ...scope, limit: 20 }),
+    failureConcentration(sql, { ...scope, limit: 20 }),
+    flakeDistribution(sql, scope),
+    runActivity(sql, { ...scope, days, timeZone: tz.zone }),
+    runSeries(sql, { ...scope, days, timeZone: tz.zone }),
+  ]);
 
   // One verdict query for both consumers — the recent-runs list and the execution chart's
   // ribbon overlap, and two calls would fetch the newest runs twice.
@@ -149,6 +156,8 @@ export default async function ProjectOverview({
     const query = next.toString();
     return query ? `${base}?${query}` : base;
   };
+  // Window only — the view toggles pick a drawing, and a CSV has none. See the org dashboard.
+  const csvHref = `${base}/export/dashboard/csv?days=${days}`;
   const hasRuns = summary.runs30d > 0 || recent.runs.length > 0;
 
   return (
@@ -198,6 +207,9 @@ export default async function ProjectOverview({
               active: days === option,
             }))}
           />
+          <Button href={csvHref} download>
+            Export CSV
+          </Button>
           <Button href={`${base}/runs`}>Runs</Button>
           <Button href={`${base}/tests`}>Tests</Button>
           {can(context, "run:upload") ? (
@@ -240,29 +252,7 @@ export default async function ProjectOverview({
         </Card>
       ) : (
         <>
-          <Card className="mb-5">
-            <div className="grid grid-cols-2 divide-x divide-y divide-[var(--color-border-subtle)] sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
-              <StatTile
-                label="Pass rate"
-                value={formatPercent(summary.passRate30d)}
-                tone={passRateTone(summary.passRate30d)}
-                hint="last 30 days"
-              />
-              <StatTile label="Runs" value={summary.runs30d} hint={`${summary.runsToday} today`} />
-              <StatTile label="Tests" value={formatInteger(summary.tests30d)} />
-              <StatTile
-                label="Failing"
-                value={summary.failing30d}
-                tone={summary.failing30d > 0 ? "failed" : "neutral"}
-              />
-              <StatTile
-                label="Flaky tests"
-                value={summary.flakyTests}
-                tone={summary.flakyTests > 0 ? "flaky" : "neutral"}
-              />
-              <StatTile label="Quarantined" value={summary.quarantined} tone="skipped" />
-            </div>
-          </Card>
+          <DashboardStatTiles windowed={windowed} current={summary} days={days} className="mb-5" />
 
           {/*
            * Today, one column per run — placed above the 30-day charts on purpose.

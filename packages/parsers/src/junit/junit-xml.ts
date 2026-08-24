@@ -1,6 +1,7 @@
 import type { Readable } from "node:stream";
 import { SaxesParser, type SaxesTag } from "saxes";
 import type { CanonicalTestResult, RetryAttempt, RunMetadata, TestStatus } from "@testcenter/core";
+import { outputLimits } from "@testcenter/core";
 import {
   ParseError,
   type ParseContext,
@@ -24,11 +25,35 @@ import { createXmlSanitizer, type SanitizeStats } from "./sanitize.js";
  * DOM parse would need many times that in memory.
  */
 
-/** Caps: one test must not be able to write megabytes into a row. */
-const MAX_MESSAGE_CHARS = 8_000;
-const MAX_STACK_CHARS = 64_000;
-const MAX_OUTPUT_CHARS = 64_000;
 const DEFAULT_BATCH_SIZE = 1_000;
+
+/**
+ * Caps on the free text one test can write into a row, from the environment.
+ *
+ * `MAX_OUTPUT_CHARS`, `MAX_STACK_CHARS` and `MAX_MESSAGE_CHARS` — see `outputLimits` in
+ * `@testcenter/core`. Read through the memoized accessor rather than captured in module
+ * constants so a test can set an env var and re-read them; the memoization means this costs a
+ * property lookup per test case, not a validation.
+ */
+
+/**
+ * How much text one element may accumulate across *multiple* text/cdata events.
+ *
+ * Sized from the largest cap so it can never become the effective limit. Note what it does
+ * *not* do: saxes buffers a text node internally and delivers it in a single `text` event —
+ * measured, one event for a 150k body regardless of stream chunk size — so this never bounds a
+ * single large `<system-out>`. `textBuffer.length` is 0 when that one event arrives and the
+ * whole body is appended. The real memory bound for one node is saxes' own buffer.
+ *
+ * What it does bound is an element whose text arrives in many pieces: CDATA interleaved with
+ * text, or text split around child elements. That is the case it was written for and the only
+ * case it catches. Deriving it from the largest cap rather than from `MAX_STACK_CHARS * 2`
+ * keeps it out of the way when a cap is raised past it.
+ */
+function textBufferLimit(): number {
+  const limits = outputLimits();
+  return 2 * Math.max(limits.maxMessageChars, limits.maxStackChars, limits.maxOutputChars);
+}
 
 /**
  * Above this many distinct tests in a single suite we stop tracking identities for
@@ -309,10 +334,13 @@ export class JUnitXmlParser implements Parser {
       }
     });
 
+    // Resolved once per parse, not per event.
+    const bufferLimit = textBufferLimit();
     const appendText = (text: string): void => {
       if (textTarget === null) return;
-      // Guard against a single element growing without bound before we cap it.
-      if (textBuffer.length < MAX_STACK_CHARS * 2) textBuffer += text;
+      // Bounds accumulation across multiple text/cdata events for one element — see
+      // textBufferLimit for what this does and does not protect against.
+      if (textBuffer.length < bufferLimit) textBuffer += text;
     };
 
     parser.on("text", appendText);
@@ -525,8 +553,9 @@ function buildResult(
     result.retries = retries;
   }
 
-  if (draft.stdout.trim()) result.stdout = truncate(draft.stdout, MAX_OUTPUT_CHARS);
-  if (draft.stderr.trim()) result.stderr = truncate(draft.stderr, MAX_OUTPUT_CHARS);
+  const limits = outputLimits();
+  if (draft.stdout.trim()) result.stdout = truncate(draft.stdout, limits.maxOutputChars);
+  if (draft.stderr.trim()) result.stderr = truncate(draft.stderr, limits.maxOutputChars);
 
   return result;
 }
@@ -534,13 +563,13 @@ function buildResult(
 function toFailure(draft: FailureDraft): NonNullable<CanonicalTestResult["failure"]> {
   const failure: NonNullable<CanonicalTestResult["failure"]> = {};
   if (draft.type) failure.type = truncate(draft.type, 512);
-  if (draft.message) failure.message = truncate(draft.message, MAX_MESSAGE_CHARS);
+  if (draft.message) failure.message = truncate(draft.message, outputLimits().maxMessageChars);
   const text = draft.text.trim();
   if (text) {
-    failure.stackTrace = truncate(text, MAX_STACK_CHARS);
+    failure.stackTrace = truncate(text, outputLimits().maxStackChars);
     // Many writers put the assertion text only in the element body.
     if (!failure.message)
-      failure.message = truncate(text.split(/\r?\n/)[0] ?? "", MAX_MESSAGE_CHARS);
+      failure.message = truncate(text.split(/\r?\n/)[0] ?? "", outputLimits().maxMessageChars);
   }
   return failure;
 }

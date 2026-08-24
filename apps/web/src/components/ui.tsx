@@ -291,6 +291,9 @@ export function EmptyState({
       <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-[var(--color-ink-muted)]">
         {description}
       </p>
+      {/* : an empty state's action is always a button, and a button on paper is
+          an instruction the reader cannot follow. The title and description still explain
+          why the section is empty, which is the part that belongs in a document. */}
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );
@@ -299,6 +302,7 @@ export function EmptyState({
 export function Button({
   children,
   href,
+  download,
   variant = "secondary",
   type = "button",
   onClick,
@@ -307,6 +311,15 @@ export function Button({
 }: {
   children: ReactNode;
   href?: string;
+  /**
+   * Renders a plain anchor instead of a `Link`, for an href that returns a file.
+   *
+   * Not a style choice. `next/link` prefetches on hover in production, so a Link pointing at
+   * the CSV route would run the whole export query — every run in the window, plus the
+   * verdict lookup — because somebody's cursor passed over the button. It would then try to
+   * client-navigate to a `Content-Disposition: attachment` response, which is not a route.
+   */
+  download?: boolean;
   variant?: "primary" | "secondary" | "ghost";
   type?: "button" | "submit";
   onClick?: () => void;
@@ -323,6 +336,16 @@ export function Button({
   };
   const classes = `${base} ${variants[variant]} ${className}`;
 
+  if (href && download) {
+    // No `download` attribute: the filename comes from the response's Content-Disposition,
+    // and setting the attribute here would override the server's name with the URL's last
+    // segment — literally "csv".
+    return (
+      <a href={href} className={classes}>
+        {children}
+      </a>
+    );
+  }
   if (href) {
     return (
       <Link href={href} className={classes}>

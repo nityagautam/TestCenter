@@ -13,10 +13,12 @@ import {
   getRun,
   getRunResult,
   listProjects,
+  listRunResultsForExport,
   listRunResults,
   listRuns,
   runFilterOptions,
   summarizeRunSuites,
+  summarizeRunFeatures,
   tagFacets,
   updateRunTags,
 } from "./queries.js";
@@ -296,6 +298,29 @@ describeIfDb("read-path queries", () => {
     const suite = suites.find((entry) => entry.suite === "specs/checkout.spec.ts");
     expect(suite?.total).toBe(3);
     expect(suite?.failed).toBe(1);
+  });
+
+  it("exports tenant-scoped feature totals and detailed run results", async () => {
+    const runId = runIds[1] as string;
+    const exported = await listRunResultsForExport(sql, { orgId, runId });
+    expect(exported.total).toBe(3);
+    expect(exported.results).toHaveLength(3);
+    expect(exported.truncated).toBe(false);
+    expect(exported.results[0]?.status).toBe("failed");
+
+    const features = await summarizeRunFeatures(sql, { orgId, runId });
+    expect(features).toHaveLength(1);
+    expect(features[0]?.suite).toBe("specs/checkout.spec.ts");
+    expect(features[0]?.scenarios).toBe(3);
+    expect(features[0]?.failed).toBe(1);
+
+    const otherOrg = "00000000-0000-4000-8000-000000000000";
+    expect(await listRunResultsForExport(sql, { orgId: otherOrg, runId })).toEqual({
+      results: [],
+      total: 0,
+      truncated: false,
+    });
+    expect(await summarizeRunFeatures(sql, { orgId: otherOrg, runId })).toEqual([]);
   });
 
   it("reads a single run scoped to its org", async () => {

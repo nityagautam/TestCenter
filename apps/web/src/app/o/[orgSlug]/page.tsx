@@ -3,6 +3,7 @@ import Link from "next/link";
 import { RUN_VERDICT_LABELS, type RunVerdict } from "@testcenter/core";
 import {
   branchPassRates,
+  dashboardWindowSummary,
   failureConcentration,
   flakeDistribution,
   flakyLeaderboard,
@@ -17,6 +18,7 @@ import {
 } from "@testcenter/db";
 import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { ChartToggle } from "@/components/charts/chart-toggle";
+import { DashboardStatTiles } from "@/components/dashboard-tiles";
 import { OutcomeDonut } from "@/components/charts/outcome-donut";
 import { RankedBars } from "@/components/charts/ranked-bars";
 import { TimeRangeNav } from "@/components/time-range-nav";
@@ -28,15 +30,7 @@ import {
 } from "@/components/verdict-badge";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { VolumeChart } from "@/components/charts/volume-chart";
-import {
-  Button,
-  Card,
-  CardHeader,
-  EmptyState,
-  ResultBar,
-  StatTile,
-  StatusBadge,
-} from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, ResultBar, StatusBadge } from "@/components/ui";
 import { DASHBOARD_DAY_OPTIONS, resolveDashboardDays } from "@/lib/dashboard-range";
 import { passRateTone, TONE_COLOR } from "@/lib/health";
 import {
@@ -94,6 +88,7 @@ export default async function OrgDashboard({
 
   const [
     summary,
+    windowed,
     projects,
     recent,
     flaky,
@@ -105,6 +100,10 @@ export default async function OrgDashboard({
     runPoints,
   ] = await Promise.all([
     orgSummary(sql, { orgId }),
+    // The headline tiles measure the selected window, not a fixed month — see
+    // DashboardStatTiles. `orgSummary` is still read, for the present-state counts and the
+    // project count in the subheading, neither of which is windowed.
+    dashboardWindowSummary(sql, { orgId, days }),
     listProjects(sql, orgId),
     listRuns(sql, { orgId }, { limit: 6 }),
     flakyLeaderboard(sql, { orgId, limit: 6 }),
@@ -148,6 +147,9 @@ export default async function OrgDashboard({
     const query = next.toString();
     return query ? `/o/${orgSlug}?${query}` : `/o/${orgSlug}`;
   };
+  // Only the window, not the view toggles: `volume` and `rate` choose a drawing, and a CSV has
+  // no drawing to choose. Carrying them would imply the data changed with the chart.
+  const csvHref = `/o/${orgSlug}/export/dashboard/csv?days=${days}`;
 
   if (projects.length === 0) {
     return (
@@ -192,43 +194,21 @@ export default async function OrgDashboard({
         </div>
         {/* Through viewHref, so changing the range keeps the chart views. These links
             used to be built by hand and reset volume/rate/duration on every click. */}
-        <TimeRangeNav
-          options={DASHBOARD_DAY_OPTIONS.map((option) => ({
-            days: option,
-            href: viewHref({ days: String(option) }),
-            active: days === option,
-          }))}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <TimeRangeNav
+            options={DASHBOARD_DAY_OPTIONS.map((option) => ({
+              days: option,
+              href: viewHref({ days: String(option) }),
+              active: days === option,
+            }))}
+          />
+          <Button href={csvHref} download>
+            Export CSV
+          </Button>
+        </div>
       </div>
 
-      <Card className="mb-5">
-        <div className="grid grid-cols-2 divide-x divide-y divide-[var(--color-border-subtle)] sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
-          <StatTile
-            label="Pass rate"
-            value={formatPercent(summary.passRate30d)}
-            tone={passRateTone(summary.passRate30d)}
-            hint="last 30 days"
-          />
-          <StatTile label="Runs" value={summary.runs30d} hint={`${summary.runsToday} today`} />
-          <StatTile label="Tests" value={formatInteger(summary.tests30d)} />
-          <StatTile
-            label="Failing"
-            value={summary.failing30d}
-            tone={summary.failing30d > 0 ? "failed" : "neutral"}
-          />
-          <StatTile
-            label="Flaky tests"
-            value={summary.flakyTests}
-            tone={summary.flakyTests > 0 ? "flaky" : "neutral"}
-          />
-          <StatTile
-            label="Quarantined"
-            value={summary.quarantined}
-            tone="skipped"
-            hint="excluded from gates"
-          />
-        </div>
-      </Card>
+      <DashboardStatTiles windowed={windowed} current={summary} days={days} className="mb-5" />
 
       {hasHistory ? (
         <>

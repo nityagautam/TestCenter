@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { outputLimitsSchema } from "./limits.js";
 
 /**
  * Config is validated once at startup and fails loudly.
@@ -33,6 +34,10 @@ export const envSchema = z.object({
 
   MAX_ARTIFACT_BYTES: z.coerce.number().int().positive().default(524_288_000),
   MAX_RUN_BYTES: z.coerce.number().int().positive().default(5_368_709_120),
+
+  // Spread rather than restated, so a service validates the same limits at boot that the
+  // parser reads at runtime. Two copies of these bounds would drift the first time one moved.
+  ...outputLimitsSchema.shape,
 
   OTEL_SERVICE_NAME: z.string().default("test-center"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),

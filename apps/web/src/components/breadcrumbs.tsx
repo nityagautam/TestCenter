@@ -46,7 +46,7 @@ export function Breadcrumbs({
   return (
     <nav
       aria-label="Breadcrumb"
-      className="tc-print-hide mb-4 flex min-w-0 items-center gap-2 text-xs text-[var(--color-ink-muted)]"
+      className="mb-4 flex min-w-0 items-center gap-2 text-xs text-[var(--color-ink-muted)]"
     >
       <BackLink fallbackHref={backHref} />
 

@@ -27,12 +27,15 @@ for project-scoped ones — so every link is shareable and unambiguous.
 | `/o/:org` | Dashboard: outcome per run over time, when runs happen (hour × weekday heatmap), per-run pass rate, last-run donut, exact CI-time bars with a five-run rolling average, slowest tests, failure concentration, flake distribution, leaderboards |
 | `/o/:org/runs` | Filterable run list — search, branch/env/framework/tag facets, latest-verdict/TODO filter, keyset pagination |
 | `/o/:org/runs/:id` | Metadata strip, summary tiles, verdict log, suite tree, failures-first results, captured output |
+| `/o/:org/runs/:id/export` | Print-ready run PDF: metadata, totals by feature/class, and detailed test executions |
 | `/o/:org/tests` | Search by name fragment; filter by failing / flaky / slow / quarantined |
+| `/o/:org/tests/export` | Print-ready inventory of the filtered unique tests with brief 30-day statistics; also project-scoped |
 | `/o/:org/tests/:id` | **Test history** — outcome strip, distinct failure modes, every failure in full (`?show=all` for passed output too) |
 | `/o/:org/flaky` | Flaky leaderboard with the CI time each flake has burned |
 | `/o/:org/projects` | Projects, and creating one (mints a CI token and shows the recipe) |
 | `/o/:org/settings/members` | Grant access by email, set roles, revoke |
 | `/o/:org/reports` | **Reports** — pick a question with blanks (*"which tests failed most in the last __ days on __?"*), get a finished answer with chart, table and caveat. Print for PDF. Also per project at `/o/:org/p/:project/reports` |
+| `/o/:org/export/dashboard` | Print-ready dashboard PDF using the selected day range and chart views; also project-scoped |
 | `/o/:org/settings/tokens` | Create and revoke CI tokens |
 | `/help` | The narrative guide — no sign-in needed. `?` from anywhere in the app |
 

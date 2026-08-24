@@ -10,19 +10,13 @@ import { Card, StatTile } from "@/components/ui";
  * This is the only place that knows how a panel kind becomes pixels, which is the point of
  * the panel contract: questions decide *what* to answer, this decides *how it looks*, and
  * neither knows about the other. A free-form chart builder can later emit the same specs and
- * get this renderer, the print stylesheet and the export path for free.
- *
- * `tc-panel` on every panel is what the print stylesheet hooks to keep a chart and its
- * caption on one page.
+ * get this renderer for free.
  */
 export function ReportPanels({ panels }: { panels: ReportPanel[] }) {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       {panels.map((panel) => (
-        <Card
-          key={panel.id}
-          className={`tc-panel p-4 ${panel.width === "full" ? "lg:col-span-2" : ""}`}
-        >
+        <Card key={panel.id} className={`p-4 ${panel.width === "full" ? "lg:col-span-2" : ""}`}>
           <PanelBody panel={panel} />
           {panel.footnote ? (
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
@@ -138,9 +132,8 @@ function PanelTable({
                     className={`max-w-xs px-2 py-1.5 ${
                       column.align === "right"
                         ? "text-right font-mono whitespace-nowrap tabular-nums"
-                        : // Truncated on screen with the full value on hover; the print
-                          // stylesheet unsets this, because paper has no hover.
-                          "tc-cell-truncate"
+                        : // Truncated, with the full value on hover via the cell's `title`.
+                          "truncate"
                     }`}
                     title={row[column.key] ?? ""}
                   >

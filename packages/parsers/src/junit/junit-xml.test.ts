@@ -3,9 +3,9 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { CanonicalTestResult } from "@testcenter/core";
-import { accumulateTotals, emptyTotals } from "@testcenter/core";
+import { accumulateTotals, emptyTotals, resetOutputLimitsCache } from "@testcenter/core";
 import { junitXmlParser } from "./junit-xml.js";
 import type { ParseOutcome } from "../types.js";
 
@@ -41,6 +41,34 @@ async function parseString(
   const results: CanonicalTestResult[] = [];
   const outcome = await junitXmlParser.parse(
     Readable.from([Buffer.from(xml, "utf8")]),
+    { projectId: PROJECT, filename },
+    async (batch) => {
+      results.push(...batch.results);
+    },
+  );
+  return { results, outcome };
+}
+
+/**
+ * Same as `parseString`, but delivered in fixed-size chunks the way a file stream would.
+ *
+ * The distinction matters for anything that bounds accumulation *across* SAX events.
+ * `Readable.from([oneBuffer])` produces a single `text` event, so a per-element guard tested
+ * that way never engages no matter how large the element is — the whole body arrives in one
+ * append. A real 200 MB report arrives in stream-sized reads, which is when it engages.
+ */
+async function parseChunked(
+  xml: string,
+  chunkSize = 16 * 1024,
+  filename = "chunked.xml",
+): Promise<{ results: CanonicalTestResult[]; outcome: ParseOutcome }> {
+  const chunks: Buffer[] = [];
+  for (let at = 0; at < xml.length; at += chunkSize) {
+    chunks.push(Buffer.from(xml.slice(at, at + chunkSize), "utf8"));
+  }
+  const results: CanonicalTestResult[] = [];
+  const outcome = await junitXmlParser.parse(
+    Readable.from(chunks),
     { projectId: PROJECT, filename },
     async (batch) => {
       results.push(...batch.results);
@@ -375,11 +403,66 @@ describe("streaming behaviour", () => {
   });
 
   it("truncates pathological output instead of storing megabytes per test", async () => {
-    const huge = "x".repeat(200_000);
+    // Comfortably past the 200k cap. This fixture used to be exactly 200_000, which stopped
+    // proving anything the moment the cap was raised to that number — a cap and a fixture of
+    // the same size make the assertion pass for the wrong reason.
+    const huge = "x".repeat(600_000);
     const xml = `<testsuite name="s"><testcase name="loud" time="0.1"><system-out>${huge}</system-out></testcase></testsuite>`;
     const { results } = await parseString(xml);
     const stdout = results[0]?.stdout ?? "";
     expect(stdout.length).toBeLessThan(huge.length);
     expect(stdout).toContain("truncated by Test Center");
+  });
+
+  /*
+   * The point of the env var: change the cap without touching code.
+   *
+   * `outputLimits` memoizes, so the cache has to be cleared around any case that sets one of
+   * these — otherwise the first test to read them fixes the value for the whole file, and this
+   * test would pass or fail depending on its position in the run order.
+   */
+  describe("configurable caps", () => {
+    afterEach(() => {
+      delete process.env.MAX_OUTPUT_CHARS;
+      resetOutputLimitsCache();
+    });
+
+    it("honours MAX_OUTPUT_CHARS from the environment", async () => {
+      process.env.MAX_OUTPUT_CHARS = "5000";
+      resetOutputLimitsCache();
+
+      const body = "z".repeat(20_000);
+      const xml = `<testsuite name="s"><testcase name="loud" time="0.1"><system-out>${body}</system-out></testcase></testsuite>`;
+      const { results } = await parseString(xml);
+      const stdout = results[0]?.stdout ?? "";
+      // 5,000 kept plus the truncation note appended after it.
+      expect(stdout.startsWith("z".repeat(5_000))).toBe(true);
+      expect(stdout).toContain("truncated by Test Center");
+      expect(stdout.length).toBeLessThan(6_000);
+    });
+
+    it("rejects an unparseable value rather than silently keeping the default", async () => {
+      process.env.MAX_OUTPUT_CHARS = "banana";
+      resetOutputLimitsCache();
+
+      const xml = `<testsuite name="s"><testcase name="t" time="0.1"><system-out>hi</system-out></testcase></testsuite>`;
+      await expect(parseString(xml)).rejects.toThrow(/Invalid output limit configuration/);
+    });
+  });
+
+  it("keeps output that fits the configured cap", async () => {
+    /*
+     * 150k: past the 64k this used to allow, inside the 200k default it allows now. Guards the
+     * cap itself rather than the in-parse buffer bound — that bound cannot be observed from
+     * here, because saxes buffers a text node and delivers it in one `text` event (measured:
+     * one event for a 150k body at every stream chunk size), so `appendText` appends the whole
+     * body in a single step no matter what its threshold is.
+     */
+    const body = "y".repeat(150_000);
+    const xml = `<testsuite name="s"><testcase name="chatty" time="0.1"><system-out>${body}</system-out></testcase></testsuite>`;
+    const { results } = await parseChunked(xml);
+    const stdout = results[0]?.stdout ?? "";
+    expect(stdout.length).toBe(150_000);
+    expect(stdout).not.toContain("truncated by Test Center");
   });
 });

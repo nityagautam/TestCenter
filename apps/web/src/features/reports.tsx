@@ -8,7 +8,6 @@ import {
   resolveBlanks,
   runReport,
 } from "@testcenter/db";
-import { PrintButton } from "@/components/print-button";
 import { ReportPanels } from "@/components/report-panels";
 import { Card, CardHeader, EmptyState } from "@/components/ui";
 import { getServices } from "@/lib/services";
@@ -95,8 +94,7 @@ export async function Reports({
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-6">
-      {/* tc-print-hide: the chrome is not part of the report. */}
-      <div className="tc-print-hide mb-5">
+      <div className="mb-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold tracking-tight">Reports</h1>
@@ -112,13 +110,12 @@ export async function Reports({
               ) : null}
             </p>
           </div>
-          {report && !report.empty ? <PrintButton /> : null}
         </div>
       </div>
 
       {/* The catalog. Reads as a list of sentences, which is the whole idea — you choose by
           recognising your own question rather than by learning a schema. */}
-      <Card className="tc-print-hide mb-5 overflow-hidden">
+      <Card className="mb-5 overflow-hidden">
         <CardHeader
           title={selected ? "Question" : `Choose a question (${available.length})`}
           action={

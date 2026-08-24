@@ -421,10 +421,22 @@ makes most flake dashboards useless. In the seeded data `test_case_7` fails 76 t
 of 89 runs and appears only in "most-failing"; the flaky list holds tests that pass
 *inconsistently*.
 
-Hover any chart for a per-day tooltip. Use the day buttons to change the window — 7 / 30 /
-90 on the organisation dashboard, 7 / 15 / 30 on a project, which is where day-to-day work
-happens and a quarter of history says little about whether the suite is healthy now. A
-project dashboard also states **when the suite last ran**, with a link to that run.
+Hover any chart for its per-run tooltip. Use the day buttons to change the window — 1 / 7 /
+15 / 30 / 45 / 90 on both dashboards, with 7 days still the default. A project dashboard
+also states **when the suite last ran**, with a link to that run.
+
+### Exporting data
+
+The organisation dashboard and project overview have **Export CSV** beside the day range. It
+downloads one row per run in the selected window, as data rather than as a document: durations
+stay in integer milliseconds and pass rates stay bare numbers, so the columns can be summed,
+averaged and charted in a spreadsheet. Each row carries the run id, project, ISO-8601 start and
+finish timestamps in UTC, name, branch, full commit sha, PR number, environment, framework,
+status, verdict, the outcome counts, pass rate and CI job URL.
+
+The totals reconcile exactly with the headline tiles above the charts — the CSV applies the same
+window predicate, so summing `tests_total` gives the "Tests executed" figure. If a window holds
+more runs than the export cap, the filename says so rather than the file quietly being partial.
 
 ### Finding a test
 

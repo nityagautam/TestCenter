@@ -147,7 +147,6 @@ export async function TestSearch({
   };
 
   const totalPages = Math.max(Math.ceil(results.total / perPage), 1);
-
   /*
    * The opening every visible name shares, lifted out of the rows.
    *
@@ -190,10 +189,12 @@ export async function TestSearch({
        */}
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h1 className="text-lg font-semibold tracking-tight">Tests</h1>
-        <p className="font-mono text-[11px] text-[var(--color-ink-muted)] tabular-nums">
-          {formatInteger(results.total)} test{results.total === 1 ? "" : "s"}
-          {project ? ` in ${project.name}` : " across all projects"}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="font-mono text-[11px] text-[var(--color-ink-muted)] tabular-nums">
+            {formatInteger(results.total)} test{results.total === 1 ? "" : "s"}
+            {project ? ` in ${project.name}` : " across all projects"}
+          </p>
+        </div>
       </div>
 
       <div className="mb-4 space-y-2.5">

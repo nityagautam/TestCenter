@@ -116,7 +116,7 @@ function HelpHeader({
 }) {
   return (
     <header
-      className="tc-print-hide sticky top-0 z-30 h-12 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)]"
+      className="sticky top-0 z-30 h-12 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)]"
       style={{
         ["--color-surface" as string]: "var(--color-chrome)",
         ["--color-surface-raised" as string]: "var(--color-chrome-raised)",
@@ -156,7 +156,7 @@ function HelpHeader({
 
 function Contents() {
   return (
-    <nav aria-label="Contents" className="tc-print-hide mt-7">
+    <nav aria-label="Contents" className="mt-7">
       <ol className="divide-y divide-[var(--color-border-subtle)] overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
         {ACTS.map((act, index) => (
           <li key={act.id}>

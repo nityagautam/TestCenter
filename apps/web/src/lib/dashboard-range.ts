@@ -14,3 +14,14 @@ export function resolveDashboardDays(value: string | undefined): DashboardDays {
   const requested = Number(value);
   return DASHBOARD_DAY_OPTIONS.find((option) => option === requested) ?? DEFAULT_DASHBOARD_DAYS;
 }
+
+/**
+ * How to name the selected window in prose.
+ *
+ * "last 1 days" is not the only problem with printing the number: the window predicate is
+ * `started_at >= (now() - (days - 1) days)::date`, so it starts at a calendar boundary and
+ * one day means *since midnight*, not the last twenty-four hours. "today" is what that is.
+ */
+export function dashboardRangeLabel(days: DashboardDays): string {
+  return days === 1 ? "today" : `last ${days} days`;
+}

@@ -314,13 +314,16 @@ falls back safely instead of producing a phantom selection or granting access.
 | `/o/:org` | dashboard: KPI tiles; outcome-per-run area chart (2/3) beside the activity heatmap (1/3); per-run pass rate, last-run donut and CI time per run (exact bars + five-run rolling average); slowest tests, failure concentration, flake distribution; leaderboards; recent runs |
 | `/o/:org/runs` | filterable run list — search, branch/env/framework/tag facets, latest verdict/TODO, keyset pagination |
 | `/o/:org/runs/:id` | run detail: metadata strip, KPI tiles, verdict log, suite tree, failures-first results, output |
+| `/o/:org/runs/:id/export` | browser-print run document: metadata and verdict, feature/class totals, detailed test executions (explicitly capped at 2,000 rows) |
 | `/o/:org/tests` | test search + per-test outcome strips |
+| `/o/:org/tests/export` | browser-print inventory of the current filtered unique-test view and its maintained 30-day statistics; also under project scope |
 | `/o/:org/tests/:id` | test history: outcome strip, duration trend, failure modes, executions (`?show=all` for passed output) |
 | `/o/:org/flaky` | flaky leaderboard with CI time burned |
 | `/o/:org/projects`, `/projects/new` | projects; creation mints a CI token and shows the recipe |
 | `/o/:org/settings` | organisation display name; slug stays immutable so links and integrations survive |
 | `/o/:org/settings/members`, `/settings/tokens` | access and tokens |
 | `/o/:org/reports` | a catalog of 12 vetted questions with blanks (`?q=` plus one parameter per blank: `days`, `branch`, `environment`, `suite`, `project`, `topN`, `verdict`), answered as panels; print for PDF |
+| `/o/:org/export/dashboard` | browser-print execution summary carrying `days`, `volume` and `rate`; charts/details are capped at the newest 300 runs while exact headline totals cover the whole window; also under project scope |
 | `/o/:org/p/:project/*` | project-scoped dashboard, runs, tests, flaky, reports, upload, settings |
 | `/organizations/new` | authenticated creation of an additional team organisation; rendered in the remembered org's full application shell |
 | `/onboarding` | no-org creation/skip flow; intentionally outside the shell because there is no tenant scope to navigate yet |
@@ -372,8 +375,7 @@ there is no saved-report table: the report *is* the link.
 | `verdict-badge` | verdict or derived TODO; `awaitsVerdict()` gates on run status |
 | `tag-editor` | tag chips + add/remove (`showChips`, `startOpen`) |
 | `time-range-nav` | page-level day-range selector |
-| `report-panels` | renders any `ReportPanel` — one renderer for every question, so print, page breaks and empty states are solved once |
-| `print-button` | hands the page to the browser's own print pipeline, which is the PDF exporter |
+| `report-panels` | renders any `ReportPanel` — one renderer for every question, so empty states are solved once |
 | `help-illustrations` | `/help` artwork: two CSS/SVG loops and two concept diagrams, no screenshots; product screens use live components with sample props |
 | `search-box` | GET-form search; `name`/`label` configurable, multi-valued hidden fields |
 | `upload-form` | drag-and-drop; one request per file, each its own run |
@@ -448,6 +450,9 @@ find it.
 | `TESTCENTER_ADMIN_EMAILS` | platform admins, re-asserted every sign-in |
 | `TESTCENTER_RETENTION_MONTHS`, `TESTCENTER_PARTITION_LOOKAHEAD` | partition maintenance |
 | `MAX_ARTIFACT_BYTES`, `MAX_RUN_BYTES` | ingest limits |
+| `MAX_OUTPUT_CHARS` | ceiling on one result's stdout/stderr (default 200,000); the parser truncates past it and appends a note |
+| `OUTPUT_READ_CHARS` | how much of that a multi-row read returns by default (64,000); the row ceiling and the payload cap are separate knobs |
+| `MAX_STACK_CHARS`, `MAX_MESSAGE_CHARS` | ceilings on a failure's stack trace and message |
 | `LOG_LEVEL`, `OTEL_*` | |
 
 `NODE_ENV` is deliberately **not** set in `.env` — forcing `development` breaks

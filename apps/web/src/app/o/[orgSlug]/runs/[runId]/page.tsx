@@ -219,7 +219,7 @@ export default async function RunPage({
           </div>
 
           {/* Renders nothing when the viewer can do none of these. */}
-          <div className="shrink-0">
+          <div className="flex shrink-0 items-start gap-2">
             <RunActions
               runId={runId}
               orgSlug={orgSlug}

@@ -254,7 +254,6 @@ export function TrendChart({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 vectorEffect="non-scaling-stroke"
-                className="tc-line-shadow"
                 /*
                  * A CSS filter, not an SVG one.
                  *

@@ -331,6 +331,12 @@ export interface ResultPage {
   nextCursor: ResultCursor | null;
 }
 
+export interface RunResultExport {
+  results: ResultRow[];
+  total: number;
+  truncated: boolean;
+}
+
 /**
  * Failures first, then errors, then flaky passes, then the rest.
  *
@@ -409,6 +415,47 @@ export async function listRunResults(
   };
 }
 
+/**
+ * Printable result rows for one run.
+ *
+ * A PDF with tens of thousands of rows is neither useful nor safe to render in one request,
+ * so this has a deliberately high but finite ceiling. The returned total lets the document
+ * state any omission instead of quietly presenting a partial run as complete.
+ */
+export async function listRunResultsForExport(
+  sql: Sql,
+  input: { orgId: string; runId: string; limit?: number },
+): Promise<RunResultExport> {
+  const limit = Math.min(Math.max(input.limit ?? 2_000, 1), 5_000);
+  const rows = await sql<(ResultRow & { matchedTotal: number })[]>`
+    SELECT
+      r.id,
+      r.test_case_id    AS "testCaseId",
+      tc.name,
+      tc.classname,
+      tc.suite,
+      r.status,
+      r.duration_ms     AS "durationMs",
+      r.retry_count     AS "retryCount",
+      r.was_flaky       AS "wasFlaky",
+      r.failure_type    AS "failureType",
+      r.failure_message AS "failureMessage",
+      ${sql.unsafe(STATUS_RANK_SQL)} AS "statusRank",
+      tc.flake_score    AS "flakeScore",
+      tc.quarantined,
+      count(*) OVER()::int AS "matchedTotal"
+    FROM test_results r
+    JOIN runs run ON run.id = r.run_id AND run.org_id = ${input.orgId}
+    JOIN test_cases tc ON tc.id = r.test_case_id AND tc.org_id = ${input.orgId}
+    WHERE r.run_id = ${input.runId}
+    ORDER BY ${sql.unsafe(STATUS_RANK_SQL)} ASC, COALESCE(r.duration_ms, 0) ASC, r.id ASC
+    LIMIT ${limit}
+  `;
+
+  const total = rows[0]?.matchedTotal ?? 0;
+  return { results: rows, total, truncated: total > rows.length };
+}
+
 export interface ResultDetail extends ResultRow {
   stackTrace: string | null;
   stdout: string | null;
@@ -461,6 +508,54 @@ export interface SuiteSummary {
   failed: number;
   skipped: number;
   durationMs: number;
+}
+
+export interface RunFeatureSummary {
+  feature: string | null;
+  suite: string | null;
+  scenarios: number;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  flaky: number;
+  passRate: string | null;
+  durationMs: number;
+}
+
+/** Feature/class totals for a printable run, with suite retained as its file-level context. */
+export async function summarizeRunFeatures(
+  sql: Sql,
+  input: { orgId: string; runId: string },
+): Promise<RunFeatureSummary[]> {
+  const rows = await sql<(Omit<RunFeatureSummary, "durationMs"> & { durationMs: string })[]>`
+    SELECT
+      tc.classname AS feature,
+      tc.suite,
+      count(DISTINCT tc.id)::int AS scenarios,
+      count(*)::int AS total,
+      count(*) FILTER (WHERE r.status = 'passed')::int AS passed,
+      count(*) FILTER (WHERE r.status IN ('failed', 'error'))::int AS failed,
+      count(*) FILTER (WHERE r.status = 'skipped')::int AS skipped,
+      count(*) FILTER (WHERE r.was_flaky)::int AS flaky,
+      CASE
+        WHEN count(*) FILTER (WHERE r.status IN ('passed', 'failed', 'error')) = 0 THEN NULL
+        ELSE ROUND(
+          count(*) FILTER (WHERE r.status = 'passed')::numeric * 100 /
+          count(*) FILTER (WHERE r.status IN ('passed', 'failed', 'error')),
+          2
+        )
+      END AS "passRate",
+      COALESCE(sum(r.duration_ms), 0)::bigint AS "durationMs"
+    FROM test_results r
+    JOIN runs run ON run.id = r.run_id AND run.org_id = ${input.orgId}
+    JOIN test_cases tc ON tc.id = r.test_case_id AND tc.org_id = ${input.orgId}
+    WHERE r.run_id = ${input.runId}
+    GROUP BY tc.classname, tc.suite
+    ORDER BY failed DESC, total DESC, tc.classname ASC NULLS LAST, tc.suite ASC NULLS LAST
+  `;
+
+  return rows.map((row) => ({ ...row, durationMs: Number(row.durationMs) }));
 }
 
 /** Powers the run page's suite tree; one grouped query, not one per suite. */

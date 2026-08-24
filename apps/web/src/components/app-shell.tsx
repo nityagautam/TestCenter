@@ -597,7 +597,7 @@ export function AppShell({
 
       {/* ── Fixed header ─────────────────────────────────────────────────── */}
       <header
-        className="tc-print-hide fixed inset-x-0 top-0 z-30 h-12 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)] transition-[padding] duration-150 motion-reduce:transition-none"
+        className="fixed inset-x-0 top-0 z-30 h-12 border-b border-[var(--color-chrome-border)] bg-[var(--color-chrome)] text-[var(--color-chrome-ink)] transition-[padding] duration-150 motion-reduce:transition-none"
         style={{
           paddingLeft: `var(--tc-sidebar, 0px)`,
           /*
@@ -740,7 +740,7 @@ export function AppShell({
       >
         {/* pt-12 clears the fixed top bar. The print sheet drops that padding along with the
             bar, so a printed page does not open with an inch of white. */}
-        <main id="content" tabIndex={-1} className="tc-shell-main pt-12">
+        <main id="content" tabIndex={-1} className="pt-12">
           {children}
         </main>
       </div>

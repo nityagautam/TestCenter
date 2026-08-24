@@ -1,4 +1,6 @@
+import { outputLimits } from "@testcenter/core";
 import type { Sql } from "./client.js";
+import type { RunStatus } from "./schema.js";
 
 /**
  * Dashboard aggregates, test search, and test history.
@@ -396,6 +398,7 @@ export async function todaysRuns(
  */
 export interface RunPoint {
   id: string;
+  projectKey: string;
   /** `Mon DD HH:MM` in the requested zone — the axis is time, so the label carries both. */
   label: string;
   name: string | null;
@@ -409,6 +412,68 @@ export interface RunPoint {
   /** Per-execution rate; skips are excluded from the denominator at ingest. */
   passRate: number;
   durationMs: number | null;
+}
+
+export interface DashboardWindowSummary {
+  runs: number;
+  tests: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  flaky: number;
+  passRate: number | null;
+  avgDurationMs: number | null;
+  totalDurationMs: number;
+}
+
+/** Exact totals for the selected dashboard window; unlike orgSummary, these are not fixed at 30d. */
+export async function dashboardWindowSummary(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; days?: number },
+): Promise<DashboardWindowSummary> {
+  const days = Math.min(Math.max(input.days ?? 7, 1), 365);
+  const rows = await sql<
+    (Omit<DashboardWindowSummary, "tests" | "passRate" | "totalDurationMs"> & {
+      tests: string;
+      passRate: string | null;
+      totalDurationMs: string;
+    })[]
+  >`
+    SELECT
+      count(*)::int AS runs,
+      COALESCE(sum(r.total), 0)::bigint AS tests,
+      COALESCE(sum(r.passed), 0)::int AS passed,
+      COALESCE(sum(r.failed + r.errored), 0)::int AS failed,
+      COALESCE(sum(r.skipped), 0)::int AS skipped,
+      COALESCE(sum(r.flaky), 0)::int AS flaky,
+      CASE
+        WHEN COALESCE(sum(r.passed + r.failed + r.errored), 0) = 0 THEN NULL
+        ELSE ROUND(
+          sum(r.passed)::numeric * 100 / sum(r.passed + r.failed + r.errored),
+          2
+        )
+      END AS "passRate",
+      avg(r.duration_ms)::int AS "avgDurationMs",
+      COALESCE(sum(r.duration_ms), 0)::bigint AS "totalDurationMs"
+    FROM runs r
+    WHERE r.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+      AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+      AND r.total > 0
+  `;
+
+  const row = rows[0];
+  return {
+    runs: row?.runs ?? 0,
+    tests: Number(row?.tests ?? 0),
+    passed: row?.passed ?? 0,
+    failed: row?.failed ?? 0,
+    skipped: row?.skipped ?? 0,
+    flaky: row?.flaky ?? 0,
+    passRate: row?.passRate === null || row?.passRate === undefined ? null : Number(row.passRate),
+    avgDurationMs: row?.avgDurationMs ?? null,
+    totalDurationMs: Number(row?.totalDurationMs ?? 0),
+  };
 }
 
 export async function runSeries(
@@ -436,11 +501,12 @@ export async function runSeries(
 
   const rows = await sql<RunPoint[]>`
     SELECT
-      id, label, name, branch, status, total, passed, failed, skipped, flaky,
+      id, "projectKey", label, name, branch, status, total, passed, failed, skipped, flaky,
       "passRate", "durationMs"
     FROM (
       SELECT
         r.id,
+        p.key AS "projectKey",
         r.started_at,
         to_char(r.started_at AT TIME ZONE ${zone}, 'Mon DD HH24:MI') AS label,
         r.name, r.branch, r.status,
@@ -449,6 +515,7 @@ export async function runSeries(
         r.pass_rate::float8 AS "passRate",
         r.duration_ms AS "durationMs"
       FROM runs r
+      JOIN projects p ON p.id = r.project_id AND p.org_id = ${input.orgId}
       WHERE r.org_id = ${input.orgId}
         ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
         AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
@@ -462,6 +529,102 @@ export async function runSeries(
   `;
 
   return rows;
+}
+
+export interface RunExportRow {
+  runId: string;
+  projectKey: string;
+  /** A real timestamp, not `RunPoint.label`. The consumer decides how to render it. */
+  startedAt: Date;
+  finishedAt: Date | null;
+  durationMs: number | null;
+  name: string | null;
+  branch: string | null;
+  commitSha: string | null;
+  prNumber: number | null;
+  environment: string | null;
+  framework: string | null;
+  status: RunStatus;
+  total: number;
+  passed: number;
+  failed: number;
+  errored: number;
+  skipped: number;
+  flaky: number;
+  /** 0–100, already numeric — `pass_rate` is `numeric` and arrives as a string otherwise. */
+  passRate: number | null;
+  ciJobUrl: string | null;
+}
+
+export interface RunExportPage {
+  runs: RunExportRow[];
+  /** Runs matching the window, before the cap. */
+  total: number;
+  truncated: boolean;
+}
+
+/**
+ * Runs in the dashboard window, as data rather than as a drawing.
+ *
+ * Deliberately not `runSeries`, though they answer over the same window with the same
+ * predicate. `RunPoint` is shaped for a chart: its `label` is `to_char(...)` output —
+ * `"Aug 18 08:08"`, a display string with no year — it carries no commit, environment or
+ * finish time, and it is capped at 1000 because every point is a hover target. All three
+ * properties are correct for an axis and disqualifying for an export somebody is going to
+ * pivot, join on a commit, or diff against their CI's own records.
+ *
+ * The window predicate is copied verbatim from `dashboardWindowSummary`, `runSeries` and
+ * `runActivity`, `total > 0` included. That term is why the headline tiles reconcile with the
+ * charts, and a CSV that quietly included empty runs would not add up to the PDF beside it.
+ */
+export async function listRunsForExport(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; days?: number; limit?: number },
+): Promise<RunExportPage> {
+  const days = Math.min(Math.max(input.days ?? 7, 1), 365);
+  const limit = Math.min(Math.max(input.limit ?? 10_000, 1), 50_000);
+
+  const rows = await sql<(RunExportRow & { matchedTotal: number })[]>`
+    SELECT
+      "runId", "projectKey", "startedAt", "finishedAt", "durationMs", name, branch,
+      "commitSha", "prNumber", environment, framework, status, total, passed, failed,
+      errored, skipped, flaky, "passRate", "ciJobUrl", "matchedTotal"
+    FROM (
+      SELECT
+        r.id             AS "runId",
+        p.key            AS "projectKey",
+        r.started_at     AS "startedAt",
+        r.finished_at    AS "finishedAt",
+        r.duration_ms    AS "durationMs",
+        r.name,
+        r.branch,
+        r.commit_sha     AS "commitSha",
+        r.pr_number      AS "prNumber",
+        r.environment,
+        r.framework,
+        r.status,
+        r.total, r.passed, r.failed, r.errored, r.skipped, r.flaky,
+        -- ::float8 so the caller receives a number. numeric arrives as a string, and a CSV
+        -- built from it would still parse — as text, in a column nobody can average.
+        r.pass_rate::float8 AS "passRate",
+        r.ci_job_url     AS "ciJobUrl",
+        count(*) OVER()::int AS "matchedTotal"
+      FROM runs r
+      JOIN projects p ON p.id = r.project_id AND p.org_id = ${input.orgId}
+      WHERE r.org_id = ${input.orgId}
+        ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+        AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+        AND r.total > 0
+      -- Newest first under the cap, so a truncated export keeps the recent history, then
+      -- re-sorted ascending to match the order of the PDF's own detail table.
+      ORDER BY r.started_at DESC
+      LIMIT ${limit}
+    ) windowed
+    ORDER BY windowed."startedAt" ASC
+  `;
+
+  const total = rows[0]?.matchedTotal ?? 0;
+  return { runs: rows, total, truncated: total > rows.length };
 }
 
 export interface SlowTest {
@@ -719,26 +882,12 @@ export interface TestSearchPage {
   total: number;
 }
 
-/**
- * Test search.
- *
- * Uses trigram matching rather than only full-text, because people search for
- * fragments — "payment" should find `test_declines_expired_payment_card`, which
- * tokenised full-text search alone will not do. The GIN trigram index added in
- * migration 0004 is what keeps that affordable.
- *
- * A total count is returned here (unlike the run list's keyset pagination) because a
- * search UI genuinely needs "312 tests match" to be useful, and the count is over
- * `test_cases` — one row per distinct test, thousands not millions.
- */
-export async function searchTests(
-  sql: Sql,
-  filter: TestSearchFilter,
-  options: { limit?: number; offset?: number } = {},
-): Promise<TestSearchPage> {
-  const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
-  const offset = Math.max(options.offset ?? 0, 0);
+export interface TestExportPage extends TestSearchPage {
+  truncated: boolean;
+}
 
+/** Shared so the on-screen search and its printable inventory cannot disagree. */
+function testSearchWhere(sql: Sql, filter: TestSearchFilter) {
   const conditions = [sql`tc.org_id = ${filter.orgId}`];
   if (filter.projectId) conditions.push(sql`tc.project_id = ${filter.projectId}`);
   if (filter.suite) conditions.push(sql`tc.suite = ${filter.suite}`);
@@ -778,18 +927,43 @@ export async function searchTests(
     conditions.push(sql`tc.p95_duration_ms >= ${filter.slowerThanMs}`);
   }
 
-  const where = conditions.reduce((combined, condition) => sql`${combined} AND ${condition}`);
+  return conditions.reduce((combined, condition) => sql`${combined} AND ${condition}`);
+}
 
-  const order =
-    filter.sort === "flakiest"
-      ? sql`tc.flake_score DESC, tc.last_seen_at DESC`
-      : filter.sort === "slowest"
-        ? sql`tc.p95_duration_ms DESC NULLS LAST`
-        : filter.sort === "most-failed"
-          ? sql`tc.failures_30d DESC, tc.fail_rate_30d DESC`
-          : filter.sort === "name"
-            ? sql`tc.name ASC`
-            : sql`tc.last_seen_at DESC`;
+function testSearchOrder(sql: Sql, sort: TestSearchFilter["sort"]) {
+  return sort === "flakiest"
+    ? sql`tc.flake_score DESC, tc.last_seen_at DESC`
+    : sort === "slowest"
+      ? sql`tc.p95_duration_ms DESC NULLS LAST`
+      : sort === "most-failed"
+        ? sql`tc.failures_30d DESC, tc.fail_rate_30d DESC`
+        : sort === "name"
+          ? sql`tc.name ASC`
+          : sql`tc.last_seen_at DESC`;
+}
+
+/**
+ * Test search.
+ *
+ * Uses trigram matching rather than only full-text, because people search for
+ * fragments — "payment" should find `test_declines_expired_payment_card`, which
+ * tokenised full-text search alone will not do. The GIN trigram index added in
+ * migration 0004 is what keeps that affordable.
+ *
+ * A total count is returned here (unlike the run list's keyset pagination) because a
+ * search UI genuinely needs "312 tests match" to be useful, and the count is over
+ * `test_cases` — one row per distinct test, thousands not millions.
+ */
+export async function searchTests(
+  sql: Sql,
+  filter: TestSearchFilter,
+  options: { limit?: number; offset?: number } = {},
+): Promise<TestSearchPage> {
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
+  const offset = Math.max(options.offset ?? 0, 0);
+
+  const where = testSearchWhere(sql, filter);
+  const order = testSearchOrder(sql, filter.sort);
 
   const tests = await sql<TestSearchRow[]>`
     SELECT
@@ -822,6 +996,51 @@ export async function searchTests(
   `;
 
   return { tests, total: counted[0]?.total ?? 0 };
+}
+
+/**
+ * Unique tests for a printable inventory.
+ *
+ * The document carries the matched total and whether it was truncated. That keeps a large
+ * organisation from turning one browser tab into thousands of PDF pages while ensuring a
+ * partial inventory can never be mistaken for the complete result set.
+ */
+export async function listTestsForExport(
+  sql: Sql,
+  filter: TestSearchFilter,
+  options: { limit?: number } = {},
+): Promise<TestExportPage> {
+  const limit = Math.min(Math.max(options.limit ?? 2_000, 1), 5_000);
+  const where = testSearchWhere(sql, filter);
+  const order = testSearchOrder(sql, filter.sort);
+
+  const rows = await sql<(TestSearchRow & { matchedTotal: number })[]>`
+    SELECT
+      tc.id,
+      tc.project_id       AS "projectId",
+      p.key               AS "projectKey",
+      tc.name,
+      tc.classname,
+      tc.suite,
+      tc.last_status      AS "lastStatus",
+      tc.last_seen_at     AS "lastSeenAt",
+      tc.runs_30d         AS "runs30d",
+      tc.failures_30d     AS "failures30d",
+      tc.fail_rate_30d    AS "failRate30d",
+      tc.flake_score      AS "flakeScore",
+      tc.avg_duration_ms  AS "avgDurationMs",
+      tc.p95_duration_ms  AS "p95DurationMs",
+      tc.quarantined,
+      count(*) OVER()::int AS "matchedTotal"
+    FROM test_cases tc
+    JOIN projects p ON p.id = tc.project_id
+    WHERE ${where}
+    ORDER BY ${order}
+    LIMIT ${limit}
+  `;
+
+  const total = rows[0]?.matchedTotal ?? 0;
+  return { tests: rows, total, truncated: total > rows.length };
 }
 
 /** Suites present, for the search filter sidebar. */
@@ -1039,8 +1258,13 @@ export interface ExecutionDetail extends TestExecution {
 /** @deprecated Kept for callers written before passed executions were included. */
 export type FailureDetail = ExecutionDetail;
 
-/** The parser caps one row's captured output at 64k chars; never read more than that. */
-const MAX_OUTPUT_CHARS = 64_000;
+/*
+ * The two output limits come from the environment — `MAX_OUTPUT_CHARS` (what a row can hold,
+ * so never read more than this) and `OUTPUT_READ_CHARS` (what a multi-row read returns unless
+ * asked otherwise). Both are defined once in `@testcenter/core`, which is what stops this
+ * query and the parser that wrote the rows from disagreeing about the ceiling; they used to be
+ * two literals kept in step by a comment.
+ */
 
 /**
  * Full detail for a test's executions, including stack traces and captured output.
@@ -1052,7 +1276,11 @@ const MAX_OUTPUT_CHARS = 64_000;
  * statuses is what powers "show me the steps of a run that passed" — Cucumber and
  * friends write their step log to `<system-out>` on success too, and that log is the
  * only record of what a green test actually did. Cap `maxOutputChars` when widening
- * the status filter: 20 rows × the parser's 64k ceiling is 1.3 MB of text otherwise.
+ * the status filter: 20 rows at the default is already 1.3 MB of text, and at the 200k
+ * ceiling it would be 4 MB. The test detail page passes 8k for exactly this reason.
+ *
+ * Truncation here is never silent — `stdoutTruncated`/`stderrTruncated` are returned so the
+ * view can say so, and the full value is still on the run's own page, which does not clamp.
  */
 export async function testExecutionDetails(
   sql: Sql,
@@ -1066,7 +1294,11 @@ export async function testExecutionDetails(
 ): Promise<ExecutionDetail[]> {
   const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
   const statuses = input.statuses ?? ["failed", "error"];
-  const cap = Math.min(Math.max(input.maxOutputChars ?? MAX_OUTPUT_CHARS, 200), MAX_OUTPUT_CHARS);
+  const limits = outputLimits();
+  const cap = Math.min(
+    Math.max(input.maxOutputChars ?? limits.outputReadChars, 200),
+    limits.maxOutputChars,
+  );
 
   return sql<ExecutionDetail[]>`
     SELECT
