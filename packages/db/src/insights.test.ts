@@ -15,7 +15,13 @@ import {
   branchPassRates,
   dashboardWindowSummary,
   dailySeries,
+  addFailureTriage,
+  failureCategories,
   failureConcentration,
+  failureSignatures,
+  failureTriageBreakdown,
+  failureTriageHistory,
+  latestFailureTriage,
   flakeDistribution,
   flakyLeaderboard,
   getTestCase,
@@ -391,6 +397,165 @@ describeIfDb("insights read path", () => {
       });
       expect(crossTenant.runs).toEqual([]);
       expect(crossTenant.total).toBe(0);
+    });
+
+    it("groups failures by signature across the whole scope", async () => {
+      /*
+       * The fixture is built for exactly this: `broken` fails identically in all 4 runs, and
+       * `two_modes` fails in 2 runs with two *different* signatures. So the right answer is not
+       * a failure count — it is that 6 failures are 3 problems.
+       */
+      const summary = await failureSignatures(sql, { orgId, days: 1, limit: 20 });
+      expect(summary.totalFailures).toBe(6);
+      expect(summary.distinctSignatures).toBe(3);
+      expect(summary.unsignatured).toBe(0);
+
+      // `broken` is the same failure four times: one group, one test, four runs.
+      const worst = summary.groups[0];
+      expect(worst?.failures).toBe(4);
+      expect(worst?.tests).toBe(1);
+      expect(worst?.runs).toBe(4);
+      expect(worst?.failureType).toBe("AssertionError");
+      expect(worst?.projectKey).toBe("insights-test");
+      // Ordered by failures, so the two single-occurrence modes follow.
+      expect(summary.groups.slice(1).every((group) => group.failures === 1)).toBe(true);
+
+      for (const group of summary.groups) {
+        expect(group.signatureHex).toMatch(/^[0-9a-f]{64}$/);
+        // The sample has to be openable, or a cluster is a dead end.
+        expect(Number.isInteger(group.sampleTestCaseId)).toBe(true);
+        expect(group.lastSeenAt).toBeInstanceOf(Date);
+      }
+    });
+
+    it("scopes signature groups by project and never leaks another tenant's failures", async () => {
+      const scoped = await failureSignatures(sql, { orgId, projectId, days: 1 });
+      expect(scoped.distinctSignatures).toBe(3);
+      const crossTenant = await failureSignatures(sql, {
+        orgId: "00000000-0000-0000-0000-000000000000",
+        projectId,
+        days: 1,
+      });
+      expect(crossTenant.groups).toEqual([]);
+      expect(crossTenant.totalFailures).toBe(0);
+    });
+
+    it("classifies failures from the error class, not by searching the message", async () => {
+      /*
+       * The fixture's three failure shapes each carry a real error class, which is the whole
+       * point of the two-stage classifier: `AssertionError`, `TimeoutError` and
+       * `ConnectionError` are tokens somebody chose to be meaningful, so matching them is exact.
+       *
+       * Asserted per bucket rather than on the total. A `CASE` with mis-ordered branches or a
+       * loose regex still produces a plausible total with the rows in the wrong places — which
+       * is exactly what the earlier substring version did on real data, filing 12 assertion
+       * failures as auth because the word "token" appeared somewhere in a long message.
+       */
+      const categories = await failureCategories(sql, { orgId, days: 1 });
+      const byName = new Map(categories.map((row) => [row.category, row]));
+
+      expect(byName.get("assertion")?.failures).toBe(4);
+      expect(byName.get("timeout")?.failures).toBe(1);
+      expect(byName.get("network")?.failures).toBe(1);
+      // Nothing falls through: every fixture failure carries a class the rules recognise.
+      expect(byName.get("other")).toBeUndefined();
+      expect(byName.get("no-detail")).toBeUndefined();
+      expect(byName.get("code-error")).toBeUndefined();
+
+      // The categories partition the failures — each counted once, none twice.
+      expect(categories.reduce((sum, row) => sum + row.failures, 0)).toBe(6);
+      for (const row of categories) {
+        expect(row.signatures).toBeGreaterThan(0);
+        expect(row.tests).toBeGreaterThan(0);
+        expect(row.lastSeenAt).toBeInstanceOf(Date);
+      }
+    });
+
+    it("counts signatures per category, so 'one problem' is distinguishable from 'many'", async () => {
+      // `broken` gives assertion 4 failures from a single signature; that ratio is the whole
+      // reason the column exists, and a count(*) mistake would make it equal the failure count.
+      const categories = await failureCategories(sql, { orgId, days: 1 });
+      const assertion = categories.find((row) => row.category === "assertion");
+      expect(assertion?.failures).toBe(4);
+      expect(assertion?.signatures).toBe(1);
+      expect(assertion?.tests).toBe(1);
+    });
+
+    it("records a triage per signature, newest row winning", async () => {
+      const modes = await testFailureModes(sql, { orgId, testCaseId: await idOf(BROKEN) });
+      const signatureHex = modes[0]?.signatureHex;
+      expect(signatureHex).toBeTruthy();
+
+      const first = await addFailureTriage(sql, {
+        orgId,
+        projectId,
+        signatureHex: signatureHex as string,
+        signatureVersion: 2,
+        category: "investigating",
+        title: "AssertionError",
+        note: "looking at it",
+        userId: null,
+      });
+      expect(first?.category).toBe("investigating");
+
+      // A correction is a new row, never an update — the earlier claim is what someone acted on.
+      await addFailureTriage(sql, {
+        orgId,
+        projectId,
+        signatureHex: signatureHex as string,
+        signatureVersion: 2,
+        category: "product-bug",
+        title: "AssertionError",
+        userId: null,
+      });
+
+      const current = await latestFailureTriage(sql, {
+        orgId,
+        signatureHexes: [signatureHex as string],
+      });
+      expect(current.get(signatureHex as string)?.category).toBe("product-bug");
+
+      const history = await failureTriageHistory(sql, {
+        orgId,
+        signatureHex: signatureHex as string,
+      });
+      expect(history.map((row) => row.category)).toEqual(["product-bug", "investigating"]);
+      // Newest first, so the current answer is history[0] and nothing was overwritten.
+      expect(history[0]?.createdAt.getTime()).toBeGreaterThanOrEqual(
+        history[1]?.createdAt.getTime() ?? 0,
+      );
+    });
+
+    it("never attaches a triage to another tenant's project", async () => {
+      const modes = await testFailureModes(sql, { orgId, testCaseId: await idOf(FLAKY) });
+      const signatureHex = modes[0]?.signatureHex ?? null;
+      if (signatureHex === null) return;
+      const recorded = await addFailureTriage(sql, {
+        orgId: "00000000-0000-0000-0000-000000000000",
+        projectId,
+        signatureHex,
+        signatureVersion: 2,
+        category: "infra",
+        title: "x",
+        userId: null,
+      });
+      // The project belongs to another org, so the INSERT ... SELECT matches no row.
+      expect(recorded).toBeNull();
+    });
+
+    it("reports the untriaged remainder rather than omitting it", async () => {
+      /*
+       * A breakdown that listed only reviewed causes would read as a complete account of the
+       * failures. The fixture has 3 signatures and only one has been triaged by the test above,
+       * so `untriaged` has to be present and carry the rest.
+       */
+      const breakdown = await failureTriageBreakdown(sql, { orgId, days: 1 });
+      const byName = new Map(breakdown.map((row) => [row.category, row]));
+      expect(byName.has("untriaged")).toBe(true);
+      expect(byName.get("product-bug")?.signatures).toBe(1);
+      expect(byName.get("product-bug")?.failures).toBe(4);
+      // Every failure is accounted for, triaged or not.
+      expect(breakdown.reduce((sum, row) => sum + row.failures, 0)).toBe(6);
     });
 
     it("ranks pass rate per branch", async () => {

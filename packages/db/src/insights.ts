@@ -1,4 +1,5 @@
 import { outputLimits } from "@testcenter/core";
+import type { FailureCategory } from "@testcenter/core";
 import type { Sql } from "./client.js";
 import type { RunStatus } from "./schema.js";
 
@@ -625,6 +626,401 @@ export async function listRunsForExport(
 
   const total = rows[0]?.matchedTotal ?? 0;
   return { runs: rows, total, truncated: total > rows.length };
+}
+
+export interface FailureSignatureGroup {
+  signatureHex: string | null;
+  /** Best available label: the error class, or a message excerpt when the class is generic. */
+  failureType: string | null;
+  sampleMessage: string | null;
+  failures: number;
+  tests: number;
+  runs: number;
+  projectKey: string;
+  lastSeenAt: Date;
+  /** A result to open, so a cluster is one click from the evidence behind it. */
+  sampleTestCaseId: number;
+}
+
+export interface FailureSignatureSummary {
+  groups: FailureSignatureGroup[];
+  /** Every failure in the window, so a listed group's share means something. */
+  totalFailures: number;
+  distinctSignatures: number;
+  /** Failures with no signature at all — no type, no message, no frames to cluster on. */
+  unsignatured: number;
+}
+
+/**
+ * Failures grouped by signature, across the whole scope rather than one test.
+ *
+ * `testFailureModes` answers this for a single test. This is the organisation-wide version, and
+ * the question it answers is the one people actually arrive with: "we have 267 failures — how
+ * many *problems* is that?" A count of failures cannot distinguish one broken dependency from
+ * forty unrelated bugs, and those need completely different responses.
+ *
+ * Grouped on the signature computed at ingest, so this is only as good as that clustering. It
+ * is worth knowing that a report whose `failure.message` carries the scenario title rather than
+ * the error will cluster ~1:1 no matter what this query does — that is what
+ * FAILURE_SIGNATURE_VERSION 2 addressed, and why rows written before it need the backfill.
+ *
+ * Reads `test_results` directly rather than a rollup: there is no per-signature aggregate, and
+ * adding one would need maintaining at write time for a view nobody has asked to be instant.
+ * The window keeps it bounded.
+ */
+export async function failureSignatures(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; days?: number; limit?: number },
+): Promise<FailureSignatureSummary> {
+  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
+  const limit = Math.min(Math.max(input.limit ?? 20, 1), 50);
+
+  const rows = await sql<
+    {
+      signatureHex: string | null;
+      failureType: string | null;
+      sampleMessage: string | null;
+      failures: number;
+      tests: number;
+      runs: number;
+      projectKey: string;
+      lastSeenAt: Date;
+      sampleTestCaseId: number;
+    }[]
+  >`
+    SELECT
+      encode(r.failure_signature, 'hex')                            AS "signatureHex",
+      (array_agg(r.failure_type ORDER BY r.started_at DESC))[1]      AS "failureType",
+      (array_agg(r.failure_message ORDER BY r.started_at DESC))[1]   AS "sampleMessage",
+      count(*)::int                                                  AS failures,
+      count(DISTINCT r.test_case_id)::int                            AS tests,
+      count(DISTINCT r.run_id)::int                                  AS runs,
+      (array_agg(p.key ORDER BY r.started_at DESC))[1]               AS "projectKey",
+      max(r.started_at)                                              AS "lastSeenAt",
+      (array_agg(r.test_case_id ORDER BY r.started_at DESC))[1]      AS "sampleTestCaseId"
+    FROM test_results r
+    JOIN projects p ON p.id = r.project_id AND p.org_id = ${input.orgId}
+    WHERE r.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+      AND r.status IN ('failed', 'error')
+      AND r.failure_signature IS NOT NULL
+      AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+    GROUP BY r.failure_signature
+    ORDER BY failures DESC, "lastSeenAt" DESC
+    LIMIT ${limit}
+  `;
+
+  const [totals] = await sql<{ total: string; signatures: string; unsignatured: string }[]>`
+    SELECT
+      count(*)::text                                                        AS total,
+      count(DISTINCT r.failure_signature)::text                             AS signatures,
+      count(*) FILTER (WHERE r.failure_signature IS NULL)::text             AS unsignatured
+    FROM test_results r
+    WHERE r.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+      AND r.status IN ('failed', 'error')
+      AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+  `;
+
+  // count(*) is bigint, which postgres.js returns as a string — ::text then Number() keeps that
+  // explicit rather than relying on a cast that a later edit could drop.
+  return {
+    groups: rows,
+    totalFailures: Number(totals?.total ?? 0),
+    distinctSignatures: Number(totals?.signatures ?? 0),
+    unsignatured: Number(totals?.unsignatured ?? 0),
+  };
+}
+
+/*
+ * The category vocabulary lives in `@testcenter/core` beside `RUN_VERDICT_LABELS`, so the SQL
+ * below and the labels the UI renders cannot drift into two different lists. The `CASE` in
+ * `failureCategories` is the only place that knows how a row maps onto it.
+ */
+
+export interface FailureCategoryGroup {
+  /**
+   * A category, or `"unclassified"` for rows written before extraction existed.
+   *
+   * The sentinel is in the type because the query really can return it — `COALESCE(category,
+   * 'unclassified')`. Declaring it as `FailureCategory` alone was a lie of exactly the kind this
+   * repo has been bitten by before: a type that describes the intent of a column rather than what
+   * the query hands back. TypeScript caught it the moment a consumer compared against the
+   * sentinel and was told the comparison was impossible.
+   */
+  category: FailureCategory | "unclassified";
+  failures: number;
+  tests: number;
+  signatures: number;
+  lastSeenAt: Date;
+}
+
+/**
+ * Failures by category.
+ *
+ * A GROUP BY, because the classifying happens at ingest now — `extractFailureIdentity` in
+ * `@testcenter/core`, stored on the row. This function used to be a ~120-line `CASE` over
+ * `failure_type`, `failure_message` and `stack_trace` with nested `regexp_replace` calls to strip
+ * the parts of reporter output that describe the test rather than the error. That version was
+ * duplicated (fingerprint.ts stripped the same preamble in TypeScript), untestable except by
+ * querying production-shaped data, and hosted in a template literal that silently ate backslash
+ * escapes, treated a backtick as end-of-string, and once reported "unterminated /* comment".
+ *
+ * Rows written before extraction existed have a NULL category. They are reported as
+ * `unclassified` rather than dropped: a chart that silently omitted them would understate the
+ * totals and read as a complete account. `pnpm --filter @testcenter/db backfill-identity` clears
+ * them.
+ */
+export async function failureCategories(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; days?: number },
+): Promise<FailureCategoryGroup[]> {
+  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
+
+  return sql<FailureCategoryGroup[]>`
+    SELECT
+      COALESCE(r.failure_category, 'unclassified') AS category,
+      count(*)::int                                AS failures,
+      count(DISTINCT r.test_case_id)::int          AS tests,
+      count(DISTINCT r.failure_signature)::int     AS signatures,
+      max(r.started_at)                            AS "lastSeenAt"
+    FROM test_results r
+    WHERE r.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+      AND r.status IN ('failed', 'error')
+      AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+    GROUP BY COALESCE(r.failure_category, 'unclassified')
+    ORDER BY failures DESC
+  `;
+}
+
+/**
+ * The failures a reader can act on, newest first, each with the error already extracted.
+ *
+ * Exists because the category tile answers "what kind" and nothing answers "which ones". The
+ * summary is the column that makes this readable: for a reporter that puts the test's identity in
+ * the failure message attribute — 83% of one real project — showing that attribute displayed a
+ * scenario title, and the actual error was only ever in the body.
+ */
+export async function recentFailureSummaries(
+  sql: Sql,
+  input: {
+    orgId: string;
+    projectId?: string | undefined;
+    days?: number;
+    category?: string | undefined;
+    limit?: number;
+  },
+): Promise<
+  {
+    summary: string;
+    failureClass: string | null;
+    category: string | null;
+    failures: number;
+    tests: number;
+    projectKey: string;
+    lastSeenAt: Date;
+    sampleTestCaseId: number;
+  }[]
+> {
+  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
+  const limit = Math.min(Math.max(input.limit ?? 20, 1), 50);
+
+  return sql`
+    SELECT
+      r.failure_summary                                              AS summary,
+      (array_agg(r.failure_class ORDER BY r.started_at DESC))[1]      AS "failureClass",
+      (array_agg(r.failure_category ORDER BY r.started_at DESC))[1]   AS category,
+      count(*)::int                                                   AS failures,
+      count(DISTINCT r.test_case_id)::int                             AS tests,
+      (array_agg(p.key ORDER BY r.started_at DESC))[1]                AS "projectKey",
+      max(r.started_at)                                               AS "lastSeenAt",
+      (array_agg(r.test_case_id ORDER BY r.started_at DESC))[1]       AS "sampleTestCaseId"
+    FROM test_results r
+    JOIN projects p ON p.id = r.project_id AND p.org_id = ${input.orgId}
+    WHERE r.org_id = ${input.orgId}
+      ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+      AND r.status IN ('failed', 'error')
+      AND r.failure_summary IS NOT NULL
+      AND r.failure_summary <> ''
+      ${input.category ? sql`AND r.failure_category = ${input.category}` : sql``}
+      AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+    -- Grouped on the extracted summary, which is a sentence somebody wrote rather than a hash,
+    -- so a row is legible without a lookup. Two different errors never share one.
+    GROUP BY r.failure_summary
+    ORDER BY failures DESC, "lastSeenAt" DESC
+    LIMIT ${limit}
+  `;
+}
+
+export interface FailureTriageRow {
+  id: string;
+  signatureHex: string;
+  category: string;
+  note: string | null;
+  title: string;
+  createdAt: Date;
+  authorName: string | null;
+  authorEmail: string | null;
+}
+
+/**
+ * The current triage for a set of signatures, newest row per signature.
+ *
+ * Batched over signatures rather than fetched per row, for the same reason `latestRunVerdicts`
+ * is: the callers are a list and a chart, and one query per item would be a query per row on a
+ * page that already draws hundreds.
+ *
+ * `DISTINCT ON` rather than a window function or a correlated subquery — it reads the index
+ * directly (`org_id, failure_signature, created_at DESC`) and stops at the first row of each
+ * group, which is exactly the shape of an append-only table's "current value" read.
+ */
+export async function latestFailureTriage(
+  sql: Sql,
+  input: { orgId: string; signatureHexes: readonly string[] },
+): Promise<Map<string, FailureTriageRow>> {
+  const bySignature = new Map<string, FailureTriageRow>();
+  if (input.signatureHexes.length === 0) return bySignature;
+
+  const rows = await sql<FailureTriageRow[]>`
+    SELECT DISTINCT ON (t.failure_signature)
+      t.id::text                          AS id,
+      encode(t.failure_signature, 'hex')  AS "signatureHex",
+      t.category,
+      t.note,
+      t.title,
+      t.created_at                        AS "createdAt",
+      u.name                              AS "authorName",
+      u.email                             AS "authorEmail"
+    FROM failure_triage t
+    LEFT JOIN users u ON u.id = t.created_by
+    WHERE t.org_id = ${input.orgId}
+      AND t.failure_signature = ANY(
+        SELECT decode(hex, 'hex') FROM unnest(${input.signatureHexes as string[]}::text[]) AS hex
+      )
+    ORDER BY t.failure_signature, t.created_at DESC
+  `;
+
+  for (const row of rows) bySignature.set(row.signatureHex, row);
+  return bySignature;
+}
+
+/** Every triage recorded for one signature, newest first — the audit trail behind the current one. */
+export async function failureTriageHistory(
+  sql: Sql,
+  input: { orgId: string; signatureHex: string },
+): Promise<FailureTriageRow[]> {
+  return sql<FailureTriageRow[]>`
+    SELECT
+      t.id::text                          AS id,
+      encode(t.failure_signature, 'hex')  AS "signatureHex",
+      t.category, t.note, t.title,
+      t.created_at                        AS "createdAt",
+      u.name AS "authorName", u.email AS "authorEmail"
+    FROM failure_triage t
+    LEFT JOIN users u ON u.id = t.created_by
+    WHERE t.org_id = ${input.orgId}
+      AND t.failure_signature = decode(${input.signatureHex}, 'hex')
+    ORDER BY t.created_at DESC
+  `;
+}
+
+/**
+ * Records a triage. Append-only — a correction is a new row, never an update.
+ *
+ * Scoped by org on the way in: the project is checked against the caller's organisation before
+ * the insert, so a project id from another tenant records nothing rather than attaching a
+ * judgement to someone else's failure. Same shape as `addRunVerdict`.
+ */
+export async function addFailureTriage(
+  sql: Sql,
+  input: {
+    orgId: string;
+    projectId: string;
+    signatureHex: string;
+    signatureVersion: number;
+    category: string;
+    note?: string | null;
+    title: string;
+    sampleMessage?: string | null;
+    userId: string | null;
+  },
+): Promise<FailureTriageRow | null> {
+  const inserted = await sql<{ id: string }[]>`
+    INSERT INTO failure_triage (
+      org_id, project_id, failure_signature, failure_signature_version,
+      category, note, title, sample_message, created_by
+    )
+    SELECT
+      ${input.orgId}, p.id, decode(${input.signatureHex}, 'hex'), ${input.signatureVersion},
+      ${input.category}, ${input.note ?? null}, ${input.title}, ${input.sampleMessage ?? null},
+      ${input.userId}
+    FROM projects p
+    WHERE p.id = ${input.projectId} AND p.org_id = ${input.orgId}
+    RETURNING id::text
+  `;
+  const id = inserted[0]?.id;
+  if (!id) return null;
+
+  const [row] = await sql<FailureTriageRow[]>`
+    SELECT
+      t.id::text AS id, encode(t.failure_signature,'hex') AS "signatureHex",
+      t.category, t.note, t.title, t.created_at AS "createdAt",
+      u.name AS "authorName", u.email AS "authorEmail"
+    FROM failure_triage t LEFT JOIN users u ON u.id = t.created_by
+    WHERE t.id = ${id}::uuid
+  `;
+  return row ?? null;
+}
+
+export interface FailureTriageBreakdown {
+  category: string;
+  /** Signatures carrying this triage. */
+  signatures: number;
+  /** Failures in the window under those signatures — the weight behind the judgement. */
+  failures: number;
+}
+
+/**
+ * Failures grouped by their *triaged* category, for the dashboard toggle.
+ *
+ * The untriaged remainder is returned as a `"untriaged"` row rather than omitted. Leaving it out
+ * would make the chart read as a complete account of the failures when it is only the reviewed
+ * slice — the same reason the verdict badge renders a TODO state instead of nothing.
+ */
+export async function failureTriageBreakdown(
+  sql: Sql,
+  input: { orgId: string; projectId?: string | undefined; days?: number },
+): Promise<FailureTriageBreakdown[]> {
+  const days = Math.min(Math.max(input.days ?? 30, 1), 365);
+
+  return sql<FailureTriageBreakdown[]>`
+    WITH failures AS (
+      SELECT r.failure_signature, count(*)::int AS failures
+      FROM test_results r
+      WHERE r.org_id = ${input.orgId}
+        ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+        AND r.status IN ('failed', 'error')
+        AND r.failure_signature IS NOT NULL
+        AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+      GROUP BY r.failure_signature
+    ),
+    current_triage AS (
+      SELECT DISTINCT ON (t.failure_signature) t.failure_signature, t.category
+      FROM failure_triage t
+      WHERE t.org_id = ${input.orgId}
+        ${input.projectId ? sql`AND t.project_id = ${input.projectId}` : sql``}
+      ORDER BY t.failure_signature, t.created_at DESC
+    )
+    SELECT
+      COALESCE(ct.category, 'untriaged')          AS category,
+      count(*)::int                               AS signatures,
+      COALESCE(sum(f.failures), 0)::int           AS failures
+    FROM failures f
+    LEFT JOIN current_triage ct ON ct.failure_signature = f.failure_signature
+    GROUP BY COALESCE(ct.category, 'untriaged')
+    ORDER BY failures DESC
+  `;
 }
 
 export interface SlowTest {

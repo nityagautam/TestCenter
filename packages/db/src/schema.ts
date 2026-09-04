@@ -379,6 +379,27 @@ export const testResults = pgTable(
     failureType: text("failure_type"),
     failureMessage: text("failure_message"),
     failureSignature: bytea("failure_signature"),
+    /**
+     * Which clustering algorithm produced `failureSignature`.
+     *
+     * Separate from `testCases.fingerprintVersion`, which versions test *identity*. This one
+     * versions a grouping key that nothing durable depends on, so it can move and be backfilled
+     * cheaply — see sql/0006. NULL means the row predates versioning.
+     */
+    failureSignatureVersion: smallint("failure_signature_version"),
+    /**
+     * What the failure is, extracted once at ingest by `extractFailureIdentity` — see sql/0008.
+     *
+     * Derived and recomputable, which is why it is versioned separately from both
+     * `fingerprintVersion` (test identity, expensive to change) and `failureSignatureVersion`
+     * (a grouping key). `failureSource` records which report field the error was found in, and
+     * exists to diagnose the reporter rather than the test.
+     */
+    failureClass: text("failure_class"),
+    failureSummary: text("failure_summary"),
+    failureCategory: text("failure_category"),
+    failureSource: text("failure_source"),
+    failureIdentityVersion: smallint("failure_identity_version"),
     stackTrace: text("stack_trace"),
     stdout: text("stdout"),
     stderr: text("stderr"),
@@ -391,6 +412,45 @@ export const testResults = pgTable(
     primaryKey({ columns: [table.id, table.startedAt] }),
     index("test_results_run_idx").on(table.runId, table.status),
     index("test_results_case_time_idx").on(table.testCaseId, table.startedAt.desc()),
+  ],
+);
+
+/**
+ * A human category attached to a failure signature — see sql/0007.
+ *
+ * Append-only: the newest row per `(orgId, failureSignature)` is the current answer and the
+ * earlier ones are the audit trail, exactly as `runVerdicts` works. `title` is stored rather
+ * than joined because `test_results` is retention-bound and a triage has to outlive the
+ * failures it describes.
+ */
+export const failureTriage = pgTable(
+  "failure_triage",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    failureSignature: bytea("failure_signature").notNull(),
+    failureSignatureVersion: smallint("failure_signature_version").notNull(),
+    category: text("category").notNull(),
+    note: text("note"),
+    title: text("title").notNull(),
+    sampleMessage: text("sample_message"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("failure_triage_lookup_idx").on(
+      table.orgId,
+      table.failureSignature,
+      table.createdAt.desc(),
+    ),
+    index("failure_triage_project_idx").on(table.orgId, table.projectId, table.createdAt.desc()),
   ],
 );
 

@@ -59,6 +59,15 @@ export const CAPABILITIES = {
    * raising it took no permission away from anyone.
    */
   "run:delete": "admin",
+  /**
+   * Categorising a failure *cause* — product bug, test bug, infra, flaky.
+   *
+   * Admin, on the same reasoning as `run:verdict` and arguably more so. A run verdict speaks for
+   * one run; this speaks for a signature, so it is inherited by every future occurrence of that
+   * cause, including in tests nobody has looked at yet. Labelling a real regression `known-issue`
+   * would quietly tell a whole team to stop looking at it. Reading it stays open to everyone.
+   */
+  "failure:triage": "admin",
   "project:create": "maintainer",
   "project:edit": "maintainer",
   /** Archive and restore. Reversible, so it sits with the other admin powers. */

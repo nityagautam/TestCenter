@@ -1,10 +1,20 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { RUN_VERDICT_LABELS, type RunVerdict } from "@testcenter/core";
+import {
+  FAILURE_CATEGORY_LABELS,
+  UNCLASSIFIED_FAILURE_LABEL,
+  FAILURE_TRIAGE_LABELS,
+  RUN_VERDICT_LABELS,
+  type FailureTriage,
+  type RunVerdict,
+} from "@testcenter/core";
 import {
   branchPassRates,
   dashboardWindowSummary,
+  failureCategories,
+  recentFailureSummaries,
   failureConcentration,
+  failureTriageBreakdown,
   flakeDistribution,
   flakyLeaderboard,
   latestRunVerdicts,
@@ -63,10 +73,16 @@ export default async function OrgDashboard({
     days?: string;
     volume?: string;
     rate?: string;
+    failures?: string;
   }>;
 }) {
   const { orgSlug } = await params;
-  const { days: daysParam, volume: volumeParam, rate: rateParam } = await searchParams;
+  const {
+    days: daysParam,
+    volume: volumeParam,
+    rate: rateParam,
+    failures: failuresParam,
+  } = await searchParams;
   const context = await requirePageContext(orgSlug);
   const { sql } = getServices();
 
@@ -85,6 +101,17 @@ export default async function OrgDashboard({
   // ChartToggle. Unknown values fall back to the default rather than erroring.
   const shareView = volumeParam === "share";
   const branchView = rateParam === "branch";
+  /*
+   * Two questions about the same failures, not two drawings of one.
+   *
+   * The derived view reads the error out of the report — mechanical, complete, available from
+   * the first upload. The triaged view reads what a person concluded about the *cause*, which is
+   * richer and covers only what has been reviewed. Neither subsumes the other, which is why this
+   * is a toggle rather than one chart preferring triage where it exists: silently mixing a
+   * mechanical category with a human one would put "Assertion" and "Product bug" in one list as
+   * though they were alternatives.
+   */
+  const triagedFailures = failuresParam === "triage";
 
   const [
     summary,
@@ -96,6 +123,8 @@ export default async function OrgDashboard({
     slowest,
     concentration,
     flakeBands,
+    failureGroups,
+    failureSummaries,
     activity,
     runPoints,
   ] = await Promise.all([
@@ -113,6 +142,22 @@ export default async function OrgDashboard({
     slowestTests(sql, { orgId, limit: 20 }),
     failureConcentration(sql, { orgId, limit: 20 }),
     flakeDistribution(sql, { orgId }),
+    /*
+     * Both windowed by the range control, unlike the two rollup-backed charts beside them.
+     *
+     * These read `test_results` directly because no per-signature or per-category aggregate
+     * exists, so they are the only charts in the failure row that answer "in the selected
+     * window" rather than "in the last 30 days". The footnotes say which, because a reader
+     * comparing the three would otherwise assume they share a period.
+     */
+    // Only the selected view is queried: the other would be fetched, discarded, and paid for on
+    // every dashboard load. Same reason `branchPassRates` is conditional.
+    triagedFailures
+      ? failureTriageBreakdown(sql, { orgId, days })
+      : failureCategories(sql, { orgId, days }),
+    // The errors themselves, readable because they were extracted at ingest rather than being
+    // whatever the reporter happened to put in the message attribute.
+    recentFailureSummaries(sql, { orgId, days, limit: 20 }),
     runActivity(sql, { orgId, days, timeZone: timeZone.zone }),
     runSeries(sql, { orgId, days, timeZone: timeZone.zone }),
   ]);
@@ -140,6 +185,7 @@ export default async function OrgDashboard({
     if (daysParam) next.set("days", String(days));
     if (volumeParam) next.set("volume", volumeParam);
     if (rateParam) next.set("rate", rateParam);
+    if (failuresParam) next.set("failures", failuresParam);
     for (const [key, value] of Object.entries(changes)) {
       if (value === null) next.delete(key);
       else next.set(key, value);
@@ -174,6 +220,18 @@ export default async function OrgDashboard({
       </main>
     );
   }
+
+  /*
+   * Narrowed once here rather than at each use. `Promise.all` gives back a union of the two
+   * query shapes because the call is conditional, and asserting the shape at three call sites
+   * inside JSX would be three chances to pick the wrong one.
+   */
+  const triageGroups = triagedFailures
+    ? (failureGroups as Awaited<ReturnType<typeof failureTriageBreakdown>>)
+    : [];
+  const categoryGroups = triagedFailures
+    ? []
+    : (failureGroups as Awaited<ReturnType<typeof failureCategories>>);
 
   const hasHistory = runPoints.length > 0;
   // Newest first, so the head of the list the "Recent runs" card already fetched is also
@@ -389,9 +447,166 @@ export default async function OrgDashboard({
             </Card>
           </div>
 
-          {/* Second row: current state rather than trend. These answer "where is the time
-            going" and "one bad test or systemic", which no time series shows. */}
+          {/*
+           * The failure row: three views of the same failures, coarse to fine.
+           *
+           * "Which tests" (concentration), "how many distinct problems" (signature) and "whose
+           * problem" (category). They belong adjacent because triage reads them in that order —
+           * a long flat concentration list plus two signatures means one bug hitting forty
+           * tests, and the category says whether to hand it to a developer or to whoever owns
+           * the environment. Split apart, each answers a third of the question.
+           */}
+          {/*
+           * One row, three views of the same window's health: which tests fail, what kind of
+           * failure, and how unstable the suite is overall. They are read left to right — a
+           * long flat concentration list beside a category of mostly Auth says one environment
+           * problem hitting many tests, which neither chart states on its own.
+           */}
           <div className="mb-5 grid gap-5 lg:grid-cols-3">
+            <Card className="p-4">
+              <RankedBars
+                title="Failure concentration"
+                maxVisible={5}
+                color="var(--color-status-failed)"
+                bars={concentration.tests.map((test) => ({
+                  label: test.name,
+                  scope: test.projectKey,
+                  value: test.failures30d,
+                  display: `${test.failures30d} · ${Math.round(test.share)}%`,
+                  href: `/o/${orgSlug}/tests/${test.id}`,
+                }))}
+                emptyMessage="No failures in the retained history."
+                footnote={
+                  concentration.totalFailures > 0
+                    ? `${concentration.failingTests} test${concentration.failingTests === 1 ? "" : "s"} produced ${formatInteger(concentration.totalFailures)} failures over 30 days. A short bar list means one bad test; a long flat one means something systemic.`
+                    : undefined
+                }
+              />
+            </Card>
+            <Card className="p-4">
+              <RankedBars
+                title={triagedFailures ? "Failures by triage" : "Failures by category"}
+                /*
+                 * No `maxVisible`, unlike the rankings beside it — and that is the difference
+                 * between the two kinds of row-based tile here.
+                 *
+                 * `Failure concentration` and `Slowest tests` rank an unbounded population, so
+                 * the first five answer the question and the tail is a scroll away. This is a
+                 * bounded taxonomy: at most nine rows, and the *whole set* is the information —
+                 * "80 timeouts" only means something beside the other categories it is being
+                 * compared against. Capping it at five hid three categories behind a scrollbar
+                 * that, on macOS, is invisible until you scroll. `Flake score distribution` is
+                 * the precedent: same shape, also uncapped.
+                 */
+                color="var(--color-status-failed)"
+                /*
+                 * One flat hue rather than a colour per category, deliberately. Eight categories
+                 * cannot be coloured from three validated categorical tokens, and bar length
+                 * already carries the magnitude — so the colour would be decoration competing
+                 * with the encoding. Every row is direct-labelled, which is also what keeps this
+                 * readable without colour at all.
+                 */
+                bars={
+                  triagedFailures
+                    ? triageGroups.map((group) => ({
+                        label:
+                          group.category === "untriaged"
+                            ? "Not yet triaged"
+                            : (FAILURE_TRIAGE_LABELS[group.category as FailureTriage] ??
+                              group.category),
+                        scope: `${group.signatures} cause${group.signatures === 1 ? "" : "s"}`,
+                        value: group.failures,
+                        display: formatInteger(group.failures),
+                      }))
+                    : categoryGroups.map((group) => ({
+                        label:
+                          group.category === "unclassified"
+                            ? UNCLASSIFIED_FAILURE_LABEL
+                            : (FAILURE_CATEGORY_LABELS[group.category] ?? group.category),
+                        scope: `${group.signatures} signature${group.signatures === 1 ? "" : "s"} · ${group.tests} test${group.tests === 1 ? "" : "s"}`,
+                        value: group.failures,
+                        display: formatInteger(group.failures),
+                      }))
+                }
+                emptyMessage="No failures in this period."
+                footnote={
+                  triagedFailures
+                    ? "What a person concluded about each failure cause, inherited by every later occurrence. “Not yet triaged” is shown rather than omitted, so the chart cannot be mistaken for a complete account of the failures."
+                    : "Read at ingest from whichever field the report carried the error in — the class, the message, or the failure body — so every failure is categorised, not only the reviewed ones. “No error reported” means the report named the test but not the failure; “Unclassified” means the row predates extraction and a backfill will clear it."
+                }
+                action={
+                  <ChartToggle
+                    label="Failure category view"
+                    options={[
+                      {
+                        label: "from report",
+                        href: viewHref({ failures: null }),
+                        active: !triagedFailures,
+                      },
+                      {
+                        label: "triaged",
+                        href: viewHref({ failures: "triage" }),
+                        active: triagedFailures,
+                      },
+                    ]}
+                  />
+                }
+              />
+            </Card>
+            <Card className="p-4">
+              <RankedBars
+                title="Flake score distribution"
+                bars={flakeBands.map((band) => ({
+                  label: band.label,
+                  value: band.tests,
+                  display: formatInteger(band.tests),
+                }))}
+                emptyMessage="No tests yet."
+                footnote="The dashboard counts a test as flaky at 20 and above."
+              />
+            </Card>
+          </div>
+
+          <div className="mb-5">
+            <Card className="p-4">
+              <RankedBars
+                title="Top failures"
+                maxVisible={5}
+                color="var(--color-status-failed)"
+                /*
+                 * Grouped on the extracted summary — a sentence somebody wrote — rather than on
+                 * the failure signature, which is a sha256 and made an unreadable label. This is
+                 * the tile the signature one was trying to be.
+                 *
+                 * Full width because these are error messages, and a third of a row truncates
+                 * them to the shared prefix, which is the part that does not tell them apart.
+                 */
+                bars={failureSummaries.map((row) => ({
+                  label: row.summary,
+                  scope: [
+                    row.failureClass || null,
+                    row.projectKey,
+                    `${row.tests} test${row.tests === 1 ? "" : "s"}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · "),
+                  value: row.failures,
+                  display: formatInteger(row.failures),
+                  href: `/o/${orgSlug}/tests/${row.sampleTestCaseId}`,
+                }))}
+                emptyMessage="No failures in this period."
+                footnote="The error itself, read from whichever field the report put it in — the class, the message, or the failure body. Grouped by message, so one root cause hitting forty tests is one row."
+              />
+            </Card>
+          </div>
+
+          {/*
+           * Slowest tests takes the full width on its own, because its labels need it.
+           * These names are full scenario titles — "SearchNReco Extension - Zone Serviceability
+           * › Test all Product pages for zone serviceability…" — and at a third of the row they
+           * truncate to the shared prefix, which is the one part that does not tell them apart.
+           */}
+          <div className="mb-5">
             <Card className="p-4">
               <RankedBars
                 title="Slowest tests (p95)"
@@ -417,38 +632,6 @@ export default async function OrgDashboard({
                 }))}
                 emptyMessage="No duration data yet."
                 footnote="p95, not average — a test that is usually fast and occasionally slow is the one worth finding."
-              />
-            </Card>
-            <Card className="p-4">
-              <RankedBars
-                title="Failure concentration"
-                maxVisible={5}
-                color="var(--color-status-failed)"
-                bars={concentration.tests.map((test) => ({
-                  label: test.name,
-                  scope: test.projectKey,
-                  value: test.failures30d,
-                  display: `${test.failures30d} · ${Math.round(test.share)}%`,
-                  href: `/o/${orgSlug}/tests/${test.id}`,
-                }))}
-                emptyMessage="No failures in the retained history."
-                footnote={
-                  concentration.totalFailures > 0
-                    ? `${concentration.failingTests} test${concentration.failingTests === 1 ? "" : "s"} produced ${formatInteger(concentration.totalFailures)} failures. A short bar list means one bad test; a long flat one means something systemic.`
-                    : undefined
-                }
-              />
-            </Card>
-            <Card className="p-4">
-              <RankedBars
-                title="Flake score distribution"
-                bars={flakeBands.map((band) => ({
-                  label: band.label,
-                  value: band.tests,
-                  display: formatInteger(band.tests),
-                }))}
-                emptyMessage="No tests yet."
-                footnote="The dashboard counts a test as flaky at 20 and above."
               />
             </Card>
           </div>

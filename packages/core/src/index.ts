@@ -1,6 +1,7 @@
 export * from "./canonical.js";
 export * from "./reports.js";
 export * from "./tags.js";
+export * from "./failure-identity.js";
 export * from "./fingerprint.js";
 export * from "./env.js";
 export * from "./limits.js";

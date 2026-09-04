@@ -3,6 +3,8 @@ import {
   computeFailureSignature,
   computeFingerprint,
   emptyTotals,
+  extractFailureIdentity,
+  FAILURE_IDENTITY_VERSION,
   isRetryFlaky,
   type CanonicalTestResult,
   type RunTotals,
@@ -198,6 +200,17 @@ export async function persistResultBatch(
         })
       : null;
 
+    // Only for a result that actually failed: a pass has no failure to characterise, and
+    // storing 'no-detail' against every green test would make the category counts meaningless.
+    const identity =
+      result.failure && (result.status === "failed" || result.status === "error")
+        ? extractFailureIdentity({
+            type: result.failure.type,
+            message: result.failure.message,
+            stackTrace: result.failure.stackTrace,
+          })
+        : null;
+
     return {
       org_id: input.orgId,
       project_id: input.projectId,
@@ -210,6 +223,22 @@ export async function persistResultBatch(
       failure_type: result.failure?.type ?? null,
       failure_message: result.failure?.message ?? null,
       failure_signature: signature?.digest ?? null,
+      // Recorded so a later algorithm change can find the rows it has not visited yet.
+      failure_signature_version: signature?.version ?? null,
+      /*
+       * Extracted here rather than derived on read.
+       *
+       * The read path used to classify with a SQL CASE over these same three fields, which was
+       * duplicated, untestable and hosted in a template literal that ate its own escapes. Doing
+       * it once means the dashboard groups on a column and the UI can *show* the error — 83% of
+       * one project's errors arrive in the <failure> body and never in the message attribute, so
+       * displaying the message attribute showed a scenario title.
+       */
+      failure_class: identity?.errorClass ?? null,
+      failure_summary: identity?.summary ?? null,
+      failure_category: identity?.category ?? null,
+      failure_source: identity?.source ?? null,
+      failure_identity_version: identity ? FAILURE_IDENTITY_VERSION : null,
       stack_trace: result.failure?.stackTrace ?? null,
       stdout: result.stdout ?? null,
       stderr: result.stderr ?? null,
@@ -236,6 +265,12 @@ export async function persistResultBatch(
         "failure_type",
         "failure_message",
         "failure_signature",
+        "failure_signature_version",
+        "failure_class",
+        "failure_summary",
+        "failure_category",
+        "failure_source",
+        "failure_identity_version",
         "stack_trace",
         "stdout",
         "stderr",

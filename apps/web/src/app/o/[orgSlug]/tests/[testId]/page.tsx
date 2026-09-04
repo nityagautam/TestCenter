@@ -6,6 +6,7 @@ import {
   testDurationHistory,
   testExecutionDetails,
   testExecutions,
+  latestFailureTriage,
   testFailureModes,
 } from "@testcenter/db";
 import { HistoryStrip } from "@/components/charts/history-strip";
@@ -22,6 +23,7 @@ import {
   shortSha,
 } from "@/lib/format";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { FailureTriageControl } from "@/components/failure-triage";
 import { getServices } from "@/lib/services";
 import { viewerTimeZone } from "@/lib/timezone";
 import { can, requirePageContext } from "@/lib/viewer";
@@ -83,6 +85,19 @@ export default async function TestDetailPage({
     }),
     testDurationHistory(sql, { orgId: context.org.id, testCaseId: numericId, limit: 40 }),
   ]);
+
+  /*
+   * Batched after the modes, which is where the signatures come from.
+   *
+   * One query for the whole list rather than one per row — the same reason the dashboards batch
+   * `latestRunVerdicts` across both of its consumers.
+   */
+  const triage = await latestFailureTriage(sql, {
+    orgId: context.org.id,
+    signatureHexes: failureModes
+      .map((failureMode) => failureMode.signatureHex)
+      .filter((hex): hex is string => hex !== null),
+  });
 
   const failureCount = executions.filter(
     (execution) => execution.status === "failed" || execution.status === "error",
@@ -293,6 +308,32 @@ export default async function TestDetailPage({
                         first {formatRelativeTime(failureMode.firstSeenAt)} · last{" "}
                         {formatRelativeTime(failureMode.lastSeenAt)}
                       </p>
+                      {/*
+                       * Only for a mode that has a signature. A failure with no type, message or
+                       * frames has nothing to cluster on, so there is no cause to attach a
+                       * category to — and a control that cannot be keyed to anything would
+                       * silently apply to the wrong rows.
+                       */}
+                      {failureMode.signatureHex ? (
+                        <FailureTriageControl
+                          orgSlug={orgSlug}
+                          projectId={test.projectId}
+                          signatureHex={failureMode.signatureHex}
+                          title={
+                            failureMode.failureType ??
+                            (failureMode.sampleMessage ?? "Failure").slice(0, 80)
+                          }
+                          sampleMessage={failureMode.sampleMessage}
+                          current={triage.get(failureMode.signatureHex)?.category ?? null}
+                          currentNote={triage.get(failureMode.signatureHex)?.note ?? null}
+                          author={
+                            triage.get(failureMode.signatureHex)?.authorName ??
+                            triage.get(failureMode.signatureHex)?.authorEmail ??
+                            null
+                          }
+                          canTriage={can(context, "failure:triage")}
+                        />
+                      ) : null}
                     </div>
                   </div>
                 </li>

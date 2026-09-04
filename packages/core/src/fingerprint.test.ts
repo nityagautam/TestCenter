@@ -6,6 +6,8 @@ import {
   normalizeFailureMessage,
   normalizeSuitePath,
   normalizeTestName,
+  FAILURE_SIGNATURE_VERSION,
+  FINGERPRINT_VERSION,
 } from "./fingerprint.js";
 
 const PROJECT = "11111111-1111-4111-8111-111111111111";
@@ -195,6 +197,93 @@ describe("failure signatures", () => {
       stackTrace: "at check (/repo/src/ui/form.ts:9:1)",
     });
     expect(assertion?.hex).not.toBe(timeout?.hex);
+  });
+
+  it("ignores the reporter preamble, so one error under two scenario titles clusters once", () => {
+    /*
+     * The regression this locks down cost real clustering. Playwright and playwright-bdd write
+     * `<spec>:<line>:<col> › <full scenario title>` ahead of the actual error, and those titles
+     * are unique by construction — they carry cluster names, case numbers and data filenames.
+     * Hashing them gave every failure its own signature: measured on a real suite, 832 failures
+     * produced 631 signatures before this and 186 after.
+     */
+    const error =
+      "AuthError: fpInstall set no cookies (status 403). Check that extension abc is installed.";
+    const first = computeFailureSignature(PROJECT, {
+      type: "Error",
+      message: `BulkCollection.feature.spec.js:108:5 › Negative Test for bulk collection with file "SWADESHUAT" of case no "3"\n${error}`,
+    });
+    const second = computeFailureSignature(PROJECT, {
+      type: "Error",
+      message: `BulkMOQ.feature.spec.js:117:5 › Positive Test for bulk MOQ export on cluster "TIRASIT" of case no "9"\n${error}`,
+    });
+    expect(first?.hex).toBe(second?.hex);
+  });
+
+  it("still separates two different errors that share one scenario title", () => {
+    // The other direction: stripping the preamble must not make the signature blind to the
+    // error itself, which is what "hash only the first line" would risk if it were too greedy.
+    const title = "BulkCollection.feature.spec.js:108:5 › Negative Test for bulk collection";
+    const auth = computeFailureSignature(PROJECT, {
+      type: "Error",
+      message: `${title}\nAuthError: fpInstall set no cookies`,
+    });
+    const timeout = computeFailureSignature(PROJECT, {
+      type: "Error",
+      message: `${title}\nTimeoutError: waited 30000ms for response`,
+    });
+    expect(auth?.hex).not.toBe(timeout?.hex);
+  });
+
+  it("drops the source excerpt Playwright appends after the error", () => {
+    // The code frame renders the assertion, so an unrelated edit that shifts line numbers or
+    // reformats the throw would otherwise re-key every failure from that site.
+    const bare = computeFailureSignature(PROJECT, {
+      type: "Error",
+      message: "AuthError: no cookies",
+    });
+    const framed = computeFailureSignature(PROJECT, {
+      type: "Error",
+      message:
+        'AuthError: no cookies\n   at ../../src/pom/api/JCPAuth.ts:387\n\n  385 |   const c = parse(r);\n> 387 |     throw new AuthError("no cookies");\n      |           ^\n',
+    });
+    expect(framed?.hex).toBe(bare?.hex);
+  });
+
+  it("records the clustering version, separately from the fingerprint version", () => {
+    /*
+     * Two versions on purpose. FINGERPRINT_VERSION covers test *identity* — bumping it detaches
+     * flake scores, quarantine and ownership. This one covers a grouping key with nothing durable
+     * hanging off it, so it can move and be backfilled independently. Conflating them would make
+     * a cheap clustering fix as expensive as an identity migration.
+     */
+    const signature = computeFailureSignature(PROJECT, {
+      type: "AssertionError",
+      message: "expected 1 to equal 2",
+    });
+    expect(signature?.version).toBe(FAILURE_SIGNATURE_VERSION);
+    expect(FAILURE_SIGNATURE_VERSION).not.toBe(FINGERPRINT_VERSION);
+    // The version is hashed in, so a v1 and a v2 signature for one failure cannot collide.
+    expect(signature?.canonicalForm.startsWith(`f${FAILURE_SIGNATURE_VERSION}`)).toBe(true);
+  });
+
+  it("leaves test identity untouched — the preamble strip is failure-path only", () => {
+    /*
+     * The guarantee that made this change safe to ship without a stop-the-world rebuild. If
+     * `stripReportPreamble` ever leaks into normalizeTestName or normalizeParameters, every test
+     * becomes a new test and all history detaches. This asserts the fingerprint of a test whose
+     * name looks exactly like a preamble is unchanged by the failure-path work.
+     */
+    const looks_like_preamble =
+      'BulkCollection.feature.spec.js:108:5 › Negative Test for case no "3"';
+    const fingerprint = computeFingerprint({
+      projectId: PROJECT,
+      name: looks_like_preamble,
+      suite: "features/a.feature",
+    });
+    expect(fingerprint.version).toBe(FINGERPRINT_VERSION);
+    // Same name, same identity — and specifically NOT collapsed to the post-preamble remainder.
+    expect(normalizeTestName(looks_like_preamble)).toContain("BulkCollection.feature.spec.js");
   });
 
   it("returns null when there is nothing to cluster on", () => {

@@ -25,7 +25,9 @@
     "seed-test-org": "tsx scripts/seed-test-org.ts",
     "seed-users": "tsx scripts/seed-users.ts",
     "remove-org": "tsx scripts/remove-org.ts",
-    "seed-scenarios": "tsx scripts/seed-scenarios.ts"
+    "seed-scenarios": "tsx scripts/seed-scenarios.ts",
+    "backfill-signatures": "tsx scripts/backfill-failure-signatures.ts",
+    "backfill-identity": "tsx scripts/backfill-failure-identity.ts"
   },
   "dependencies": {
     "@testcenter/core": "workspace:*",

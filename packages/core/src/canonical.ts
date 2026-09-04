@@ -155,6 +155,94 @@ export const MAX_VERDICT_NOTE_LENGTH = 500;
 export const runVerdictSchema = z.enum(RUN_VERDICTS);
 
 /** Human labels, so the UI and any future export agree on wording. */
+/**
+ * How a failure is categorised from the report itself, without asking anyone.
+ *
+ * Distinct from `RUN_VERDICTS`, which is a human judgement about a whole *run*. This is a
+ * mechanical reading of one *failure*: derived from the error type and message, so every failure
+ * carries one from the moment it is ingested rather than only the reviewed ones. The two answer
+ * different questions and are deliberately not merged — "somebody decided this run was infra" is
+ * not the same claim as "this error says ECONNREFUSED".
+ *
+ * Ordered as the classifier tries them, first match winning. `auth` precedes `infra` because a
+ * 401 is a specific, actionable case of "the environment said no", and calling it generic infra
+ * sends someone to look at the wrong thing. The classifier itself is SQL — see
+ * `failureCategories` — because it aggregates over more rows than are worth shipping to the app.
+ */
+export const FAILURE_CATEGORIES = [
+  "assertion",
+  "code-error",
+  "timeout",
+  "network",
+  "auth",
+  "element",
+  "data",
+  "no-detail",
+  "other",
+] as const;
+export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
+
+export const FAILURE_CATEGORY_LABELS: Record<FailureCategory, string> = {
+  /** The test looked, and what it found differed from what it expected. A real signal. */
+  assertion: "Assertion failed",
+  /**
+   * Something threw where nothing was meant to — TypeError, NullPointerException, KeyError.
+   *
+   * Kept apart from `assertion` because the two mean opposite things about the test. An
+   * assertion failure is the test working: it checked something and the answer was wrong. A code
+   * error is the test (or the product) falling over before it could check anything, so the
+   * result is not "the feature is broken" but "we do not know". Folding them together — which a
+   * generic "Error" bucket does — hides that distinction, and it is the one that decides whether
+   * a developer reads the diff or the stack.
+   */
+  "code-error": "Code exception",
+  timeout: "Timeout",
+  network: "Network / infrastructure",
+  auth: "Auth / permission",
+  element: "Element / selector",
+  data: "Data / schema",
+  /**
+   * Not a synonym for "other", and the difference is the point.
+   *
+   * The report named the test but not the failure — some reporters write only the spec path and
+   * scenario title when they cannot extract an error. That is a gap in what CI sent, fixable
+   * upstream, whereas "other" is a gap in these rules. Showing them as one bucket would hide
+   * which of the two a reader can act on.
+   */
+  "no-detail": "No error reported",
+  other: "Other",
+};
+
+/**
+ * Label for the sentinel `failureCategories` returns for rows written before extraction existed.
+ *
+ * Not a member of `FAILURE_CATEGORIES`, because it is not a kind of failure — it is a kind of
+ * *row*. Keeping it out of the union means no consumer can accidentally treat it as a category a
+ * classifier could produce, while the dashboards still have something to render.
+ */
+export const UNCLASSIFIED_FAILURE_LABEL = "Unclassified (not yet extracted)";
+
+export const FAILURE_TRIAGES = [
+  "product-bug",
+  "test-bug",
+  "infra",
+  "flaky",
+  "known-issue",
+  "investigating",
+] as const;
+export type FailureTriage = (typeof FAILURE_TRIAGES)[number];
+
+export const FAILURE_TRIAGE_LABELS: Record<FailureTriage, string> = {
+  "product-bug": "Product bug",
+  "test-bug": "Test bug",
+  infra: "Infrastructure",
+  flaky: "Flaky",
+  "known-issue": "Known issue",
+  investigating: "Investigating",
+};
+
+export const failureTriageSchema = z.enum(FAILURE_TRIAGES);
+
 export const RUN_VERDICT_LABELS: Record<RunVerdict, string> = {
   pass: "Pass",
   "product-bug": "Product bug",
