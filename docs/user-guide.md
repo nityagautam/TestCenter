@@ -421,6 +421,52 @@ makes most flake dashboards useless. In the seeded data `test_case_7` fails 76 t
 of 89 runs and appears only in "most-failing"; the flaky list holds tests that pass
 *inconsistently*.
 
+**Failures by category** sorts every failure into a standard kind — assertion failed, code
+exception, timeout, network, auth, element, data — read from the error class in the report. It
+needs no triage, so it is populated from the first upload.
+
+The classification happens once, at ingest, and is stored on the result. It reads, in order:
+the error **class** (`AssertionError`, `java.net.SocketException`), then an actual-vs-expected
+pair, then keywords — across the `type`, the `message` **and the failure body**.
+
+All three, because reporters disagree about where the error goes. Playwright writes the *test's
+identity* into the `message` attribute and leaves the error in the **body**; Surefire and pytest
+put it in `type` and `message`. Measured on real projects, 83% of one project's errors were
+recoverable only from the body while another's were 99.7% in `type` — same rules, opposite
+reporters. A dashboard that reads one field works for one framework and silently fails for the
+next.
+
+The body is cleaned first: the location/step lines and the numbered source excerpt are removed,
+because the excerpt renders whatever the failing line *calls*, so leaving it in makes every
+failure look like whatever function happened to be on that line. A raw substring search over the
+uncleaned text filed 91% of one real suite as assertions, auth failures included.
+
+Each failure also records **which field its error came from**, which diagnoses the *reporter*
+rather than the test: all-`stack` means a reporter putting errors in the body, and `none` means
+it sent no error at all. That difference decides whether the fix is a rule here or a change
+upstream in CI.
+
+**Top failures** lists the errors themselves, grouped by the extracted message — so one root
+cause hitting forty tests is one row that reads *"SEO import job did not reach a terminal status
+before polling timed out — 50"* rather than forty rows of a scenario title.
+
+Two categories are worth knowing about:
+
+- **Code exception** is kept apart from **Assertion failed** because they mean opposite things. An
+  assertion failure is the test working — it checked something and the answer was wrong. A code
+  exception is the test or product falling over before it could check anything, so the result is
+  not "the feature is broken" but "we do not know". Both arrive as type `Error`.
+- **No error reported** means the report named the test but not the failure, which some reporters
+  do when they cannot extract an error. That is a gap in what CI sent — fixable upstream — rather
+  than a gap in the rules, which is what "Other" means.
+
+Toggle the card to **triaged** to see the same failures grouped by what a person concluded about
+each *cause* instead. Categorise a cause from any test's **Distinct failure modes** list; the
+category attaches to the failure signature, so every later occurrence inherits it — including in
+tests nobody has opened yet. Corrections are recorded rather than overwritten, so "who called
+this infra, and when" stays answerable. Needs admin. "Not yet triaged" is always shown, so the
+chart cannot be mistaken for a complete account of the failures.
+
 Hover any chart for its per-run tooltip. Use the day buttons to change the window — 1 / 7 /
 15 / 30 / 45 / 90 on both dashboards, with 7 days still the default. A project dashboard
 also states **when the suite last ran**, with a link to that run.
@@ -493,6 +539,21 @@ create a project. A token is displayed **once** — only its hash is stored.
 
 In GitHub Actions, use `if: always()` on the publish step. Without it the step is skipped
 exactly when tests fail, which is when you most want the results.
+
+That one-command endpoint accepts reports up to **32 MiB** by default, because it buffers the
+upload in the web process. A larger report returns HTTP 413 with `too_large_for_single_shot`,
+and the error body carries `limitBytes`, `actualBytes` and the alternative endpoint as fields —
+so a CI wrapper can branch on it rather than parsing the message:
+
+```bash
+# Raise the server-side ceiling (must stay <= MAX_ARTIFACT_BYTES)
+MAX_SINGLE_SHOT_BYTES=134217728
+```
+
+Raising it costs memory: peak RSS runs at roughly 7x the limit while a request is in flight, so
+budget for `concurrent uploads x limit x 7`. For reports that are routinely large, the answer is
+the three-step flow instead — `POST /api/v1/runs` returns presigned URLs and the bytes go
+straight from CI to object storage, bounded only by `MAX_ARTIFACT_BYTES`.
 
 Supported today: **JUnit / xUnit XML** — pytest `--junitxml`, Playwright's junit
 reporter, Maven Surefire, Gradle, jest-junit, Cypress, Robot, TestNG.

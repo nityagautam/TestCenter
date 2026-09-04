@@ -294,6 +294,17 @@ filter before keyset pagination and is carried through search, facets and older-
 `GET /api/health` — shallow by default; `?deep=1` adds object storage. Checks database,
 queue depth, current-month partition, blob store.
 
+It also returns a `metrics.results` block: total size of the `test_results` partitions, how
+much of that is captured output (the TOAST share), the current month's figures, and the
+configured retention and output limits. Read from `pg_class` rather than by scanning — the
+row-counting version of this metric is a sequential scan of every partition, which is not
+something an endpoint a load balancer polls may do.
+
+`metrics` sits outside `checks` on purpose and never influences `status`. A table growing is a
+capacity signal, not a liveness failure; letting it return 503 would pull the app out of
+rotation for something that needs a purchase order rather than a restart. If the metric itself
+fails it reports its own error and the endpoint stays 200.
+
 Query parameters accepted by ingest: `project` (required), `name`, `branch`, `commit`,
 `env`/`environment`, `framework`, `suite`, `tag` (repeatable, `key:value`), `buildId`,
 `ciProvider`, `jobUrl`, `startedAt`.
@@ -449,7 +460,10 @@ find it.
 | `AUTH_DEV_LOGIN` | password-less local sign-in; impossible in production |
 | `TESTCENTER_ADMIN_EMAILS` | platform admins, re-asserted every sign-in |
 | `TESTCENTER_RETENTION_MONTHS`, `TESTCENTER_PARTITION_LOOKAHEAD` | partition maintenance |
-| `MAX_ARTIFACT_BYTES`, `MAX_RUN_BYTES` | ingest limits |
+| `MAX_ARTIFACT_BYTES`, `MAX_RUN_BYTES` | ingest limits for the presigned path |
+| `MAX_SINGLE_SHOT_BYTES` | ceiling for `POST /api/v1/ingest` (default 32 MiB). That path buffers in the web process, so this is a memory budget — ~7x the limit in peak RSS. Validated at boot to be ≤ `MAX_ARTIFACT_BYTES` |
+| `failure_identity` (columns on `test_results`) | `failure_class`, `failure_summary`, `failure_category`, `failure_source`, extracted once at ingest by `extractFailureIdentity` in `packages/core`. Replaced a ~120-line SQL `CASE` that was duplicated in `fingerprint.ts`, untestable, and hosted in a template literal that ate its own escapes. Versioned by `failure_identity_version`; `pnpm --filter @testcenter/db backfill-identity` refreshes stale rows |
+| `failure_triage` | append-only human category per failure signature; newest row per `(org_id, failure_signature)` wins. Distinct from `run_verdicts`, which judges a run rather than a cause |
 | `MAX_OUTPUT_CHARS` | ceiling on one result's stdout/stderr (default 200,000); the parser truncates past it and appends a note |
 | `OUTPUT_READ_CHARS` | how much of that a multi-row read returns by default (64,000); the row ceiling and the payload cap are separate knobs |
 | `MAX_STACK_CHARS`, `MAX_MESSAGE_CHARS` | ceilings on a failure's stack trace and message |
