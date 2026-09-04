@@ -142,12 +142,16 @@ Each of these cost real debugging time. They are in the code as comments too.
   100% keyframe is what those readers see — a loop that resets to "empty" at 100% shows them
   nothing. Decoration that carries no information does not get animated at all.
 - **`/help` documents the product with the product.** It is the narrative front door — five
-  acts following one build from CI to a verdict — and it illustrates itself with the app's
+  acts following one build from CI to a verdict, then two unnumbered reference sections (tokens,
+  keyboard), which are unnumbered because a reader arrives at them repeatedly and out of order —
+  and it illustrates itself with the app's
   own live components given sample props, never screenshots, so it cannot silently go stale.
   Only concepts with no screen of their own (fingerprinting, signature clustering) are drawn
   as artwork. It renders unauthenticated and reads no tenant data, which is what lets it go
-  in an invitation mail and survive an outage; keep it that way. `docs/user-guide.md` stays
-  the exhaustive reference.
+  in an invitation mail and survive an outage; keep it that way. Its navigation is server-rendered
+  for the same reason — the margin rail in `help-reading-aid.tsx` only *marks* the section being
+  read, and every link on the page is a real anchor that works before hydration.
+  `docs/user-guide.md` stays the exhaustive reference.
 - **Authenticated utility pages reuse `OrgAppShell`; onboarding does not.** `/admin` and
   `/organizations/new` have no org segment in their own URL, but resolve the remembered accessible
   org as chrome context so they retain the normal header and sidebar. `/onboarding` is only for a

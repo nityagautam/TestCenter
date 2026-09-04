@@ -7,6 +7,7 @@ import { TrendChart } from "@/components/charts/trend-chart";
 import { VolumeChart } from "@/components/charts/volume-chart";
 import { CiSnippet } from "@/components/ci-snippet";
 import { FilterMenu } from "@/components/filter-menu";
+import { HelpReadingAid } from "@/components/help-reading-aid";
 import {
   FingerprintPipeline,
   FlakeFlip,
@@ -43,13 +44,51 @@ import type { ThemePreference } from "@/lib/theme";
  * outage somebody might be trying to understand.
  */
 
+/** A section of this page: a narrative act, or a reference section after them. */
+type HelpSection = {
+  id: string;
+  title: string;
+  hint: string;
+  /** Present for the five acts, absent for reference. See `SECTIONS`. */
+  number?: number;
+};
+
+/**
+ * The narrative. Five questions in the order people ask them, each one a beat in the life of a
+ * single build, and numbered because the order is the argument.
+ */
 const ACTS = [
   { id: "ingest", title: "Your CI just ran", hint: "runs and ingest" },
   { id: "triage", title: "Something is red", hint: "triage and verdicts" },
   { id: "history", title: "Is it always red?", hint: "history and flakiness" },
   { id: "trends", title: "How are we doing?", hint: "dashboards and reports" },
-  { id: "access", title: "Who can do what", hint: "roles, tokens, CI" },
+  { id: "access", title: "Who can do what", hint: "roles and organisations" },
 ] as const;
+
+/**
+ * Reference sections, after the story and deliberately outside it.
+ *
+ * Both of these were `H3`s inside other sections — tokens at the end of act five, the key table
+ * in the footer — which made the two things a returning reader comes back for the two hardest
+ * things to find. They are now linkable sections in the contents.
+ *
+ * Not numbered as acts six and seven, though. An act is a beat in one build's life, told in an
+ * order that carries the argument; "what are the keyboard shortcuts" is a question asked at no
+ * particular point and answered by a table. Numbering them would say the reader should arrive
+ * here sixth, when in fact they will arrive here repeatedly and out of order.
+ */
+const REFERENCE = [
+  // "Tokens and CI" rather than "Tokens and API": the section is about getting a pipeline
+  // authenticated, and the page has no API reference to send anyone to.
+  { id: "tokens", title: "Tokens and CI", hint: "authenticating a pipeline" },
+  { id: "keyboard", title: "Keyboard shortcuts", hint: "keys and the palette" },
+] as const;
+
+/** Everything with an anchor, in document order — what the contents and the margin rail read. */
+const SECTIONS: HelpSection[] = [
+  ...ACTS.map((act, index) => ({ ...act, number: index + 1 })),
+  ...REFERENCE.map((section) => ({ ...section })),
+];
 
 export function Help({
   appHref,
@@ -70,6 +109,15 @@ export function Help({
     <>
       <HelpHeader appHref={appHref} appLabel={appLabel} theme={theme} />
 
+      {/*
+       * The margin rail and the back-to-top control. `ACTS` is spread into a plain array because
+       * it crosses into a client component: `as const` makes it a readonly tuple, which is a
+       * type-level fact React's serialiser neither needs nor preserves, and the prop type on the
+       * other side is deliberately the loose shape so the rail is not coupled to this page's
+       * particular five sections.
+       */}
+      <HelpReadingAid sections={SECTIONS.map(({ id, title, number }) => ({ id, title, number }))} />
+
       <main id="content" tabIndex={-1} className="mx-auto max-w-3xl px-5 pt-8 pb-20 lg:px-6">
         <p className="text-[13px] leading-relaxed text-[var(--color-ink-muted)]">
           Test Center takes the report your test runner already writes — JUnit or xUnit XML from
@@ -80,7 +128,8 @@ export function Help({
         </p>
         <p className="mt-3 text-[13px] leading-relaxed text-[var(--color-ink-muted)]">
           What follows is one build, followed from the moment CI finishes to the moment somebody
-          decides whose problem it is. Five questions, in the order people ask them.
+          decides whose problem it is. Five questions, in the order people ask them, and then two
+          reference sections you will come back to out of order.
         </p>
 
         <Contents />
@@ -90,6 +139,9 @@ export function Help({
         <ActThree />
         <ActFour />
         <ActFive />
+
+        <TokensAndApi />
+        <KeyboardShortcuts />
 
         <Footer appHref={appHref} appLabel={appLabel} />
       </main>
@@ -158,17 +210,33 @@ function Contents() {
   return (
     <nav aria-label="Contents" className="mt-7">
       <ol className="divide-y divide-[var(--color-border-subtle)] overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
-        {ACTS.map((act, index) => (
-          <li key={act.id}>
+        {SECTIONS.map((section) => (
+          <li key={section.id}>
             <a
-              href={`#${act.id}`}
+              href={`#${section.id}`}
               className="flex items-baseline gap-3 px-4 py-2.5 hover:bg-[var(--color-surface)]"
             >
-              <span className="font-mono text-[11px] text-[var(--color-ink-muted)] tabular-nums">
-                {index + 1}
+              {/*
+               * A middot where a number would be, rather than nothing: the column is what makes
+               * the titles line up, and collapsing it for the last two rows would leave the
+               * reference group looking like a rendering fault instead of a different kind of
+               * section. Hidden from assistive technology, which gets the grouping from the
+               * heading levels in the document itself.
+               */}
+              <span
+                className="w-2 shrink-0 font-mono text-[11px] text-[var(--color-ink-muted)] tabular-nums"
+                aria-hidden={section.number === undefined}
+              >
+                {section.number ?? "·"}
               </span>
-              <span className="text-[13px] font-medium">{act.title}</span>
-              <span className="ml-auto text-[11px] text-[var(--color-ink-muted)]">{act.hint}</span>
+              <span
+                className={section.number === undefined ? "text-[13px]" : "text-[13px] font-medium"}
+              >
+                {section.title}
+              </span>
+              <span className="ml-auto text-[11px] text-[var(--color-ink-muted)]">
+                {section.hint}
+              </span>
             </a>
           </li>
         ))}
@@ -181,7 +249,7 @@ function Contents() {
 
 function ActOne() {
   return (
-    <Act id="ingest" number={1} title="Your CI just ran">
+    <Act id="ingest" title="Your CI just ran">
       <P>
         The unit here is a <Term>run</Term>: one report file, uploaded once, from one execution of
         one suite. Everything else in the product hangs off it. A run knows its project, its branch
@@ -266,7 +334,7 @@ function ActTwo({
   sampleSearch: string;
 }) {
   return (
-    <Act id="triage" number={2} title="Something is red">
+    <Act id="triage" title="Something is red">
       <P>
         Open the run and the failures are already at the top — a result table that sorted the
         passing 142 below the failing four would be answering a question nobody asked. Selecting a
@@ -506,7 +574,7 @@ function outcomes(pattern: string): RecentOutcome[] {
 
 function ActThree() {
   return (
-    <Act id="history" number={3} title="Is it always red?">
+    <Act id="history" title="Is it always red?">
       <P>
         This is where a dashboard earns its keep, and it depends entirely on one thing: knowing that
         the test that failed tonight is the <em>same test</em> that failed on Tuesday. That is
@@ -669,7 +737,7 @@ const HELP_RUN_POINTS = [
 
 function ActFour() {
   return (
-    <Act id="trends" number={4} title="How are we doing?">
+    <Act id="trends" title="How are we doing?">
       <P>
         Zoom out from one test and the dashboards answer the question a team lead has: is this
         getting better or worse, and where is the damage concentrated. Headline numbers first, for
@@ -840,7 +908,7 @@ const ROLE_ROWS: [string, string, string, string, string, string][] = [
 
 function ActFive() {
   return (
-    <Act id="access" number={5} title="Who can do what">
+    <Act id="access" title="Who can do what">
       <P>
         Membership is of an <Term>organisation</Term>, and it grants access to every project in it.
         Roles are ordered — each includes everything below it — and they control what you can{" "}
@@ -896,9 +964,19 @@ function ActFive() {
         somebody else&rsquo;s rows, and the isolation is proved from the outside in the test suite
         using ids that are perfectly valid in their own tenant.
       </Note>
+    </Act>
+  );
+}
 
-      <H3>Tokens and CI</H3>
+/* ── Reference ─────────────────────────────────────────────────────────────── */
 
+/**
+ * How a pipeline authenticates. Previously the closing `H3` of act five, where a reader coming
+ * back for the one thing they need at their terminal had to know it was filed under roles.
+ */
+function TokensAndApi() {
+  return (
+    <Act id="tokens" title="Tokens and CI">
       <P>
         CI authenticates with a bearer token scoped to a project. One is minted the moment you
         create a project — that is the minute you are actually ready to wire up a pipeline — and
@@ -917,12 +995,13 @@ function ActFive() {
   );
 }
 
-/* ── Footer ────────────────────────────────────────────────────────────────── */
-
-function Footer({ appHref, appLabel }: { appHref: string; appLabel: string }) {
+/**
+ * The key table, lifted out of the footer. Nothing was wrong with the content; it was filed below
+ * a closing paragraph, in the one part of a page readers scroll past.
+ */
+function KeyboardShortcuts() {
   return (
-    <section className="mt-14 border-t border-[var(--color-border-subtle)] pt-6">
-      <H3>Keyboard</H3>
+    <Act id="keyboard" title="Keyboard shortcuts">
       <Table
         columns={["Key", "Does"]}
         rows={[
@@ -932,8 +1011,16 @@ function Footer({ appHref, appLabel }: { appHref: string; appLabel: string }) {
           ["esc", "Close the palette, a dropdown, or the mobile nav"],
         ]}
       />
+    </Act>
+  );
+}
 
-      <p className="mt-6 text-[12px] leading-relaxed text-[var(--color-ink-muted)]">
+/* ── Footer ────────────────────────────────────────────────────────────────── */
+
+function Footer({ appHref, appLabel }: { appHref: string; appLabel: string }) {
+  return (
+    <section className="mt-14 border-t border-[var(--color-border-subtle)] pt-6">
+      <p className="text-[12px] leading-relaxed text-[var(--color-ink-muted)]">
         This page is the narrative. The exhaustive reference — every role boundary measured rather
         than described, the seeded accounts, the scenario projects, troubleshooting — lives in{" "}
         <Code>docs/user-guide.md</Code> in the repository, with the developer reference beside it in{" "}
@@ -941,9 +1028,16 @@ function Footer({ appHref, appLabel }: { appHref: string; appLabel: string }) {
       </p>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-subtle)] pt-4 text-[12px]">
-        <a href={appHref} className="underline hover:text-[var(--color-ink)]">
-          {appLabel}
-        </a>
+        <span className="flex items-center gap-4">
+          <a href={appHref} className="underline hover:text-[var(--color-ink)]">
+            {appLabel}
+          </a>
+          {/* The floating control is client-rendered; this one is not. Somebody who reached the
+              bottom of the page with no JavaScript is exactly who needs a way back up. */}
+          <a href="#top" className="text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]">
+            Back to top
+          </a>
+        </span>
         <p className="text-[var(--color-ink-muted)]">
           Made with{" "}
           <span
@@ -963,32 +1057,44 @@ function Footer({ appHref, appLabel }: { appHref: string; appLabel: string }) {
 
 /* ── Small building blocks ─────────────────────────────────────────────────── */
 
-function Act({
-  id,
-  number,
-  title,
-  children,
-}: {
-  id: string;
-  number: number;
-  title: string;
-  children: ReactNode;
-}) {
+/**
+ * A section with an anchor and a heading — an act, or one of the reference sections after them.
+ *
+ * Named `Act` while the acts were the only thing it built. The number now comes from `SECTIONS`
+ * by id rather than being passed in, so the contents card, the margin rail and the heading can
+ * never disagree about which number a section carries: there is one list and it is the source.
+ */
+function Act({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  const number = SECTIONS.find((section) => section.id === id)?.number;
   return (
     <section id={id} className="tc-help-anchor mt-14">
-      <div className="flex items-baseline gap-3 border-b border-[var(--color-border-subtle)] pb-2">
-        <span className="font-mono text-[11px] text-[var(--color-ink-muted)] tabular-nums">
-          {number}
-        </span>
+      <div className="group flex items-baseline gap-3 border-b border-[var(--color-border-subtle)] pb-2">
+        {/* Reference sections have no number, and their heading then starts flush with the prose
+            column — which is the difference being drawn, so it is left visible rather than
+            padded away. */}
+        {number === undefined ? null : (
+          <span className="font-mono text-[11px] text-[var(--color-ink-muted)] tabular-nums">
+            {number}
+          </span>
+        )}
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+        {/*
+         * A permalink per act, because this page is documentation and people cite documentation
+         * by the paragraph rather than the page — "read act three" is a worse answer than a link
+         * that lands on it. Revealed on hover to stay out of the prose, but also on focus, since
+         * a control that only exists for a pointer excludes the keyboard reader entirely.
+         */}
+        <a
+          href={`#${id}`}
+          aria-label={`Link to “${title}”`}
+          className="font-mono text-[11px] text-[var(--color-ink-muted)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--color-ink)] focus-visible:opacity-100"
+        >
+          #
+        </a>
       </div>
       <div className="mt-4 space-y-4">{children}</div>
     </section>
   );
-}
-
-function H3({ children }: { children: ReactNode }) {
-  return <h3 className="mt-8 text-[13px] font-semibold">{children}</h3>;
 }
 
 function P({ children }: { children: ReactNode }) {
