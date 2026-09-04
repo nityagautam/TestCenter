@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { QUEUES } from "@testcenter/core";
-import { listPartitions, ping } from "@testcenter/db";
+import { listPartitions, ping, resultStorageFootprint } from "@testcenter/db";
+import { formatBytes } from "@/lib/format";
 import { getServices } from "@/lib/services";
 
 /**
@@ -13,6 +14,12 @@ import { getServices } from "@/lib/services";
  *
  * `?deep=1` adds the checks that cost a round trip to object storage; the default
  * response is cheap enough for a load balancer to poll.
+ *
+ * Storage figures ride along under `metrics`, deliberately *outside* `checks`. Nothing in
+ * there may influence `status`: a table growing is a capacity signal, not a liveness failure,
+ * and letting it return 503 would pull the app out of the load balancer for something that
+ * needs a purchase order rather than a restart. Keeping the two apart is what makes it safe to
+ * report a number nobody has agreed a threshold for.
  */
 export const dynamic = "force-dynamic";
 
@@ -61,6 +68,59 @@ export async function GET(request: Request): Promise<NextResponse> {
     }
   }
 
+  /*
+   * Catalog-only, so it is cheap enough to run unconditionally rather than behind `?deep=1`.
+   * `resultStorageFootprint` reads `pg_class` — O(partitions), a dozen buffers — where the
+   * row-scanning version of this metric would read the whole table. Wrapped anyway: a metric
+   * that cannot be collected must not take the endpoint down with it.
+   */
+  let metrics: Record<string, unknown> | undefined;
+  if (database.ok) {
+    try {
+      const footprint = await resultStorageFootprint(sql);
+      metrics = {
+        /*
+         * Advertised so a publisher can pick its upload path *before* transferring anything.
+         * Without this the only way to learn the ceiling is to exceed it and read the 413, which
+         * means every oversized run pays for a failed request first — and any client that
+         * hardcodes the old 32 MiB default is wrong the moment an operator changes it.
+         */
+        ingest: {
+          maxSingleShotBytes: env.MAX_SINGLE_SHOT_BYTES,
+          maxSingleShot: formatBytes(env.MAX_SINGLE_SHOT_BYTES),
+          maxArtifactBytes: env.MAX_ARTIFACT_BYTES,
+          singleShotPath: "/api/v1/ingest",
+          presignedPath: "/api/v1/runs",
+        },
+        results: {
+          totalBytes: footprint.totalBytes,
+          total: formatBytes(footprint.totalBytes),
+          // Split out because the two grow for different reasons: heap tracks how many tests
+          // ran, TOAST tracks how much they printed. See resultStorageFootprint.
+          capturedOutput: formatBytes(footprint.toastBytes),
+          capturedOutputShare: `${Math.round(footprint.toastShare * 100)}%`,
+          currentMonth: footprint.currentMonth
+            ? {
+                partition: footprint.currentMonth.partition,
+                total: formatBytes(footprint.currentMonth.totalBytes),
+                capturedOutput: formatBytes(footprint.currentMonth.toastBytes),
+              }
+            : null,
+          partitions: footprint.partitions.length,
+          retentionMonths: env.TESTCENTER_RETENTION_MONTHS,
+          // The knobs that decide the ceiling, echoed so a surprising figure above can be
+          // traced to configuration without shelling into the container.
+          limits: {
+            maxOutputChars: env.MAX_OUTPUT_CHARS,
+            outputReadChars: env.OUTPUT_READ_CHARS,
+          },
+        },
+      };
+    } catch (error) {
+      metrics = { results: { error: errorMessage(error) } };
+    }
+  }
+
   if (deep) {
     try {
       const startedAt = Date.now();
@@ -87,6 +147,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       environment: env.NODE_ENV,
       blobDriver: blobStore.driver,
       checks,
+      ...(metrics ? { metrics } : {}),
       timestamp: new Date().toISOString(),
     },
     {

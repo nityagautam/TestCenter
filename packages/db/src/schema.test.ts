@@ -2,7 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { computeFingerprint } from "@testcenter/core";
 import { createClient, type Database, type Sql } from "./client.js";
-import { drainDefaultPartition, listPartitions, maintainPartitions } from "./partitions.js";
+import {
+  drainDefaultPartition,
+  listPartitions,
+  maintainPartitions,
+  resultStorageFootprint,
+} from "./partitions.js";
 import { persistResultBatch } from "./ingest.js";
 import { bootstrap, generateApiToken, hashApiToken, resolveApiToken } from "./bootstrap.js";
 import * as schema from "./schema.js";
@@ -158,6 +163,39 @@ describeIfDb("schema", () => {
         SELECT count(*)::text AS count FROM pg_class WHERE relname = 'test_results_default'
       `;
       expect(Number(rows[0]?.count)).toBe(1);
+    });
+
+    it("reports the storage footprint from the catalog, not by scanning rows", async () => {
+      const footprint = await resultStorageFootprint(sql);
+
+      // One entry per partition, DEFAULT included — it holds real rows after a backfill and
+      // is exactly the one an operator needs to see growing.
+      const names = footprint.partitions.map((row) => row.partition);
+      expect(names).toContain("test_results_default");
+      expect(names.length).toBe((await listPartitions(sql)).length);
+
+      const current = `test_results_${new Date().getUTCFullYear()}_${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+      expect(footprint.currentMonth?.partition).toBe(current);
+
+      for (const row of footprint.partitions) {
+        // Every one of these comes from a bigint-returning size function, which postgres.js
+        // hands back as a string. Left uncoerced they would pass typecheck and concatenate at
+        // runtime, so assert the runtime type rather than just the value.
+        expect(typeof row.totalBytes).toBe("number");
+        expect(typeof row.toastBytes).toBe("number");
+        expect(Number.isFinite(row.totalBytes)).toBe(true);
+        expect(row.totalBytes).toBeGreaterThanOrEqual(0);
+        // pg_total_relation_size already includes TOAST and indexes, so neither part may
+        // exceed the whole. This is what catches summing them into a double count.
+        expect(row.toastBytes).toBeLessThanOrEqual(row.totalBytes);
+        expect(row.heapBytes).toBeLessThanOrEqual(row.totalBytes);
+      }
+
+      expect(footprint.totalBytes).toBe(
+        footprint.partitions.reduce((sum, row) => sum + row.totalBytes, 0),
+      );
+      expect(footprint.toastShare).toBeGreaterThanOrEqual(0);
+      expect(footprint.toastShare).toBeLessThanOrEqual(1);
     });
 
     it("is idempotent — re-running maintenance changes nothing", async () => {

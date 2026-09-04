@@ -240,3 +240,22 @@ export function shortSha(sha: string | null | undefined): string | null {
   if (!sha) return null;
   return sha.slice(0, 7);
 }
+
+/**
+ * Bytes as a human-readable size.
+ *
+ * Binary units (1024), because every limit it renders is expressed in powers of two — a 32 MiB
+ * cap shown as "33.6 MB" invites someone to set 34000000 and be short by 4%.
+ */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}

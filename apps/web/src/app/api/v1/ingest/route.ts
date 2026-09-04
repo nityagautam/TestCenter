@@ -16,6 +16,7 @@ import {
   authenticate,
   requireScope,
 } from "@/lib/api-auth";
+import { formatBytes } from "@/lib/format";
 import { getServices } from "@/lib/services";
 
 /**
@@ -35,8 +36,11 @@ import { getServices } from "@/lib/services";
  */
 export const dynamic = "force-dynamic";
 
-/** Well below MAX_ARTIFACT_BYTES: this path buffers, the presigned path does not. */
-const MAX_SINGLE_SHOT_BYTES = 32 * 1024 * 1024;
+/*
+ * The size ceiling is `env.MAX_SINGLE_SHOT_BYTES` — configurable, and validated at boot to be
+ * no larger than `MAX_ARTIFACT_BYTES`. It used to be a literal here, which meant the only way
+ * to accept a bigger report was a code change and a deploy.
+ */
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
@@ -49,14 +53,33 @@ export async function POST(request: Request): Promise<NextResponse> {
       throw new ApiError(400, "project_required", "the ?project= query parameter is required");
     }
 
-    const { db, sql, blobStore, queue } = getServices();
+    const { db, sql, blobStore, queue, env } = getServices();
+    const limit = env.MAX_SINGLE_SHOT_BYTES;
+
+    /*
+     * Rejected on the header, before a single byte of body is read.
+     *
+     * This ordering is the whole fix. The check used to happen after `readUploadedFiles`, which
+     * meant an oversized upload was fully buffered and *then* refused: measured, a 191 MB post
+     * against a 32 MiB limit made the client transfer all 191 MB and took the server from
+     * 187 MB to 1.34 GB of RSS before returning 413. The limit reported a problem it had
+     * already caused, and a few concurrent ones would OOM the process.
+     *
+     * Content-Length is advisory — absent under chunked encoding, and a client may lie — so
+     * this is the cheap gate, not the only one. `readUploadedFiles` bounds the read itself.
+     */
+    const declared = Number(request.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > limit) {
+      throw tooLarge(declared, limit);
+    }
+
     const project = await findProjectByKey(sql, { orgId: principal.orgId, key: projectKey });
     if (!project) {
       throw new ApiError(404, "project_not_found", `no project with key "${projectKey}"`);
     }
     assertProjectAccess(principal, project.id);
 
-    const files = await readUploadedFiles(request);
+    const files = await readUploadedFiles(request, limit);
     if (files.length === 0) {
       throw new ApiError(
         400,
@@ -65,15 +88,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
+    // Backstop. `readUploadedFiles` already aborts past the limit, so reaching this would mean
+    // multipart framing overhead pushed the decoded total over — worth a clear 413 either way.
     const totalBytes = files.reduce((sum, file) => sum + file.bytes.length, 0);
-    if (totalBytes > MAX_SINGLE_SHOT_BYTES) {
-      throw new ApiError(
-        413,
-        "too_large_for_single_shot",
-        `single-shot ingest is limited to ${MAX_SINGLE_SHOT_BYTES} bytes; ` +
-          `use POST /api/v1/runs for presigned direct-to-storage upload`,
-      );
-    }
+    if (totalBytes > limit) throw tooLarge(totalBytes, limit);
 
     // Tags come from repeated ?tag=key:value, which is what the CLI and the curl
     // recipe emit. Normalizing here keeps casing consistent across CI systems.
@@ -205,17 +223,107 @@ interface UploadedFile {
 }
 
 /**
+ * The 413, with the numbers a caller needs to act on it.
+ *
+ * `details` carries `limitBytes`/`actualBytes` as integers so a CI wrapper can decide to fall
+ * back to the presigned path without regex-matching the prose, and the message states both
+ * sizes in binary units because "33554432 bytes" is not a number anyone reads at a glance —
+ * that is what the original message printed, and it is why this exists.
+ */
+function tooLarge(actualBytes: number, limitBytes: number): ApiError {
+  return new ApiError(
+    413,
+    "too_large_for_single_shot",
+    `report is ${formatBytes(actualBytes)}; single-shot ingest accepts up to ` +
+      `${formatBytes(limitBytes)}. Either raise MAX_SINGLE_SHOT_BYTES on the server, or use ` +
+      `the three-step presigned flow (POST /api/v1/runs) which streams straight to object ` +
+      `storage and has no such limit.`,
+    {
+      limitBytes,
+      actualBytes,
+      limitEnvVar: "MAX_SINGLE_SHOT_BYTES",
+      // Named so a client can route itself rather than needing the docs open.
+      alternative: { method: "POST", path: "/api/v1/runs" },
+    },
+  );
+}
+
+/**
+ * Reads the body with a hard ceiling, so an oversized upload cannot be buffered.
+ *
+ * The point is that memory is bounded by `limit` no matter what the client does — including
+ * chunked encoding with no Content-Length, and a client whose Content-Length understates the
+ * body. Streaming and counting is the only way to get that guarantee; `request.arrayBuffer()`
+ * and `request.formData()` have both already allocated everything by the time they return,
+ * which is what made the old check cosmetic.
+ *
+ * Returns `null` once the limit is passed, and stops pulling from the stream at that point
+ * rather than draining it. The connection is dropped by the runtime when the handler responds,
+ * so the client learns quickly instead of finishing a transfer that is going to be discarded.
+ */
+async function readBounded(
+  body: ReadableStream<Uint8Array>,
+  limit: number,
+): Promise<Buffer | null> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      // Checked before keeping the chunk, so the peak is limit + one chunk rather than the
+      // whole body. Comparing after pushing would defeat the entire purpose.
+      if (total > limit) return null;
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
+}
+
+/**
  * Accepts multipart form data *or* a raw body.
  *
  * Both are supported because CI authors reach for whichever their tool makes easy —
  * `curl -F` and `curl --data-binary` are equally common, and rejecting one is a
  * pointless adoption barrier.
+ *
+ * Both now go through `readBounded` first. Multipart cannot be parsed incrementally with the
+ * platform API, so the bytes are bounded on the way in and the FormData parse then runs against
+ * a buffer already known to fit — which keeps one code path for the size guarantee instead of
+ * trusting Content-Length for one shape and enforcing it for the other.
  */
-async function readUploadedFiles(request: Request): Promise<UploadedFile[]> {
+async function readUploadedFiles(request: Request, limit: number): Promise<UploadedFile[]> {
   const contentType = request.headers.get("content-type") ?? "";
+  if (!request.body) return [];
+
+  const raw = await readBounded(request.body, limit);
+  // `limit + 1` is a floor, not the real size: the stream was abandoned rather than counted to
+  // the end, so the true total is unknown. Reporting a lower bound beats reporting a wrong
+  // exact figure, and the Content-Length gate above already handles the common case where the
+  // real number is known.
+  if (raw === null) throw tooLarge(limit + 1, limit);
 
   if (contentType.includes("multipart/form-data")) {
-    const form = await request.formData();
+    // Re-wrapped so the platform multipart parser can run over the bounded bytes. Headers are
+    // carried across because the boundary lives in Content-Type.
+    const form = await new Request(request.url, {
+      method: "POST",
+      headers: request.headers,
+      /*
+       * Handed over as a plain ArrayBuffer.
+       *
+       * `Buffer` is a `Uint8Array` subclass, but since TS made `ArrayBufferView` generic its
+       * `ArrayBufferLike` parameter no longer satisfies `BodyInit`. `.slice()` copies, which
+       * is accepted here rather than cast away: the length is already bounded by `limit`, and
+       * a cast would be asserting something about SharedArrayBuffer that is not checked.
+       */
+      body: raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
+    }).formData();
     const files: UploadedFile[] = [];
     for (const [, value] of form.entries()) {
       if (typeof value === "string") continue;
@@ -228,7 +336,6 @@ async function readUploadedFiles(request: Request): Promise<UploadedFile[]> {
     return files;
   }
 
-  const raw = Buffer.from(await request.arrayBuffer());
   if (raw.length === 0) return [];
   return [
     {

@@ -34,6 +34,26 @@ export const envSchema = z.object({
 
   MAX_ARTIFACT_BYTES: z.coerce.number().int().positive().default(524_288_000),
   MAX_RUN_BYTES: z.coerce.number().int().positive().default(5_368_709_120),
+  /**
+   * Ceiling for the *single-shot* ingest endpoint, which is far lower than the others and has
+   * to be.
+   *
+   * `/api/v1/runs` hands out a presigned URL and the bytes go client → object storage without
+   * touching this process, so `MAX_ARTIFACT_BYTES` can be half a gigabyte. `/api/v1/ingest`
+   * buffers the upload in the web process to keep the one-command curl recipe working, so this
+   * limit is a memory budget, not a policy preference. Measured: a 191 MB upload took the
+   * server from 187 MB to 1.34 GB of RSS — roughly 7×, because the body is materialised
+   * several times over (stream → buffer → FormData part → Buffer copy).
+   *
+   * Raise it if your reports are genuinely larger and the container has the headroom for
+   * `concurrent uploads × limit × ~7`. Past that, the presigned path is the answer rather than
+   * a bigger number here.
+   */
+  MAX_SINGLE_SHOT_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(32 * 1024 * 1024),
 
   // Spread rather than restated, so a service validates the same limits at boot that the
   // parser reads at runtime. Two copies of these bounds would drift the first time one moved.
@@ -56,6 +76,20 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       .join("\n");
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
+  /*
+   * A single-shot limit above the per-artifact limit is unreachable configuration: the upload
+   * would clear this gate and then be rejected by `MAX_ARTIFACT_BYTES` on the way to storage,
+   * which reads as the setting having been ignored. Caught at boot, where it is a typo, rather
+   * than in CI, where it is a mystery.
+   */
+  if (parsed.data.MAX_SINGLE_SHOT_BYTES > parsed.data.MAX_ARTIFACT_BYTES) {
+    throw new Error(
+      `MAX_SINGLE_SHOT_BYTES (${parsed.data.MAX_SINGLE_SHOT_BYTES}) cannot exceed ` +
+        `MAX_ARTIFACT_BYTES (${parsed.data.MAX_ARTIFACT_BYTES}) — an upload that passed the ` +
+        `first limit would be rejected by the second`,
+    );
+  }
+
   // Fail at boot rather than at first upload.
   if (parsed.data.BLOB_DRIVER === "s3") {
     const missing = (

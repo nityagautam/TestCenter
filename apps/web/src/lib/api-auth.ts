@@ -36,6 +36,15 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /**
+     * Machine-readable specifics, merged into the error body alongside `code` and `message`.
+     *
+     * For anything a caller might branch on rather than print. A size rejection is the
+     * motivating case: a CI script that wants to retry through the presigned path needs the
+     * limit and the actual size as numbers, and parsing them back out of an English sentence
+     * is exactly the kind of coupling that breaks when the wording is improved.
+     */
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -52,7 +61,7 @@ export function apiErrorResponse(error: unknown): NextResponse {
   }
   if (error instanceof ApiError) {
     return NextResponse.json(
-      { error: { code: error.code, message: error.message } },
+      { error: { code: error.code, message: error.message, ...error.details } },
       { status: error.status },
     );
   }

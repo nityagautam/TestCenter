@@ -119,6 +119,102 @@ export async function listPartitions(sql: Sql): Promise<string[]> {
   return rows.map((row) => row.relname);
 }
 
+export interface PartitionFootprint {
+  partition: string;
+  /** Main heap: the fixed-width columns and any short text stored inline. */
+  heapBytes: number;
+  /** Out-of-line storage for large values, plus its index. Captured output lives here. */
+  toastBytes: number;
+  indexBytes: number;
+  totalBytes: number;
+}
+
+export interface ResultStorageFootprint {
+  partitions: PartitionFootprint[];
+  totalBytes: number;
+  toastBytes: number;
+  heapBytes: number;
+  /** The partition currently being written, so growth is visible before retention hides it. */
+  currentMonth: PartitionFootprint | null;
+  /**
+   * TOAST as a share of the whole, 0–1.
+   *
+   * The single most useful number here. `test_results` is mostly narrow fixed-width columns,
+   * so a healthy table is heap-dominated; TOAST is almost entirely captured stdout/stderr and
+   * stack traces. When this climbs, output volume is what is growing — not result volume.
+   */
+  toastShare: number;
+}
+
+/**
+ * What the result partitions actually occupy, from the catalog rather than by scanning.
+ *
+ * Deliberately catalog-only, and that is the whole design. The obvious implementation —
+ * `count(*) FILTER (WHERE octet_length(stdout) > …)` — is a sequential scan of every
+ * partition: measured at 494 buffers for 17k rows, so roughly a gigabyte of reads at a few
+ * million. That is indefensible on an endpoint a load balancer polls, however interesting the
+ * number. `pg_total_relation_size` reads `pg_class`, costs O(partitions), and answers the
+ * question people actually have — "how much is this costing me" — rather than a row count they
+ * would have to convert into bytes anyway.
+ *
+ * What it cannot tell you is which *tests* are responsible; that needs the scan, and belongs in
+ * a script someone runs deliberately, not here.
+ *
+ * TOAST is reported separately from heap because the two grow for different reasons and the
+ * split is the diagnosis: heap tracks how many tests ran, TOAST tracks how much they printed.
+ */
+export async function resultStorageFootprint(sql: Sql): Promise<ResultStorageFootprint> {
+  const rows = await sql<
+    {
+      partition: string;
+      heapBytes: string;
+      toastBytes: string;
+      indexBytes: string;
+      totalBytes: string;
+    }[]
+  >`
+    SELECT
+      child.relname                                            AS partition,
+      pg_relation_size(child.oid)                              AS "heapBytes",
+      COALESCE(pg_total_relation_size(child.reltoastrelid), 0)  AS "toastBytes",
+      pg_indexes_size(child.oid)                               AS "indexBytes",
+      pg_total_relation_size(child.oid)                        AS "totalBytes"
+    FROM pg_inherits
+    JOIN pg_class parent ON parent.oid = pg_inherits.inhparent
+    JOIN pg_class child  ON child.oid  = pg_inherits.inhrelid
+    WHERE parent.relname = ${PARENT_TABLE}
+    ORDER BY pg_total_relation_size(child.oid) DESC
+  `;
+
+  /*
+   * Every size function returns bigint, which postgres.js hands back as a *string*. Left raw
+   * these would satisfy `number` at compile time and concatenate at runtime — the trap the
+   * repo notes for `dailySeries` and `int8` generally. `pg_total_relation_size` also already
+   * includes the TOAST total, so summing heap + toast + index would double-count.
+   */
+  const partitions: PartitionFootprint[] = rows.map((row) => ({
+    partition: row.partition,
+    heapBytes: Number(row.heapBytes),
+    toastBytes: Number(row.toastBytes),
+    indexBytes: Number(row.indexBytes),
+    totalBytes: Number(row.totalBytes),
+  }));
+
+  const totalBytes = partitions.reduce((sum, row) => sum + row.totalBytes, 0);
+  const toastBytes = partitions.reduce((sum, row) => sum + row.toastBytes, 0);
+  const heapBytes = partitions.reduce((sum, row) => sum + row.heapBytes, 0);
+  const currentName = partitionName(monthStart(new Date()));
+
+  return {
+    partitions,
+    totalBytes,
+    toastBytes,
+    heapBytes,
+    currentMonth: partitions.find((row) => row.partition === currentName) ?? null,
+    toastShare: totalBytes === 0 ? 0 : toastBytes / totalBytes,
+  };
+}
+
 /**
  * Moves any rows that landed in the DEFAULT partition into their proper monthly
  * partition. Needed after a backfill or after maintenance was down: a row in
