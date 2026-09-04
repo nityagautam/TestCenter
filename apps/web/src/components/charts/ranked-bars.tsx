@@ -121,10 +121,45 @@ export function RankedBars({
   const rowHeightRem = bars.some(hasSubLine) ? ROW_WITH_DETAIL_HEIGHT_REM : ROW_HEIGHT_REM;
 
   return (
-    <figure className="min-w-0">
+    /*
+     * A full-height flex column when it scrolls, so the list can claim whatever height the card
+     * was given rather than a height derived from `maxVisible` alone.
+     *
+     * These tiles sit in a `lg:grid-cols-3` row, and a grid stretches its items: when the
+     * uncapped taxonomy beside them runs to six categories, every card in the row grows to
+     * match. A capped list clipped at exactly `maxVisible * rowHeightRem` then sat in a taller
+     * card with dead space under it *and* rows hidden behind a scrollbar — the one arrangement
+     * where the reader can see there is room and still cannot see the data.
+     *
+     * Left as a plain block when nothing scrolls, so the report panels and any other caller
+     * whose parent has no definite height render byte-identically.
+     */
+    <figure className={scrolls ? "flex h-full min-w-0 flex-col" : "min-w-0"}>
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <figcaption className="text-xs font-medium">{title}</figcaption>
-        {action}
+        <figcaption className="min-w-0 truncate text-xs font-medium">{title}</figcaption>
+        {/*
+         * The row count, printed, when the list is longer than the window — the visible twin of
+         * the `aria-label` a screen reader already gets.
+         *
+         * The previous affordance was geometric: end the box part-way through a row, because a
+         * list clipped flush looks like a list that ends and macOS hides overlay scrollbars
+         * until you scroll. That worked while the height was a fixed multiple of a row. It stops
+         * working now the box grows to fill the card, since the grown height is whatever a
+         * taller sibling left over and lands flush on a row boundary about as often as not —
+         * measured, `Failure concentration` at 90 days showed 0px of a partial row with 13 rows
+         * hidden. The single-line row shape never had the overshoot at all, so `Slowest tests`
+         * clipped flush already.
+         *
+         * A count does not depend on the arithmetic working out, and it says more than a sliver
+         * ever did: how much is down there. Suppressed when `action` is present so it cannot
+         * crowd a toggle — those lists are the uncapped ones, which never scroll anyway.
+         */}
+        {action ??
+          (scrolls ? (
+            <span className="shrink-0 font-mono text-[10px] text-[var(--color-ink-muted)]">
+              {bars.length} rows
+            </span>
+          ) : null)}
       </div>
 
       {bars.length === 0 ? (
@@ -147,12 +182,32 @@ export function RankedBars({
                 tabIndex: 0,
                 role: "region" as const,
                 "aria-label": `${title} — scrollable, ${bars.length} rows`,
-                style: { maxHeight: `${maxVisible! * rowHeightRem}rem` },
+                /*
+                 * `height` AND `minHeight`, with `grow` beside them — deliberately not
+                 * `flex-1`, and measured rather than reasoned.
+                 *
+                 * `flex-1` is `flex: 1 1 0%`, and the zero *basis* is the trap: a flex item
+                 * still offers its full content height when an ancestor is being sized
+                 * intrinsically, so a 20-row list inside a `lg:grid-cols-3` row made the row
+                 * 1123px tall and simply moved the dead space to its neighbours. Growing and
+                 * driving are different jobs.
+                 *
+                 * `flex-basis: auto` with a definite `height` separates them: the base size
+                 * this tile contributes to the row is exactly `maxVisible` rows, so it never
+                 * makes the row taller, while `flex-grow: 1` still lets it absorb whatever
+                 * height a taller sibling created. `minHeight` is the floor for the reverse
+                 * case, since the default `flex-shrink: 1` would otherwise let a cramped row
+                 * squeeze it below the rows it promised to show.
+                 */
+                style: {
+                  height: `${maxVisible! * rowHeightRem}rem`,
+                  minHeight: `${maxVisible! * rowHeightRem}rem`,
+                },
               }
             : {})}
           /* `pr-1` went with the scrollbar it was making room for; with the bar hidden
              that padding would just narrow the bars for no reason. */
-          className={scrolls ? "tc-no-scrollbar overflow-y-auto" : undefined}
+          className={scrolls ? "tc-no-scrollbar grow overflow-y-auto" : undefined}
         >
           <ol className="space-y-1.5">
             {bars.map((bar, index) => {
