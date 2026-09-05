@@ -513,8 +513,12 @@ get:
    message, the stack trace, and captured stdout/stderr. This is the "show me all three
    failures" view.
 
-**Quarantine** (member and above) marks a known-flaky test so it stops dominating
-dashboards while staying visible and still reported. It is not skipping or deleting.
+**Quarantine** (member and above) marks a known-flaky test so it stops counting toward the
+dashboards. The test still runs, still uploads, and keeps its own page and full history —
+but every dashboard figure excludes it: the pass rate and trends, the failure tiles, and
+the slowest, flakiest and most-failing leaderboards. The run pages and the quality gate are
+unaffected, because those describe what a run did rather than how healthy a suite is.
+Quarantine is not skipping and it is not deleting.
 
 ### Uploading results
 

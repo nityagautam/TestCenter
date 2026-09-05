@@ -440,27 +440,81 @@ export async function dashboardWindowSummary(
       totalDurationMs: string;
     })[]
   >`
+    /*
+     * The run counters minus what quarantined tests contributed.
+     *
+     * Quarantined tests are excluded from every number on the dashboard, so the headline figures
+     * cannot be read straight from the runs table: those counters are written at ingest and
+     * quarantine is decided afterwards, so they always include tests somebody has since declared
+     * untrustworthy.
+     *
+     * Subtracting a correction rather than recomputing from test_results is what keeps this a read
+     * of the rollups. The correction only touches results belonging to quarantined tests, so its
+     * cost is proportional to how many tests are quarantined -- with none the CTE is empty, the
+     * join matches nothing, and the query costs what it always did. Recomputing every figure from
+     * test_results would abandon the rollups and make each dashboard load a partition scan, which
+     * is what those tables exist to avoid.
+     *
+     * duration_ms is deliberately not corrected. A run took as long as it took; excluding a test
+     * does not give the machine its minutes back.
+     *
+     * No backticks anywhere in here: this comment lives inside a JS template literal, and one
+     * would end the query mid-sentence.
+     */
+    WITH quarantined AS (
+      SELECT tc.id
+      FROM test_cases tc
+      WHERE tc.org_id = ${input.orgId}
+        AND tc.quarantined
+        ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
+    ),
+    scoped AS (
+      SELECT r.id, r.total, r.passed, r.failed, r.errored, r.skipped, r.flaky, r.duration_ms
+      FROM runs r
+      WHERE r.org_id = ${input.orgId}
+        ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
+        AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
+        AND r.total > 0
+    ),
+    correction AS (
+      SELECT
+        count(*)::int                                                   AS total,
+        count(*) FILTER (WHERE tr.status = 'passed')::int                AS passed,
+        count(*) FILTER (WHERE tr.status IN ('failed', 'error'))::int    AS failed,
+        count(*) FILTER (WHERE tr.status = 'skipped')::int               AS skipped,
+        count(*) FILTER (WHERE tr.was_flaky)::int                        AS flaky
+      FROM test_results tr
+      JOIN quarantined q ON q.id = tr.test_case_id
+      JOIN scoped s ON s.id = tr.run_id
+      WHERE tr.org_id = ${input.orgId}
+    )
     SELECT
-      count(*)::int AS runs,
-      COALESCE(sum(r.total), 0)::bigint AS tests,
-      COALESCE(sum(r.passed), 0)::int AS passed,
-      COALESCE(sum(r.failed + r.errored), 0)::int AS failed,
-      COALESCE(sum(r.skipped), 0)::int AS skipped,
-      COALESCE(sum(r.flaky), 0)::int AS flaky,
+      (SELECT count(*)::int FROM scoped) AS runs,
+      GREATEST(COALESCE((SELECT sum(total) FROM scoped), 0) - (SELECT total FROM correction), 0)::bigint
+        AS tests,
+      GREATEST(COALESCE((SELECT sum(passed) FROM scoped), 0) - (SELECT passed FROM correction), 0)::int
+        AS passed,
+      GREATEST(COALESCE((SELECT sum(failed + errored) FROM scoped), 0) - (SELECT failed FROM correction), 0)::int
+        AS failed,
+      GREATEST(COALESCE((SELECT sum(skipped) FROM scoped), 0) - (SELECT skipped FROM correction), 0)::int
+        AS skipped,
+      GREATEST(COALESCE((SELECT sum(flaky) FROM scoped), 0) - (SELECT flaky FROM correction), 0)::int
+        AS flaky,
       CASE
-        WHEN COALESCE(sum(r.passed + r.failed + r.errored), 0) = 0 THEN NULL
+        WHEN GREATEST(
+               COALESCE((SELECT sum(passed + failed + errored) FROM scoped), 0)
+                 - (SELECT passed + failed FROM correction), 0) = 0 THEN NULL
         ELSE ROUND(
-          sum(r.passed)::numeric * 100 / sum(r.passed + r.failed + r.errored),
+          GREATEST(COALESCE((SELECT sum(passed) FROM scoped), 0) - (SELECT passed FROM correction), 0)::numeric
+            * 100
+            / GREATEST(
+                COALESCE((SELECT sum(passed + failed + errored) FROM scoped), 0)
+                  - (SELECT passed + failed FROM correction), 1),
           2
         )
       END AS "passRate",
-      avg(r.duration_ms)::int AS "avgDurationMs",
-      COALESCE(sum(r.duration_ms), 0)::bigint AS "totalDurationMs"
-    FROM runs r
-    WHERE r.org_id = ${input.orgId}
-      ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
-      AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
-      AND r.total > 0
+      (SELECT avg(duration_ms)::int FROM scoped) AS "avgDurationMs",
+      COALESCE((SELECT sum(duration_ms) FROM scoped), 0)::bigint AS "totalDurationMs"
   `;
 
   const row = rows[0];
@@ -511,12 +565,41 @@ export async function runSeries(
         r.started_at,
         to_char(r.started_at AT TIME ZONE ${zone}, 'Mon DD HH24:MI') AS label,
         r.name, r.branch, r.status,
-        r.total, r.passed, r.skipped, r.flaky,
-        (r.failed + r.errored) AS failed,
-        r.pass_rate::float8 AS "passRate",
+        /*
+         * Each counter less what quarantined tests contributed to this run, and the pass rate
+         * recomputed from the corrected pair rather than read from r.pass_rate -- that column was
+         * written at ingest, before anybody quarantined anything, so using it would leave the
+         * plotted line disagreeing with the totals above it on the same page.
+         *
+         * The lateral runs once per plotted run and only over results belonging to quarantined
+         * tests. With none quarantined it matches no rows and costs nothing.
+         */
+        GREATEST(r.total - q.total, 0) AS total,
+        GREATEST(r.passed - q.passed, 0) AS passed,
+        GREATEST(r.skipped - q.skipped, 0) AS skipped,
+        GREATEST(r.flaky - q.flaky, 0) AS flaky,
+        GREATEST(r.failed + r.errored - q.failed, 0) AS failed,
+        CASE
+          WHEN GREATEST(r.passed + r.failed + r.errored - q.passed - q.failed, 0) = 0 THEN 0
+          ELSE ROUND(
+            GREATEST(r.passed - q.passed, 0)::numeric * 100
+              / GREATEST(r.passed + r.failed + r.errored - q.passed - q.failed, 1),
+            2)
+        END::float8 AS "passRate",
         r.duration_ms AS "durationMs"
       FROM runs r
       JOIN projects p ON p.id = r.project_id AND p.org_id = ${input.orgId}
+      LEFT JOIN LATERAL (
+        SELECT
+          count(*)::int                                                AS total,
+          count(*) FILTER (WHERE tr.status = 'passed')::int             AS passed,
+          count(*) FILTER (WHERE tr.status IN ('failed', 'error'))::int AS failed,
+          count(*) FILTER (WHERE tr.status = 'skipped')::int            AS skipped,
+          count(*) FILTER (WHERE tr.was_flaky)::int                     AS flaky
+        FROM test_results tr
+        JOIN test_cases tc ON tc.id = tr.test_case_id AND tc.quarantined
+        WHERE tr.org_id = ${input.orgId} AND tr.run_id = r.id
+      ) q ON TRUE
       WHERE r.org_id = ${input.orgId}
         ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
         AND r.started_at >= (now() - (${days - 1} || ' days')::interval)::date
@@ -785,6 +868,8 @@ export async function failureCategories(
       count(DISTINCT r.failure_signature)::int     AS signatures,
       max(r.started_at)                            AS "lastSeenAt"
     FROM test_results r
+    -- Joined only to drop quarantined tests; the grouping needs nothing else from test_cases.
+    JOIN test_cases tc ON tc.id = r.test_case_id AND NOT tc.quarantined
     WHERE r.org_id = ${input.orgId}
       ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
       AND r.status IN ('failed', 'error')
@@ -838,6 +923,8 @@ export async function recentFailureSummaries(
       (array_agg(r.test_case_id ORDER BY r.started_at DESC))[1]       AS "sampleTestCaseId"
     FROM test_results r
     JOIN projects p ON p.id = r.project_id AND p.org_id = ${input.orgId}
+    -- Joined only to drop quarantined tests; the ranking needs nothing else from test_cases.
+    JOIN test_cases tc ON tc.id = r.test_case_id AND NOT tc.quarantined
     WHERE r.org_id = ${input.orgId}
       ${input.projectId ? sql`AND r.project_id = ${input.projectId}` : sql``}
       AND r.status IN ('failed', 'error')
@@ -1096,6 +1183,8 @@ export async function failureConcentration(
     WHERE tc.org_id = ${input.orgId}
       ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
       AND tc.failures_30d > 0
+      -- Quarantined tests are excluded from every ranking on the dashboard.
+      AND NOT tc.quarantined
     ORDER BY tc.failures_30d DESC
     LIMIT ${limit}
   `;
@@ -1108,6 +1197,8 @@ export async function failureConcentration(
     WHERE tc.org_id = ${input.orgId}
       ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
       AND tc.failures_30d > 0
+      -- Quarantined tests are excluded from every ranking on the dashboard.
+      AND NOT tc.quarantined
   `;
 
   const totalFailures = totals[0]?.total ?? 0;

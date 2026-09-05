@@ -812,8 +812,11 @@ function ActThree() {
         A test&rsquo;s own page adds the rest: fail rate, average and p95 duration, its distinct
         failure modes grouped by the signature from act two, and every failure in full with branch,
         commit, attempts, stack and captured output. If a test is known-flaky and drowning the
-        dashboards, <Term>quarantine</Term> it — the test stays visible and still reported, it just
-        stops dominating the numbers. Quarantine is not skipping, and it is not deleting.
+        dashboards, <Term>quarantine</Term> it. The test still runs, still uploads and still has its
+        own page and history; what changes is that every figure on a dashboard stops counting it —
+        the pass rate, the trends, the failure tiles and all three leaderboards alike. Quarantine is
+        not skipping, and it is not deleting: nothing about the run changes, only what the summaries
+        are willing to draw a conclusion from.
       </P>
     </Act>
   );
