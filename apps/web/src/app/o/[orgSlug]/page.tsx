@@ -336,10 +336,19 @@ export default async function OrgDashboard({
             </Card>
           </div>
 
-          {/* Four across at 2xl, two at lg. The donut sits beside the pass-rate trend
-              because the pair answers "how are we doing" and "how did the last one go" —
-              the two questions people arrive with, in that order. */}
-          <div className="mb-5 grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+          {/*
+           * Three across, matching the project overview exactly.
+           *
+           * This row held four cards once, and the `lg:grid-cols-2 2xl:grid-cols-3` it kept
+           * afterwards was left over from that: with three cards it put two on one line and
+           * dropped "CI time per run" onto a row of its own at every width below 1536px, so the
+           * organisation dashboard and the project overview — the same cards, differing only in
+           * what they are scoped to — disagreed about their own layout.
+           *
+           * The donut sits beside the pass-rate trend because the pair answers "how are we doing"
+           * and "how did the last one go", the two questions people arrive with, in that order.
+           */}
+          <div className="mb-5 grid gap-5 lg:grid-cols-3">
             <Card className="p-4">
               {branchView ? (
                 <RankedBars
