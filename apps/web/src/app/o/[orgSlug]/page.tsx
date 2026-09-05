@@ -661,7 +661,84 @@ export default async function OrgDashboard({
         </Card>
       )}
 
+      {/*
+       * Same three cards, same order, as the project overview: recent runs, then the two
+       * leaderboards. They differ only in scope.
+       *
+       * Recent runs used to sit outside this grid as a full-width card below it, which put
+       * the two leaderboards first and left the run list stretched across a width its rows do
+       * not need. Inside the grid it takes the first cell and the leaderboards follow, so the
+       * page reads newest-activity-first the way the overview does.
+       */}
       <div className="grid gap-5 lg:grid-cols-2">
+        <Card className="overflow-hidden">
+          <CardHeader
+            title="Recent runs"
+            action={
+              <Link href={`/o/${orgSlug}/runs`} className="text-[11px] underline">
+                view all
+              </Link>
+            }
+          />
+          {recent.runs.length === 0 ? (
+            <p className="px-5 py-6 text-center text-xs text-[var(--color-ink-muted)]">
+              No runs yet.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-border-subtle)]">
+              {recent.runs.map((run) => {
+                const failingCount = run.failed + run.errored;
+                return (
+                  <li key={run.id} className="flex items-center gap-4 px-5 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* No action control here on purpose: this is a glance widget whose
+                            names are already truncated at 12px. Run actions live on the runs
+                            list and the run's own page. */}
+                        <Link
+                          href={`/o/${orgSlug}/runs/${run.id}`}
+                          className="truncate text-xs font-medium hover:underline"
+                        >
+                          {run.name ?? run.framework ?? "Run"}
+                        </Link>
+                        <StatusBadge status={run.status} />
+                        {/* A badge is information, not a control — which is why it belongs on
+                            this glance widget even though the action menu deliberately does
+                            not. "Which of these still needs review?" is a glance question. */}
+                        {awaitsVerdict(run.status) ? (
+                          <VerdictBadge
+                            verdict={recentVerdicts.get(run.id)?.verdict ?? null}
+                            size="sm"
+                          />
+                        ) : null}
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] text-[var(--color-ink-muted)]">
+                        <span>{run.projectKey}</span>
+                        {run.branch ? <span>{run.branch}</span> : null}
+                        {shortSha(run.commitSha) ? <span>{shortSha(run.commitSha)}</span> : null}
+                        <span>{formatRelativeTime(run.startedAt)}</span>
+                      </div>
+                    </div>
+                    <div className="w-28 shrink-0">
+                      <div className="text-right font-mono text-[11px] tabular-nums">
+                        {formatPercent(run.passRate)}
+                      </div>
+                      <div className="mt-1">
+                        <ResultBar
+                          passed={run.passed}
+                          failed={failingCount}
+                          skipped={run.skipped}
+                          flaky={run.flaky}
+                          total={run.total}
+                        />
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
         <Card className="overflow-hidden">
           <CardHeader
             title="Flakiest tests"
@@ -752,75 +829,6 @@ export default async function OrgDashboard({
           )}
         </Card>
       </div>
-
-      <Card className="mt-5 overflow-hidden">
-        <CardHeader
-          title="Recent runs"
-          action={
-            <Link href={`/o/${orgSlug}/runs`} className="text-[11px] underline">
-              view all
-            </Link>
-          }
-        />
-        {recent.runs.length === 0 ? (
-          <p className="px-5 py-6 text-center text-xs text-[var(--color-ink-muted)]">
-            No runs yet.
-          </p>
-        ) : (
-          <ul className="divide-y divide-[var(--color-border-subtle)]">
-            {recent.runs.map((run) => {
-              const failingCount = run.failed + run.errored;
-              return (
-                <li key={run.id} className="flex items-center gap-4 px-5 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* No action control here on purpose: this is a glance widget whose
-                          names are already truncated at 12px. Run actions live on the runs
-                          list and the run's own page. */}
-                      <Link
-                        href={`/o/${orgSlug}/runs/${run.id}`}
-                        className="truncate text-xs font-medium hover:underline"
-                      >
-                        {run.name ?? run.framework ?? "Run"}
-                      </Link>
-                      <StatusBadge status={run.status} />
-                      {/* A badge is information, not a control — which is why it belongs on
-                          this glance widget even though the action menu deliberately does
-                          not. "Which of these still needs review?" is a glance question. */}
-                      {awaitsVerdict(run.status) ? (
-                        <VerdictBadge
-                          verdict={recentVerdicts.get(run.id)?.verdict ?? null}
-                          size="sm"
-                        />
-                      ) : null}
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap gap-x-3 font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      <span>{run.projectKey}</span>
-                      {run.branch ? <span>{run.branch}</span> : null}
-                      {shortSha(run.commitSha) ? <span>{shortSha(run.commitSha)}</span> : null}
-                      <span>{formatRelativeTime(run.startedAt)}</span>
-                    </div>
-                  </div>
-                  <div className="w-28 shrink-0">
-                    <div className="text-right font-mono text-[11px] tabular-nums">
-                      {formatPercent(run.passRate)}
-                    </div>
-                    <div className="mt-1">
-                      <ResultBar
-                        passed={run.passed}
-                        failed={failingCount}
-                        skipped={run.skipped}
-                        flaky={run.flaky}
-                        total={run.total}
-                      />
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Card>
     </main>
   );
 }
