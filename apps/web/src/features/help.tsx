@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import type { RecentOutcome } from "@testcenter/db";
-import { RUN_VERDICTS, RUN_VERDICT_LABELS, type RunVerdict } from "@testcenter/core";
+import {
+  RUN_VERDICTS,
+  RUN_VERDICT_LABELS,
+  type GateConfig,
+  type GateRuleResult,
+  type RunVerdict,
+} from "@testcenter/core";
 import { OutcomeStrip } from "@/components/charts/outcome-strip";
 import { RankedBars } from "@/components/charts/ranked-bars";
 import { TrendChart } from "@/components/charts/trend-chart";
@@ -17,6 +23,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SearchBox } from "@/components/search-box";
 import { Card, CardHeader, ResultBar, StatTile, StatusBadge, TagChip } from "@/components/ui";
+import { describeGate, GateBadge, GateRuleList } from "@/components/gate-badge";
 import { VerdictBadge } from "@/components/verdict-badge";
 import { CREDIT } from "@/lib/credit";
 import type { ThemePreference } from "@/lib/theme";
@@ -59,7 +66,7 @@ type HelpSection = {
  */
 const ACTS = [
   { id: "ingest", title: "Your CI just ran", hint: "runs and ingest" },
-  { id: "triage", title: "Something is red", hint: "triage and verdicts" },
+  { id: "triage", title: "Something is red", hint: "gates, triage and verdicts" },
   { id: "history", title: "Is it always red?", hint: "history and flakiness" },
   { id: "trends", title: "How are we doing?", hint: "dashboards and reports" },
   { id: "access", title: "Who can do what", hint: "roles and organisations" },
@@ -376,9 +383,63 @@ function ActTwo({
       <SignatureClustering />
 
       <P>
+        Some of that judgement does not need a person at all. Every run is checked against a{" "}
+        <Term>quality gate</Term> the moment it finishes — a short list of things that have to be
+        true, evaluated from the run&rsquo;s own history rather than from a number somebody had to
+        pick.
+      </P>
+
+      <Illustration caption="The gate answers before anyone opens the run. Advisory reports; enforcing stops the build.">
+        <div className="flex flex-wrap items-center gap-2">
+          <GateBadge outcome="passed" />
+          <GateBadge outcome="warned" />
+          <GateBadge outcome="failed" />
+        </div>
+      </Illustration>
+
+      <P>
+        Out of the box it checks two things, and both were chosen because they need no local
+        knowledge to be correct: the run has to have <em>finished</em>, and it must not break a test
+        that was passing. Everything else — a pass-rate floor, a cap on failures — is a number only
+        your team can set, so nothing guesses one for you.
+      </P>
+
+      <Illustration caption="What a gate says about a run that introduced a regression.">
+        <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-3">
+          <p className="mb-2.5 text-[12px] leading-relaxed text-[var(--color-ink-muted)]">
+            {describeGate(HELP_GATE_CONFIG)}
+          </p>
+          <GateRuleList results={HELP_GATE_RESULTS} />
+        </div>
+      </Illustration>
+
+      <P>
+        &ldquo;Finished&rdquo; earns its place: a suite that dies halfway reports <em>fewer</em>{" "}
+        failures than one that ran, so without that check every threshold is passed by crashing. And
+        a new failure is measured against each test&rsquo;s own recent history, not against the
+        previous run — projects receive several unrelated suites, and comparing a nightly regression
+        against a smoke test reports every test the smoke run did not contain as newly broken.
+      </P>
+
+      <Note title="A gate starts by reporting, not blocking">
+        New gates are <Term>advisory</Term>: they judge every run and say what they would have done,
+        while nothing is stopped. That is deliberate — a gate switched straight to blocking spends
+        its first week failing builds for flakes nobody budgeted for, and the lasting result is a
+        team that turned it off. Enforcement is a switch under <Term>Settings → Quality gate</Term>,
+        once the numbers are worth arguing with.
+      </Note>
+
+      <P>
         Then comes the part no amount of parsing can do for you. &ldquo;96%, four failing&rdquo;
         does not distinguish a real regression from a UAT cluster being down, and that distinction
         decides who gets handed the problem. So somebody records a <Term>verdict</Term>.
+      </P>
+
+      <P>
+        The two answers sit side by side on the run, and they are allowed to disagree. A failed gate
+        with a <Term>pass</Term> verdict is the ordinary shape of an accepted known failure: the
+        rules were broken, a person looked, and it was fine. Collapsing them into one status would
+        destroy exactly the information that makes the disagreement worth reading.
       </P>
 
       <Illustration caption="Every verdict, plus the state of a run nobody has looked at yet.">
@@ -442,6 +503,36 @@ const HELP_VERDICT_OPTIONS: { value: HelpVerdictSelection; label: string }[] = [
   { value: "all", label: "All" },
   { value: "todo", label: "TODO / unreviewed" },
   ...RUN_VERDICTS.map((value) => ({ value, label: RUN_VERDICT_LABELS[value] })),
+];
+
+/**
+ * Sample gate data. Realistic rather than tidy — a run that finished and then broke two tests is
+ * the case a reader will actually meet, and a screenshot of an all-green gate teaches nothing.
+ */
+const HELP_GATE_CONFIG: GateConfig = {
+  enabled: true,
+  enforcement: "advisory",
+  modifiers: { ignoreQuarantined: true },
+  rules: [{ rule: "require_complete_run" }, { rule: "no_new_failures", count: 0 }],
+};
+
+const HELP_GATE_RESULTS: GateRuleResult[] = [
+  {
+    key: "require_complete_run",
+    rule: "require_complete_run",
+    outcome: "passed",
+    message: "run completed",
+    actual: null,
+    limit: null,
+  },
+  {
+    key: "no_new_failures",
+    rule: "no_new_failures",
+    outcome: "failed",
+    message: "2 new failures (limit 0)",
+    actual: 2,
+    limit: 0,
+  },
 ];
 
 function helpVerdictHref(verdict: HelpVerdictSelection, search: string): string {

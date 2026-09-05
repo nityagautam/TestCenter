@@ -576,6 +576,57 @@ action here that destroys evidence — the results, their stack traces and the u
 all go, and trends are recalculated without them. Typing the name also makes it impossible
 to delete the run above the one you meant.
 
+### Quality gates — the automatic go/no-go
+
+Every run is checked the moment it finishes, and the result appears as a `gate` badge beside the
+run's status and its verdict.
+
+**Out of the box, two checks, and no configuration required.** A run must have *finished*, and it
+must not break a test that was passing. Both were chosen because they need no local knowledge to
+be right; everything else (a pass-rate floor, a cap on failures) is a number only your team can
+set, so nothing guesses one.
+
+Why those two:
+
+- **Must have finished.** A suite that dies halfway reports *fewer* failures than one that ran, so
+  without this check every threshold is passed by crashing.
+- **No new failures.** Measured against each test's own recent history — the last five times it
+  ran — and not against the previous run. Projects commonly receive several unrelated suites, so
+  comparing a nightly regression against a smoke test would report every test the smoke run did
+  not contain as newly broken. Measured on real data, the run-to-run version reported 264 new
+  failures where the true number of regressions was zero.
+
+**Advisory first.** A new gate reports but does not block: the badge says `gate ! would fail` and
+CI is unaffected. Switch it to *Stop the build* under **Settings → Quality gate** once the numbers
+are worth arguing with. A gate that goes straight to blocking spends its first week failing builds
+for known flakes, and the lasting result is a team that turned it off.
+
+**Three levels.** The organisation sets the default; a project can tighten it or switch it off for
+itself; a branch can override again, so `main` can demand no regressions while feature branches do
+not. Settings pages show what is in force and where each part came from. Editing the
+organisation-wide gate is owner-only — it is the floor under every project at once, including
+projects whose owners are not in the room — while everyone can read it, because "why was my build
+gated" is a question the people who cannot change the policy need answered.
+
+**A gate is not a verdict.** The gate is what the rules computed; the verdict below is what a
+person concluded. They are allowed to disagree, and a failed gate with a `pass` verdict is the
+ordinary shape of an accepted known failure.
+
+Existing history is not judged automatically. To evaluate runs that predate the feature, or to
+re-judge everything after changing a policy:
+
+```bash
+pnpm --filter @testcenter/db backfill-gate            # dry run
+pnpm --filter @testcenter/db backfill-gate -- --apply
+pnpm --filter @testcenter/db backfill-gate -- --apply --force   # re-judge runs already scored
+```
+
+To see what a policy *would* have said before switching it on:
+
+```bash
+pnpm --filter @testcenter/db gate-dry-run -- --project=orders-api --limit=50
+```
+
 ### Verdicts — why a run looked the way it did
 
 A verdict is the one thing Test Center cannot work out for itself. "96%, 2 failing" does not
