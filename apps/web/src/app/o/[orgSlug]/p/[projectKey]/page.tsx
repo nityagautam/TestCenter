@@ -581,12 +581,18 @@ export default async function ProjectOverview({
           </div>
 
           {/*
-           * Slowest tests takes the full width on its own, because its labels need it.
-           * These names are full scenario titles — "SearchNReco Extension - Zone Serviceability
-           * › Test all Product pages for zone serviceability…" — and at a third of the row they
-           * truncate to the shared prefix, which is the one part that does not tell them apart.
+           * The three per-test leaderboards, side by side: slowest, flakiest, most-failing.
+           *
+           * Slowest tests used to take the full width, because these are full scenario titles and a
+           * third of a row truncates them to their shared prefix. Measured after this change, 15 of 20
+           * names truncate at 376px — the cost is real, and was accepted rather than overlooked.
+           *
+           * What it buys is the comparison. Slowest, flakiest and most-failing are three ways of asking
+           * the same question, and side by side a test appearing in two of them is visible at a glance,
+           * where three stacked full-width cards made it a scroll. The full name stays on hover and one
+           * click away, which is the part truncation does not take.
            */}
-          <div className="mb-5">
+          <div className="mb-5 grid gap-5 lg:grid-cols-3">
             <Card className="p-4">
               <RankedBars
                 title="Slowest tests (p95)"
@@ -601,9 +607,71 @@ export default async function ProjectOverview({
                 footnote="p95, not average — a test that is usually fast and occasionally slow is the one worth finding."
               />
             </Card>
+            <Card className="overflow-hidden">
+              {/* Points at this project's leaderboard, not the organisation's — the card
+                  is showing this project's flakes, so "view all" has to mean more of the
+                  same rather than a wider list the reader did not ask for. */}
+              <CardHeader
+                title="Flakiest tests"
+                action={
+                  flaky.length > 0 ? (
+                    <Link href={`${base}/flaky`} className="text-[11px] underline">
+                      view all
+                    </Link>
+                  ) : undefined
+                }
+              />
+              {flaky.length === 0 ? (
+                <p className="px-5 py-5 text-center text-xs text-[var(--color-ink-muted)]">
+                  None detected.
+                </p>
+              ) : (
+                <ul className="divide-y divide-[var(--color-border-subtle)]">
+                  {flaky.map((test) => (
+                    <li key={test.id} className="flex items-center gap-3 px-5 py-2">
+                      <Link
+                        href={`/o/${orgSlug}/tests/${test.id}`}
+                        className="min-w-0 flex-1 truncate text-xs hover:underline"
+                      >
+                        {test.name}
+                      </Link>
+                      <span className="shrink-0 font-mono text-[11px] text-[var(--color-status-flaky)] tabular-nums">
+                        {Number(test.flakeScore).toFixed(0)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+            <Card className="overflow-hidden">
+              <CardHeader title="Most-failing tests" />
+              {failing.length === 0 ? (
+                <p className="px-5 py-5 text-center text-xs text-[var(--color-ink-muted)]">
+                  Nothing failing.
+                </p>
+              ) : (
+                <ul className="divide-y divide-[var(--color-border-subtle)]">
+                  {failing.map((test) => (
+                    <li key={test.id} className="flex items-center gap-3 px-5 py-2">
+                      <Link
+                        href={`/o/${orgSlug}/tests/${test.id}`}
+                        className="min-w-0 flex-1 truncate text-xs hover:underline"
+                      >
+                        {test.name}
+                      </Link>
+                      <span className="shrink-0 font-mono text-[11px] text-[var(--color-status-failed)] tabular-nums">
+                        {test.failures30d}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-2">
+          {/* Recent runs last and full width: it is a list of runs with names, branches and times,
+              and it is the row people scan rather than compare. */}
+          <div className="mb-5">
             <Card className="overflow-hidden">
               <CardHeader
                 title="Recent runs"
@@ -656,70 +724,6 @@ export default async function ProjectOverview({
                 ))}
               </ul>
             </Card>
-
-            <div className="space-y-5">
-              <Card className="overflow-hidden">
-                {/* Points at this project's leaderboard, not the organisation's — the card
-                    is showing this project's flakes, so "view all" has to mean more of the
-                    same rather than a wider list the reader did not ask for. */}
-                <CardHeader
-                  title="Flakiest tests"
-                  action={
-                    flaky.length > 0 ? (
-                      <Link href={`${base}/flaky`} className="text-[11px] underline">
-                        view all
-                      </Link>
-                    ) : undefined
-                  }
-                />
-                {flaky.length === 0 ? (
-                  <p className="px-5 py-5 text-center text-xs text-[var(--color-ink-muted)]">
-                    None detected.
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-[var(--color-border-subtle)]">
-                    {flaky.map((test) => (
-                      <li key={test.id} className="flex items-center gap-3 px-5 py-2">
-                        <Link
-                          href={`/o/${orgSlug}/tests/${test.id}`}
-                          className="min-w-0 flex-1 truncate text-xs hover:underline"
-                        >
-                          {test.name}
-                        </Link>
-                        <span className="shrink-0 font-mono text-[11px] text-[var(--color-status-flaky)] tabular-nums">
-                          {Number(test.flakeScore).toFixed(0)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-
-              <Card className="overflow-hidden">
-                <CardHeader title="Most-failing tests" />
-                {failing.length === 0 ? (
-                  <p className="px-5 py-5 text-center text-xs text-[var(--color-ink-muted)]">
-                    Nothing failing.
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-[var(--color-border-subtle)]">
-                    {failing.map((test) => (
-                      <li key={test.id} className="flex items-center gap-3 px-5 py-2">
-                        <Link
-                          href={`/o/${orgSlug}/tests/${test.id}`}
-                          className="min-w-0 flex-1 truncate text-xs hover:underline"
-                        >
-                          {test.name}
-                        </Link>
-                        <span className="shrink-0 font-mono text-[11px] text-[var(--color-status-failed)] tabular-nums">
-                          {test.failures30d}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-            </div>
           </div>
         </>
       )}

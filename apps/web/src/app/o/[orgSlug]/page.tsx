@@ -608,42 +608,6 @@ export default async function OrgDashboard({
               />
             </Card>
           </div>
-
-          {/*
-           * Slowest tests takes the full width on its own, because its labels need it.
-           * These names are full scenario titles — "SearchNReco Extension - Zone Serviceability
-           * › Test all Product pages for zone serviceability…" — and at a third of the row they
-           * truncate to the shared prefix, which is the one part that does not tell them apart.
-           */}
-          <div className="mb-5">
-            <Card className="p-4">
-              <RankedBars
-                title="Slowest tests (p95)"
-                maxVisible={5}
-                /*
-                 * The project captions each name. The suite path used to sit here instead and
-                 * was removed, because it answered a question nobody asks of a ranking — you
-                 * are looking for *which test*, and the path is one click away on the test's
-                 * own page.
-                 *
-                 * The project is not that. This list spans every project in the organisation,
-                 * so without it a row names a test the reader cannot place, and two projects
-                 * with a similarly-named test are indistinguishable — `orders-api` and
-                 * `checkout-web` both have a `test_case_7`. That is worth the second line the
-                 * suite path was not.
-                 */
-                bars={slowest.map((test) => ({
-                  label: test.name,
-                  scope: test.projectKey,
-                  value: test.p95DurationMs,
-                  display: formatDuration(test.p95DurationMs),
-                  href: `/o/${orgSlug}/tests/${test.id}`,
-                }))}
-                emptyMessage="No duration data yet."
-                footnote="p95, not average — a test that is usually fast and occasionally slow is the one worth finding."
-              />
-            </Card>
-          </div>
         </>
       ) : (
         <Card className="mb-5">
@@ -670,7 +634,139 @@ export default async function OrgDashboard({
        * not need. Inside the grid it takes the first cell and the leaderboards follow, so the
        * page reads newest-activity-first the way the overview does.
        */}
-      <div className="grid gap-5 lg:grid-cols-2">
+      {/*
+       * The three per-test leaderboards, side by side: slowest, flakiest, most-failing.
+       *
+       * Slowest tests used to take the full width, because these are full scenario titles and a
+       * third of a row truncates them to their shared prefix. Measured after this change, 15 of 20
+       * names truncate at 376px — the cost is real, and was accepted rather than overlooked.
+       *
+       * What it buys is the comparison. Slowest, flakiest and most-failing are three ways of asking
+       * the same question, and side by side a test appearing in two of them is visible at a glance,
+       * where three stacked full-width cards made it a scroll. The full name stays on hover and one
+       * click away, which is the part truncation does not take.
+       */}
+      <div className="mb-5 grid gap-5 lg:grid-cols-3">
+        <Card className="p-4">
+          <RankedBars
+            title="Slowest tests (p95)"
+            maxVisible={5}
+            /*
+             * The project captions each name. The suite path used to sit here instead and
+             * was removed, because it answered a question nobody asks of a ranking — you
+             * are looking for *which test*, and the path is one click away on the test's
+             * own page.
+             *
+             * The project is not that. This list spans every project in the organisation,
+             * so without it a row names a test the reader cannot place, and two projects
+             * with a similarly-named test are indistinguishable — `orders-api` and
+             * `checkout-web` both have a `test_case_7`. That is worth the second line the
+             * suite path was not.
+             */
+            bars={slowest.map((test) => ({
+              label: test.name,
+              scope: test.projectKey,
+              value: test.p95DurationMs,
+              display: formatDuration(test.p95DurationMs),
+              href: `/o/${orgSlug}/tests/${test.id}`,
+            }))}
+            emptyMessage="No duration data yet."
+            footnote="p95, not average — a test that is usually fast and occasionally slow is the one worth finding."
+          />
+        </Card>
+        <Card className="overflow-hidden">
+          <CardHeader
+            title="Flakiest tests"
+            action={
+              <Link href={`/o/${orgSlug}/flaky`} className="text-[11px] underline">
+                view all
+              </Link>
+            }
+          />
+          {flaky.length === 0 ? (
+            <p className="px-5 py-6 text-center text-xs text-[var(--color-ink-muted)]">
+              No flaky tests detected. A test counts as flaky when it passes on retry or flips
+              outcome between runs — a consistently failing test is not flaky.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-border-subtle)]">
+              {flaky.map((test) => (
+                <li key={test.id} className="flex items-center gap-3 px-5 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/o/${orgSlug}/tests/${test.id}`}
+                      className="block truncate text-xs font-medium hover:underline"
+                    >
+                      {test.name}
+                    </Link>
+                    <div className="truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
+                      {test.projectKey}
+                      {test.suite ? ` · ${test.suite}` : ""}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="font-mono text-xs text-[var(--color-status-flaky)] tabular-nums">
+                      {Number(test.flakeScore).toFixed(0)}
+                    </div>
+                    <div className="font-mono text-[10px] text-[var(--color-ink-muted)]">
+                      {test.failures30d}/{test.runs30d} failed
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+        <Card className="overflow-hidden">
+          <CardHeader
+            title="Most-failing tests"
+            action={
+              <Link
+                href={`/o/${orgSlug}/tests?status=failing&sort=most-failed`}
+                className="text-[11px] underline"
+              >
+                view all
+              </Link>
+            }
+          />
+          {failing.length === 0 ? (
+            <p className="px-5 py-6 text-center text-xs text-[var(--color-ink-muted)]">
+              Nothing has failed in the last 30 days.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-border-subtle)]">
+              {failing.map((test) => (
+                <li key={test.id} className="flex items-center gap-3 px-5 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/o/${orgSlug}/tests/${test.id}`}
+                      className="block truncate text-xs font-medium hover:underline"
+                    >
+                      {test.name}
+                    </Link>
+                    <div className="truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
+                      {test.projectKey}
+                      {test.suite ? ` · ${test.suite}` : ""}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="font-mono text-xs text-[var(--color-status-failed)] tabular-nums">
+                      {test.failures30d}
+                    </div>
+                    <div className="font-mono text-[10px] text-[var(--color-ink-muted)]">
+                      {formatPercent(test.failRate30d)} of {test.runs30d}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+
+      {/* Recent runs last and full width: it is a list of runs with names, branches and times,
+          and it is the row people scan rather than compare. */}
+      <div className="mb-5">
         <Card className="overflow-hidden">
           <CardHeader
             title="Recent runs"
@@ -736,95 +832,6 @@ export default async function OrgDashboard({
                   </li>
                 );
               })}
-            </ul>
-          )}
-        </Card>
-        <Card className="overflow-hidden">
-          <CardHeader
-            title="Flakiest tests"
-            action={
-              <Link href={`/o/${orgSlug}/flaky`} className="text-[11px] underline">
-                view all
-              </Link>
-            }
-          />
-          {flaky.length === 0 ? (
-            <p className="px-5 py-6 text-center text-xs text-[var(--color-ink-muted)]">
-              No flaky tests detected. A test counts as flaky when it passes on retry or flips
-              outcome between runs — a consistently failing test is not flaky.
-            </p>
-          ) : (
-            <ul className="divide-y divide-[var(--color-border-subtle)]">
-              {flaky.map((test) => (
-                <li key={test.id} className="flex items-center gap-3 px-5 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      href={`/o/${orgSlug}/tests/${test.id}`}
-                      className="block truncate text-xs font-medium hover:underline"
-                    >
-                      {test.name}
-                    </Link>
-                    <div className="truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {test.projectKey}
-                      {test.suite ? ` · ${test.suite}` : ""}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <div className="font-mono text-xs text-[var(--color-status-flaky)] tabular-nums">
-                      {Number(test.flakeScore).toFixed(0)}
-                    </div>
-                    <div className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {test.failures30d}/{test.runs30d} failed
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card className="overflow-hidden">
-          <CardHeader
-            title="Most-failing tests"
-            action={
-              <Link
-                href={`/o/${orgSlug}/tests?status=failing&sort=most-failed`}
-                className="text-[11px] underline"
-              >
-                view all
-              </Link>
-            }
-          />
-          {failing.length === 0 ? (
-            <p className="px-5 py-6 text-center text-xs text-[var(--color-ink-muted)]">
-              Nothing has failed in the last 30 days.
-            </p>
-          ) : (
-            <ul className="divide-y divide-[var(--color-border-subtle)]">
-              {failing.map((test) => (
-                <li key={test.id} className="flex items-center gap-3 px-5 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      href={`/o/${orgSlug}/tests/${test.id}`}
-                      className="block truncate text-xs font-medium hover:underline"
-                    >
-                      {test.name}
-                    </Link>
-                    <div className="truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {test.projectKey}
-                      {test.suite ? ` · ${test.suite}` : ""}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <div className="font-mono text-xs text-[var(--color-status-failed)] tabular-nums">
-                      {test.failures30d}
-                    </div>
-                    <div className="font-mono text-[10px] text-[var(--color-ink-muted)]">
-                      {formatPercent(test.failRate30d)} of {test.runs30d}
-                    </div>
-                  </div>
-                </li>
-              ))}
             </ul>
           )}
         </Card>
