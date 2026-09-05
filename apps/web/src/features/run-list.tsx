@@ -9,6 +9,7 @@ import {
 } from "@testcenter/core";
 import {
   findProjectByKey,
+  gateResultsForRuns,
   latestRunVerdicts,
   listRuns,
   runFilterOptions,
@@ -17,6 +18,7 @@ import {
 import { RunActions } from "@/components/run-actions";
 import { FilterMenu } from "@/components/filter-menu";
 import { SearchBox } from "@/components/search-box";
+import { GateBadge } from "@/components/gate-badge";
 import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import { Button, Card, EmptyState, ResultBar, StatusBadge, TagChip } from "@/components/ui";
 import { formatDuration, formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
@@ -209,10 +211,12 @@ export async function RunList({
 
   // Batched after the list, since it needs the ids the list resolved. One LATERAL per
   // visible run rather than a query per row.
-  const verdicts = await latestRunVerdicts(sql, {
-    orgId,
-    runIds: page.runs.map((run) => run.id),
-  });
+  const runIds = page.runs.map((run) => run.id);
+  const [verdicts, gates] = await Promise.all([
+    latestRunVerdicts(sql, { orgId, runIds }),
+    // Same batching for the same reason: a badge per row must not become a query per row.
+    gateResultsForRuns(sql, { orgId, runIds }),
+  ]);
 
   const activeFilters = [
     params.branch
@@ -399,6 +403,13 @@ export async function RunList({
                               size="sm"
                             />
                           ) : null}
+                          {/* Renders nothing when no gate applied, so older runs and
+                              opted-out projects stay uncluttered. */}
+                          <GateBadge
+                            outcome={gates.get(run.id)?.outcome ?? null}
+                            results={gates.get(run.id)?.results}
+                            size="sm"
+                          />
                           {run.flaky > 0 ? (
                             <StatusBadge status="flaky">{run.flaky} flaky</StatusBadge>
                           ) : null}

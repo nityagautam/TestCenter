@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  gateResultForRun,
   getRun,
   getRunResult,
   listRunResults,
@@ -11,6 +12,7 @@ import {
 import { Card, CardHeader, EmptyState, ResultBar, StatTile, StatusBadge } from "@/components/ui";
 import { OutcomeStrip } from "@/components/charts/outcome-strip";
 import { RunActions } from "@/components/run-actions";
+import { describeGate, GateBadge, GateRuleList, GateVerdictLine } from "@/components/gate-badge";
 import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import { RunProgress } from "@/components/run-progress";
 import {
@@ -63,7 +65,7 @@ export default async function RunPage({
   if (!run) notFound();
 
   const limit = Math.min(Math.max(Number(query.limit ?? 200), 25), 500);
-  const [resultPage, suites, selected, verdicts] = await Promise.all([
+  const [resultPage, suites, selected, verdicts, gate] = await Promise.all([
     listRunResults(
       sql,
       {
@@ -78,6 +80,9 @@ export default async function RunPage({
     summarizeRunSuites(sql, runId),
     query.result ? getRunResult(sql, { runId, resultId: Number(query.result) }) : null,
     runVerdictHistory(sql, { orgId, runId, limit: 10 }),
+    // Null for runs that finished before the gate existed, and for a project that switched it
+    // off. The badge renders nothing in that case rather than asserting a verdict nobody made.
+    gateResultForRun(sql, { orgId, runId }),
   ]);
 
   /*
@@ -201,6 +206,13 @@ export default async function RunPage({
               {run.name ?? run.framework ?? "Run"}
             </h1>
             <StatusBadge status={run.status} />
+            {/*
+             * Machine before human, left to right, because that is the order they happen: the
+             * gate judges the moment the run lands, and the verdict is somebody's response to it
+             * — often to the gate itself. Reading them the other way round asks what a person
+             * concluded before saying what they were reacting to.
+             */}
+            <GateBadge outcome={gate?.outcome ?? null} results={gate?.results} />
             {/* Always shown once the run has finished — TODO when nobody has judged it, so
               an unreviewed run is visibly unreviewed rather than silently blank. */}
             {awaitsVerdict(run.status) ? (
@@ -364,6 +376,14 @@ export default async function RunPage({
         </div>
       ) : null}
 
+      {/*
+       * The gate's reasoning, above the counters it judged.
+       *
+       * Shown whenever a gate applied, not only when it failed. A rule list that appears only on
+       * breach teaches people the gate is an error message; showing the satisfied rules too is
+       * what makes "0 new failures" a fact somebody can rely on rather than an absence they have
+       * to infer. Bordered only when something broke, so a passing gate is quiet.
+       */}
       {run.warnings.length > 0 ? (
         <Card className="mb-6 border-[var(--color-status-flaky)]/40">
           <CardHeader title="Import warnings" />
@@ -401,6 +421,66 @@ export default async function RunPage({
           />
         </div>
       </Card>
+
+      {/*
+       * Collapsed by default, and a native <details> rather than a client toggle.
+       *
+       * The badge in the header already carries the outcome, so the panel's job is only to
+       * explain it — which most readers do not need on most runs, and which was costing a card's
+       * worth of vertical space above the numbers they came for. <details> gives the disclosure
+       * semantics, the keyboard behaviour and aria-expanded for free, works before hydration on a
+       * page that is otherwise entirely server-rendered, and costs nothing in the bundle.
+       *
+       * Open by default when the gate actually failed. A blocking breach stopped somebody's
+       * build; making them click to find out which rule broke is the one case where minimising
+       * the panel would cost more than it saves.
+       */}
+      {gate ? (
+        <Card
+          className={`mb-6 ${
+            gate.breached
+              ? gate.outcome === "failed"
+                ? "border-[var(--color-status-failed)]/40"
+                : "border-[var(--color-status-flaky)]/40"
+              : ""
+          }`}
+        >
+          <details open={gate.outcome === "failed"} className="group/gate">
+            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-5 py-3 text-sm font-medium marker:content-none hover:bg-[var(--color-surface)]/60">
+              {/* The caret is the affordance; it rotates rather than swapping glyphs so the
+                  control reads as one thing in two states. */}
+              <span
+                aria-hidden
+                className="text-[10px] text-[var(--color-ink-muted)] transition-transform group-open/gate:rotate-90"
+              >
+                ▶
+              </span>
+              Quality gate
+              <GateBadge outcome={gate.outcome} size="sm" />
+              <span className="text-[11px] font-normal text-[var(--color-ink-muted)]">
+                {gate.enforcement === "advisory"
+                  ? "advisory — reported, not enforced"
+                  : "enforcing — CI is told to stop on a breach"}
+              </span>
+            </summary>
+
+            <div className="border-t border-[var(--color-border-subtle)] px-5 py-3">
+              {/* The policy in a sentence before the table of numbers. Somebody opening a blocked
+                  run wants to know what was being asked of it, not to reverse-engineer that from
+                  four rows of thresholds. */}
+              <p className="mb-3 text-[12px] leading-relaxed text-[var(--color-ink-muted)]">
+                {describeGate(gate.config)}
+              </p>
+              <GateRuleList results={gate.results} />
+              <GateVerdictLine
+                outcome={gate.outcome}
+                enforcement={gate.enforcement}
+                results={gate.results}
+              />
+            </div>
+          </details>
+        </Card>
+      ) : null}
 
       {/*
        * The verdict log.
