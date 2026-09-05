@@ -7,4 +7,5 @@ export * from "./ingest.js";
 export * from "./queries.js";
 export * from "./access.js";
 export * from "./insights.js";
+export * from "./quality-gate.js";
 export * from "./reports.js";

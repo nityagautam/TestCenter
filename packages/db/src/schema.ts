@@ -17,7 +17,14 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { Tags } from "@testcenter/core";
+import type {
+  GateConfig,
+  GateConfigPatch,
+  GateEnforcement,
+  GateOutcome,
+  GateRuleResult,
+  Tags,
+} from "@testcenter/core";
 
 /**
  * Drizzle schema — typed query surface over the schema defined in sql/.
@@ -529,3 +536,54 @@ export const schemaMigrations = pgTable("schema_migrations", {
   appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
   durationMs: integer("duration_ms"),
 });
+
+/**
+ * Layered gate policy. The layer is derived from which keys are null — org when both are, project
+ * when only `branch` is, branch otherwise — rather than stored, so nothing can disagree with the
+ * keys it is filed under. `0009_quality_gates.sql` carries the CHECK that keeps those three the
+ * only legal shapes.
+ */
+export const qualityGates = pgTable(
+  "quality_gates",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    branch: text("branch"),
+    /** Only the fields this layer sets; everything else inherits from the layer above. */
+    config: jsonb("config").$type<GateConfigPatch>().notNull().default({}),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("quality_gates_project_idx").on(table.orgId, table.projectId)],
+);
+
+/** One row per run. See the table comment in `0009` for why this replaces rather than accumulates. */
+export const runGateResults = pgTable(
+  "run_gate_results",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    outcome: text("outcome").$type<GateOutcome>().notNull(),
+    breached: boolean("breached").notNull(),
+    enforcement: text("enforcement").$type<GateEnforcement>().notNull(),
+    gateVersion: smallint("gate_version").notNull(),
+    /** The config as resolved, so the verdict stays explainable after the policy is edited. */
+    resolvedConfig: jsonb("resolved_config").$type<GateConfig>().notNull(),
+    ruleResults: jsonb("rule_results").$type<GateRuleResult[]>().notNull(),
+    facts: jsonb("facts").$type<Record<string, unknown>>().notNull(),
+    evaluatedAt: timestamp("evaluated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("run_gate_results_run").on(table.runId)],
+);

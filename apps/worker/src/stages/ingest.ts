@@ -13,6 +13,7 @@ import {
   deleteRunResults,
   finalizeRun,
   persistResultBatch,
+  evaluateAndRecordGate,
   refreshTestCaseStats,
   resetRunTotals,
   rollupProjectDay,
@@ -206,6 +207,34 @@ export async function handleIngest(context: IngestContext): Promise<void> {
     const statsUpdated = await refreshTestCaseStats(sql, { projectId, runId });
 
     timings.rollup = Date.now() - started;
+
+    /*
+     * The quality gate, evaluated after the rollups because its rules read the counters they
+     * maintain — running it earlier would judge a run against numbers that were still being
+     * written.
+     *
+     * Wrapped, and deliberately so. A gate is an opinion about a run; the run itself is the
+     * product. A rule that throws — a malformed config saved by a future build, a baseline query
+     * that times out on a pathological history — must not fail an ingest that has already
+     * persisted every result. The failure is logged and the run stands without a verdict, which
+     * reads on the UI as "no gate", the same as a project that never configured one.
+     */
+    try {
+      const gate = await evaluateAndRecordGate(sql, {
+        orgId,
+        projectId,
+        runId,
+        branch: run.branch ?? null,
+      });
+      if (gate) {
+        logger.info(
+          { runId, outcome: gate.outcome, breached: gate.breached, enforcement: gate.enforcement },
+          "quality gate evaluated",
+        );
+      }
+    } catch (error) {
+      logger.error({ err: error, runId }, "quality gate evaluation failed; run is unaffected");
+    }
 
     await db
       .update(schema.ingestJobs)

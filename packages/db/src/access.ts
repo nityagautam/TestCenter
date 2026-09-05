@@ -68,6 +68,26 @@ export const CAPABILITIES = {
    * would quietly tell a whole team to stop looking at it. Reading it stays open to everyone.
    */
   "failure:triage": "admin",
+  /*
+   * Gate policy decides whether builds are allowed to proceed, so it sits with the other
+   * policy capabilities rather than with per-slice annotations like tags and quarantine.
+   * Admin, matching failure:triage: both are claims that apply to work nobody has looked at
+   * yet, and a maintainer changing the bar for everyone is not the same as a maintainer
+   * fixing one project's settings.
+   */
+  "gate:manage": "admin",
+  /*
+   * The organisation-wide gate is a separate, higher capability than a project's.
+   *
+   * A project gate binds one team's own work, which is a maintainer-to-admin sort of decision. The
+   * organisation gate is the floor under every project at once, including projects whose owners
+   * are not in the room — changing it can start blocking a pipeline belonging to a team that never
+   * asked for it. That is an ownership decision, not an administrative one.
+   *
+   * Reading it is unrestricted: everyone whose builds are judged by a policy is entitled to see
+   * what it says, and hiding it only means the rule is discovered by being failed.
+   */
+  "gate:manage-org": "owner",
   "project:create": "maintainer",
   "project:edit": "maintainer",
   /** Archive and restore. Reversible, so it sits with the other admin powers. */

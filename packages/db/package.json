@@ -27,7 +27,9 @@
     "remove-org": "tsx scripts/remove-org.ts",
     "seed-scenarios": "tsx scripts/seed-scenarios.ts",
     "backfill-signatures": "tsx scripts/backfill-failure-signatures.ts",
-    "backfill-identity": "tsx scripts/backfill-failure-identity.ts"
+    "backfill-identity": "tsx scripts/backfill-failure-identity.ts",
+    "gate-dry-run": "tsx scripts/gate-dry-run.ts",
+    "backfill-gate": "tsx scripts/backfill-gate-results.ts"
   },
   "dependencies": {
     "@testcenter/core": "workspace:*",
