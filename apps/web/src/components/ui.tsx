@@ -146,7 +146,15 @@ export function StatTile({
   label: string;
   value: ReactNode;
   tone?: "neutral" | "passed" | "failed" | "flaky" | "skipped";
-  hint?: string;
+  /**
+   * `ReactNode`, not `string`, so a tile can carry a link.
+   *
+   * Widened for the flake score, which is a number arrived at by a formula: without somewhere to
+   * ask how, the tile states a figure the reader has no way to interrogate, and a score you
+   * cannot interrogate is one you are entitled to ignore. Every other caller passes a string,
+   * which is a `ReactNode` already.
+   */
+  hint?: ReactNode;
 }) {
   const toneClass =
     tone === "passed"

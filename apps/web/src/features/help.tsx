@@ -384,9 +384,9 @@ function ActTwo({
 
       <P>
         Some of that judgement does not need a person at all. Every run is checked against a{" "}
-        <Term>quality gate</Term> the moment it finishes — a short list of things that have to be
-        true, evaluated from the run&rsquo;s own history rather than from a number somebody had to
-        pick.
+        <Term>quality gate</Term>&nbsp;the moment it finishes — a short list of things that have to
+        be true, evaluated from the run&rsquo;s own history rather than from a number somebody had
+        to pick.
       </P>
 
       <Illustration caption="The gate answers before anyone opens the run. Advisory reports; enforcing stops the build.">
@@ -719,6 +719,94 @@ function ActThree() {
         time scores zero, and shows up under <em>most-failing</em> instead. Both lists exist, side
         by side, and they deliberately do not overlap.
       </P>
+
+      {/*
+       * Its own anchor: the flake score is linked to from the test detail page, where a number
+       * appears with no way to find out how it was arrived at. A score somebody cannot interrogate
+       * is a score they are entitled to ignore.
+       */}
+      <div id="flake-score" className="tc-help-anchor">
+        <H4>How the flake score is calculated</H4>
+
+        <P>
+          Two signals, combined and then saturated. Both are measured over the last 30 days and
+          recomputed when a run lands, never on read.
+        </P>
+
+        <Table
+          columns={["Signal", "What it counts", "Why it is trusted"]}
+          rows={[
+            [
+              "Retry flakes",
+              "Failed and then passed inside one run",
+              "Needs no history and cannot be explained by anything but nondeterminism",
+            ],
+            [
+              "Status flips",
+              "Outcome changed between consecutive runs, ignoring skips",
+              "Counted only from two flips upward — one transition is a regression, not flakiness",
+            ],
+          ]}
+        />
+
+        <P>
+          That second threshold is what keeps the two lists apart. A test that broke once and stayed
+          broken has exactly one flip, so it scores <Code>0</Code> and appears under most-failing
+          instead. The flake list stays a list of flaky tests rather than a second list of failures.
+        </P>
+
+        <Illustration caption="Both rates are divided by the run count plus four, then run through a saturating curve.">
+          <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] p-4">
+            <p className="font-mono text-[12px] leading-relaxed">
+              score = 100 × (1 − e<sup>−8 × (retryRate + flipRate)</sup>)
+            </p>
+            <p className="mt-2 font-mono text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
+              retryRate = retries ÷ (runs + 4)
+              <br />
+              flipRate&nbsp; = flips ÷ (runs − 1 + 4), and 0 below two flips
+            </p>
+          </div>
+        </Illustration>
+
+        <P>
+          <Term>The curve saturates</Term> because a test flaking 40% of the time and one flaking
+          60% of the time are equally urgent — the difference stops being actionable well before the
+          top of the scale, so the resolution is spent where decisions actually change. A linear
+          weighting was tried first and scored a test needing retries in 30% of its runs below the
+          threshold the dashboard uses to call anything flaky, and below a test that merely failed
+          sometimes with no retries at all.
+        </P>
+
+        <P>
+          <Term>The four</Term>&nbsp;is four pseudo-runs added to every denominator, and it is the
+          part that is easy to miss. Without it the rate is the raw proportion, so one retry in a
+          test&rsquo;s only run is a rate of 1.0 — a perfect 100. A brand-new test that hiccuped
+          once outranked a test that had been flaking in 30 of its last 40 runs, which reserved the
+          top of the leaderboard for its least-evidenced entries: precisely backwards for a list
+          whose job is to say what to fix first.
+        </P>
+
+        <Table
+          columns={["A test that…", "Score"]}
+          rows={[
+            ["failed every run for a month, no retries", "0"],
+            ["broke once and stayed broken", "0"],
+            ["was retried once, in its only run", "80"],
+            ["was retried in 4 of 40 runs (10%)", "52"],
+            ["was retried in 8 of 40 runs (20%)", "77"],
+            ["was retried in 12 of 40 runs (30%)", "89"],
+            ["was retried in 24 of 40 runs (60%)", "99"],
+            ["flipped outcome 6 times in 40 runs", "67"],
+          ]}
+        />
+
+        <P>
+          Smoothing pulls sparse observations down and leaves well-evidenced ones almost untouched:
+          one flake in one run scores 80, while a 30%-of-40-runs flake scores 89 and keeps its place
+          above it. At 40 runs the correction is under two points. The dashboards call a test flaky
+          at <Code>20</Code> and above.
+        </P>
+      </div>
 
       <P>
         A test&rsquo;s own page adds the rest: fail rate, average and p95 duration, its distinct
@@ -1188,11 +1276,30 @@ function Act({ id, title, children }: { id: string; title: string; children: Rea
   );
 }
 
+/**
+ * A heading below an act, for the one place a section needs internal structure.
+ *
+ * `h4` rather than `h3`: the acts are `h2`, and the sample components embedded in this page bring
+ * their own `h2`/`h3` from `CardHeader`. Skipping to `h4` keeps the document outline monotonic
+ * where those illustrations land, which is the outline a screen-reader user navigates by.
+ */
+function H4({ children }: { children: ReactNode }) {
+  return <h4 className="mt-8 mb-2 text-[13px] font-semibold">{children}</h4>;
+}
+
 function P({ children }: { children: ReactNode }) {
   return <p className="text-[13px] leading-relaxed">{children}</p>;
 }
 
-/** Bold-ish, never a link: the vocabulary being introduced, marked once. */
+/**
+ * Bold-ish, never a link: the vocabulary being introduced, marked once.
+ *
+ * Where a `Term` is followed by ordinary prose, write the separating space as `&nbsp;` rather
+ * than leaving it as text. Two places on this page lost that space in the rendered output while a
+ * third, structurally identical, kept it — and an explicit `{" "}` does not survive, because
+ * prettier collapses it back onto one line. The entity renders the same, cannot be collapsed, and
+ * for a two-word emphasised lead-in the non-breaking behaviour is wanted anyway.
+ */
 function Term({ children }: { children: ReactNode }) {
   return <strong className="font-medium">{children}</strong>;
 }

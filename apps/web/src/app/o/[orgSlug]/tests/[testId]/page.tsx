@@ -208,7 +208,21 @@ export default async function TestDetailPage({
             label="Flake score"
             value={Number(test.flakeScore).toFixed(0)}
             tone={Number(test.flakeScore) > 0 ? "flaky" : "neutral"}
-            hint={Number(test.flakeScore) > 0 ? "passes inconsistently" : "stable"}
+            hint={
+              <>
+                {Number(test.flakeScore) > 0 ? "passes inconsistently" : "stable"}{" "}
+                {/* The one number on this page nobody can derive by looking at the rows below it:
+                    it is a formula over two signals with a smoothing constant. The link is here
+                    rather than in a tooltip because the answer is four paragraphs long. */}
+                <Link
+                  href="/help#flake-score"
+                  className="underline hover:text-[var(--color-ink)]"
+                  title="How the flake score is calculated"
+                >
+                  how?
+                </Link>
+              </>
+            }
           />
           <StatTile label="Avg duration" value={formatDuration(test.avgDurationMs)} />
           <StatTile label="p95 duration" value={formatDuration(test.p95DurationMs)} />
