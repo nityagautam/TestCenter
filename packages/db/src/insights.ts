@@ -1248,6 +1248,7 @@ export async function flakeDistribution(
     LEFT JOIN test_cases tc
       ON tc.org_id = ${input.orgId}
       ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
+      AND NOT tc.quarantined
       AND tc.flake_score >= b.lo
       AND tc.flake_score < b.hi
     GROUP BY b.label, b.ord
@@ -2020,6 +2021,10 @@ export async function topFailingTests(
     JOIN projects p ON p.id = tc.project_id
     WHERE tc.org_id = ${input.orgId}
       AND tc.failures_30d > 0
+      -- Excluded like every other dashboard ranking. This one was missed because the query
+      -- already mentioned the column in its SELECT list, which made a grep for 'quarantined'
+      -- look like a filter.
+      AND NOT tc.quarantined
       ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}
     ORDER BY tc.failures_30d DESC, tc.fail_rate_30d DESC
     LIMIT ${limit}
