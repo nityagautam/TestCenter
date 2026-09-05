@@ -349,6 +349,20 @@ export function AppShell({
             Members
           </NavLink>
         ) : null}
+        {/*
+         * Its own entry rather than a section of the organisation page, because it is the one
+         * setting here that changes what happens to every future run rather than describing the
+         * organisation. Somebody arriving to ask "why did my build fail the gate" should find the
+         * answer by name in the sidebar, not by guessing which page it is filed under.
+         *
+         * Shown to everyone, unconditionally, like API tokens below it. Editing the global gate is
+         * owner-only, but reading it is not: the policy judges every member's runs, and a rule you
+         * can only discover by failing it teaches nothing. The page renders read-only for anyone
+         * who cannot change it.
+         */}
+        <NavLink href={`/o/${orgSlug}/settings/quality-gate`} icon="gate" collapsed={collapsed}>
+          Quality gate
+        </NavLink>
         <NavLink href={`/o/${orgSlug}/settings/tokens`} icon="tokens" collapsed={collapsed}>
           API tokens
         </NavLink>

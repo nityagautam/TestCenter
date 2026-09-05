@@ -1,10 +1,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { schema } from "@testcenter/db";
+import { gateLayersFor, getGateLayer, schema } from "@testcenter/db";
 import { archiveProject, deleteProject, restoreProject } from "@/app/actions/projects";
 import { PermissionDenied } from "@/components/permission-denied";
 import { Card, CardHeader } from "@/components/ui";
+import { gatePatchFromForm, QualityGateSettings } from "@/features/quality-gate-settings";
 import { formatRelativeTime } from "@/lib/format";
 import { getServices } from "@/lib/services";
 import { can, requirePageContext, requirePageProject } from "@/lib/viewer";
@@ -59,6 +60,14 @@ export default async function ProjectSettingsPage({
     .where(eq(schema.projects.id, project.id))
     .limit(1);
   const detail = rows[0];
+
+  // The layer this page edits, and everything that applies here — two different reads. See the
+  // note in `QualityGateSettings` for why saving must not merge them.
+  const { sql } = getServices();
+  const [gateLayer, gateLayers] = await Promise.all([
+    getGateLayer(sql, { orgId: context.org.id, projectId: project.id, branch: null }),
+    gateLayersFor(sql, { orgId: context.org.id, projectId: project.id, branch: null }),
+  ]);
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-6">
@@ -216,6 +225,60 @@ export default async function ProjectSettingsPage({
           </button>
         </form>
       </Card>
+
+      {/*
+       * Placed above the destructive cards and below the details, matching how the page already
+       * orders things by how often they are used and how badly they go wrong.
+       */}
+      <QualityGateSettings
+        scope="project"
+        layer={gateLayer}
+        layers={gateLayers}
+        canEdit={can(context, "gate:manage")}
+        description={`What has to be true for a run of ${project.name} to pass. Anything left to inherit follows the organisation policy.`}
+        action={async (formData: FormData) => {
+          "use server";
+          const { requirePageContext: resolve, can: allows } = await import("@/lib/viewer");
+          const current = await resolve(orgSlug);
+          if (!allows(current, "gate:manage")) {
+            redirect(`/o/${orgSlug}/p/${projectKey}/settings?error=Not+permitted`);
+          }
+          const { sql: db2 } = getServices();
+          const {
+            saveGateLayer: save,
+            deleteGateLayer: drop,
+            reevaluateGateForScope: rejudge,
+          } = await import("@testcenter/db");
+
+          if (formData.get("reset")) {
+            await drop(db2, { orgId: current.org.id, projectId: project.id, branch: null });
+            const cleared = await rejudge(db2, {
+              orgId: current.org.id,
+              projectId: project.id,
+            });
+            redirect(
+              `/o/${orgSlug}/p/${projectKey}/settings?ok=${encodeURIComponent(
+                `Cleared; this project now inherits. ${cleared} run${cleared === 1 ? "" : "s"} re-checked.`,
+              )}`,
+            );
+          }
+
+          await save(db2, {
+            orgId: current.org.id,
+            projectId: project.id,
+            branch: null,
+            config: gatePatchFromForm(formData),
+            userId: current.viewer.userId,
+          });
+          // Scoped to this project: an organisation's other projects are unaffected by this layer.
+          const judged = await rejudge(db2, { orgId: current.org.id, projectId: project.id });
+          redirect(
+            `/o/${orgSlug}/p/${projectKey}/settings?ok=${encodeURIComponent(
+              `Saved. ${judged} existing run${judged === 1 ? "" : "s"} re-checked.`,
+            )}`,
+          );
+        }}
+      />
 
       {can(context, "project:archive") ? (
         <Card className="mb-5">

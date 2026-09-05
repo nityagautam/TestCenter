@@ -27,6 +27,7 @@ export type NavIcon =
   | "admin"
   | "upload"
   | "settings"
+  | "gate"
   | "overview"
   | "reports"
   | "help";
@@ -219,6 +220,19 @@ function NavGlyph({ icon }: { icon: NavIcon }) {
       <>
         <path d="M8 11.5 L8 3.5 M5 6.5 L8 3.5 L11 6.5" />
         <path d="M3 12.5 L13 12.5" />
+      </>
+    ),
+    /*
+     * A boom barrier: a post and a bar across the road. Not a shield (that is `admin`) and not a
+     * tick (every status token already owns one) — the metaphor has to say "something is stopped
+     * and checked here" rather than "this is good", because the same icon labels a gate that is
+     * currently failing.
+     */
+    gate: (
+      <>
+        <path d="M3.25 2.5 V13.5" />
+        <rect x="5.25" y="6.25" width="8.25" height="3" rx="0.75" />
+        <path d="M7.75 6.25 L6.25 9.25 M10.75 6.25 L9.25 9.25" />
       </>
     ),
     settings: (

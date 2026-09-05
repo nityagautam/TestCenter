@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { schema } from "@testcenter/db";
@@ -57,7 +58,7 @@ export default async function OrganizationSettingsPage({
         </p>
       ) : null}
 
-      <Card className="p-5">
+      <Card className="mb-5 p-5">
         <h2 className="text-sm font-medium">Identity</h2>
         <p className="mt-1 mb-4 text-xs leading-relaxed text-[var(--color-ink-muted)]">
           The name appears in the header, scope switcher and reports. The URL slug stays fixed so
@@ -126,6 +127,24 @@ export default async function OrganizationSettingsPage({
           </button>
         </form>
       </Card>
+
+      {/* Moved to its own page. A second editor for the same row is how two screens end up
+          disagreeing about which one saved last; a link keeps it findable from here. */}
+      {can(context, "gate:manage") ? (
+        <Card className="p-5">
+          <h2 className="text-sm font-medium">Quality gate</h2>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-muted)]">
+            What has to be true for a run to pass, for every project in this organisation.{" "}
+            <Link
+              href={`/o/${orgSlug}/settings/quality-gate`}
+              className="underline hover:text-[var(--color-ink)]"
+            >
+              Manage the quality gate
+            </Link>
+            .
+          </p>
+        </Card>
+      ) : null}
     </main>
   );
 }
