@@ -53,6 +53,15 @@ export interface TestSearchParams {
 
 const STATUS_FILTERS = [
   { value: "", label: "All" },
+  /*
+   * "Red now" and "Failing" are different questions, and both are worth asking. Red now is the
+   * work queue — what is broken as of its last run. Failing is the wider net: anything that has
+   * failed at all in 30 days, which includes tests that have since recovered.
+   *
+   * Red now comes first because it is the one the header links to and the one people arrive
+   * wanting.
+   */
+  { value: "red", label: "Red now" },
   { value: "failing", label: "Failing" },
   { value: "flaky", label: "Flaky" },
   { value: "passing", label: "Passing" },

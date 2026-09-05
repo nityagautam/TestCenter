@@ -1168,7 +1168,23 @@ export interface OrgSummary {
   projects: number;
   runs30d: number;
   tests30d: number;
-  failing30d: number;
+  /**
+   * Tests whose most recent run failed — the count of things currently broken.
+   *
+   * Replaces a sum of `failed + errored` across every run in 30 days, which counted
+   * *occurrences*: a nightly test broken for a month contributed thirty, so the number grew with
+   * how often CI ran rather than with how much was wrong. On real data the two differ by a third
+   * (752 occurrences against 569 broken tests) and only one of them is a list somebody can work
+   * through.
+   *
+   * Restricted to tests seen in the last 30 days, because `last_status` is sticky: a test that was
+   * deleted or renamed while red keeps that status for ever and would haunt the count with no way
+   * to clear it. Measured here, 81 of 650 were exactly that. Quarantined tests are excluded —
+   * quarantine exists to stop known-bad tests dominating the numbers, and this is a number.
+   */
+  failingNow: number;
+  /** Tests seen in the last 30 days: the denominator that makes `failingNow` mean something. */
+  activeTests: number;
   flaky30d: number;
   passRate30d: number | null;
   runsToday: number;
@@ -1189,8 +1205,16 @@ export async function orgSummary(
       COALESCE(sum(r.total) FILTER (WHERE r.started_at >= now() - INTERVAL '30 days'), 0)::int
         AS "tests30d",
       count(*) FILTER (WHERE r.started_at >= now() - INTERVAL '30 days')::int AS "runs30d",
-      COALESCE(sum(r.failed + r.errored) FILTER (WHERE r.started_at >= now() - INTERVAL '30 days'), 0)::int
-        AS "failing30d",
+      (SELECT count(*)::int FROM test_cases tc
+        WHERE tc.org_id = ${input.orgId}
+          AND tc.last_status IN ('failed', 'error')
+          AND tc.last_seen_at >= now() - INTERVAL '30 days'
+          AND NOT tc.quarantined
+        ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}) AS "failingNow",
+      (SELECT count(*)::int FROM test_cases tc
+        WHERE tc.org_id = ${input.orgId}
+          AND tc.last_seen_at >= now() - INTERVAL '30 days'
+        ${input.projectId ? sql`AND tc.project_id = ${input.projectId}` : sql``}) AS "activeTests",
       COALESCE(sum(r.flaky) FILTER (WHERE r.started_at >= now() - INTERVAL '30 days'), 0)::int
         AS "flaky30d",
       CASE
@@ -1219,7 +1243,8 @@ export async function orgSummary(
       projects: 0,
       runs30d: 0,
       tests30d: 0,
-      failing30d: 0,
+      failingNow: 0,
+      activeTests: 0,
       flaky30d: 0,
       passRate30d: null,
       runsToday: 0,
@@ -1238,7 +1263,8 @@ export interface TestSearchFilter {
   /** Free text over name, classname and suite. */
   query?: string | undefined;
   /** "failing" means it failed at least once in the window. */
-  status?: "failing" | "passing" | "flaky" | "quarantined" | "skipped" | undefined;
+  /** `red` is "its last run failed"; `failing` is "it failed at least once in 30 days". */
+  status?: "failing" | "red" | "passing" | "flaky" | "quarantined" | "skipped" | undefined;
   /*
    * Note: there is deliberately no `tags` field here yet.
    *
@@ -1299,6 +1325,21 @@ function testSearchWhere(sql: Sql, filter: TestSearchFilter) {
   switch (filter.status) {
     case "failing":
       conditions.push(sql`tc.failures_30d > 0`);
+      break;
+    /*
+     * Deliberately distinct from `failing`, which is "failed at least once in 30 days". This is
+     * "is red right now", and the two are different populations — a test that failed once a month
+     * ago and has passed since is in one and not the other.
+     *
+     * It exists because the header counts this and links here: a headline number that lands on a
+     * page showing a different number teaches people not to trust either.
+     */
+    case "red":
+      conditions.push(
+        sql`tc.last_status IN ('failed', 'error')
+            AND tc.last_seen_at >= now() - INTERVAL '30 days'
+            AND NOT tc.quarantined`,
+      );
       break;
     case "passing":
       conditions.push(sql`tc.failures_30d = 0 AND tc.runs_30d > 0`);

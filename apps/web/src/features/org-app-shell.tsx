@@ -60,7 +60,11 @@ export async function OrgAppShell({ orgSlug, children }: { orgSlug: string; chil
         canManageMembers: can(context, "member:manage"),
         canEditOrg: can(context, "org:edit"),
       }}
-      signals={{ failing: summary.failing30d, flaky: summary.flakyTests }}
+      signals={{
+        failing: summary.failingNow,
+        activeTests: summary.activeTests,
+        flaky: summary.flakyTests,
+      }}
       rememberedOrgSlug={rememberedOrgSlug}
       rememberedProjectKey={rememberedProjectKey}
       initialSidebar={sidebar}

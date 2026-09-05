@@ -57,7 +57,14 @@ export interface AppShellProps {
     canEditOrg: boolean;
   };
   /** Live counts so the collapsed rail still carries signal. */
-  signals: { failing: number; flaky: number };
+  /**
+   * Live counts so the collapsed rail still carries signal.
+   *
+   * `failing` is tests whose last run failed, not failures observed — see `orgSummary`. It is
+   * shown over `activeTests` because a bare count answers "how many" without answering "out of
+   * what", and 569 means something quite different against 600 tests than against 6,000.
+   */
+  signals: { failing: number; activeTests: number; flaky: number };
   /** Last organisation stored by the shell, so it only writes when the URL changes it. */
   rememberedOrgSlug: string | null;
   /**
@@ -698,18 +705,29 @@ export function AppShell({
           <div className="ml-auto flex items-center gap-2">
             {signals.failing > 0 ? (
               <Link
-                href={`/o/${orgSlug}/runs?failed=true`}
+                /*
+                 * Lands on exactly the tests this counted. It used to point at the runs list,
+                 * which showed a different population and a different number — a headline that
+                 * disagrees with the page it opens teaches people to trust neither.
+                 */
+                href={`/o/${orgSlug}/tests?status=red`}
                 // The dot is decorative and the count is split across spans, so the name
                 // is stated once here instead of assembled from fragments.
-                aria-label={`${signals.failing} failing tests in the last 30 days. Show runs with failures.`}
+                aria-label={`${signals.failing} of ${signals.activeTests} tests failed their most recent run. Show them.`}
+                title={`${signals.failing} of ${signals.activeTests} tests seen in the last 30 days failed their most recent run`}
                 className="hidden items-center gap-1.5 rounded-md border border-[var(--color-chrome-danger)]/40 px-2 py-1 text-[11px] text-[var(--color-chrome-danger)] hover:bg-[var(--color-chrome-danger)]/10 sm:flex"
               >
                 <span
                   className="inline-block size-1.5 rounded-full bg-[var(--color-chrome-danger)]"
                   aria-hidden
                 />
-                <span className="font-mono tabular-nums">{signals.failing}</span>
-                <span>failing</span>
+                <span className="font-mono tabular-nums">
+                  {signals.failing}
+                  {/* The denominator is muted: it is context for the count, not a second number
+                      competing with it. */}
+                  <span className="opacity-60">/{signals.activeTests}</span>
+                </span>
+                <span>red</span>
               </Link>
             ) : null}
             {/* Announces the shortcut rather than hiding it: a keybinding nobody is
