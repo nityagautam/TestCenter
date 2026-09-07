@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   MAX_RUN_NAME_LENGTH,
   MAX_VERDICT_NOTE_LENGTH,
@@ -21,7 +21,9 @@ import { TagEditor } from "@/components/tag-editor";
  * reintroduced. One menu, labelled once, with room for the next action.
  *
  * The menu only lists what the viewer can actually do, and renders nothing at all when
- * that set is empty, so a viewer's list has no dead controls in it.
+ * that set is empty, so a viewer's list has no dead controls in it. Viewing the test cases
+ * counts as something they can do, so with `canViewResults` the menu is never empty — which is
+ * the point: a read-only viewer still gets the one item that matters to them.
  *
  * Each action expands in place rather than in a modal: renaming shows an input where the
  * name is, deleting shows its confirmation under the row. A modal would cover the very
@@ -48,6 +50,7 @@ export function RunActions({
   canDelete,
   canVerdict = false,
   canEditTags = false,
+  canViewResults = false,
   tags,
   currentVerdict = null,
   deleteRedirectTo,
@@ -63,6 +66,8 @@ export function RunActions({
   canRename: boolean;
   canDelete: boolean;
   canVerdict?: boolean;
+  /** Adds the always-available "View test cases" item. */
+  canViewResults?: boolean;
   /** Tag editing is `run:edit` (member), unlike the admin-only actions beside it. */
   canEditTags?: boolean;
   tags?: Record<string, string>;
@@ -73,6 +78,7 @@ export function RunActions({
   align?: "left" | "right";
 }) {
   const router = useRouter();
+  const params = useSearchParams();
   const [mode, setMode] = useState<Mode>("idle");
   const [draft, setDraft] = useState(name ?? "");
   const [confirmation, setConfirmation] = useState("");
@@ -164,6 +170,24 @@ export function RunActions({
   }
 
   const items: ActionItem[] = [
+    /*
+     * First, and available to everyone.
+     *
+     * It only writes `?results=` and lets the overlay mounted beside this row react — the row is
+     * server-rendered, so a callback could not have been passed down to here anyway.
+     */
+    ...(canViewResults
+      ? [
+          {
+            label: "View test cases…",
+            onSelect: () => {
+              const search = new URLSearchParams(params.toString());
+              search.set("results", runId);
+              router.push(`?${search.toString()}`, { scroll: false });
+            },
+          },
+        ]
+      : []),
     ...(canRename
       ? [{ label: name ? "Rename…" : "Name this run…", onSelect: () => setMode("rename") }]
       : []),

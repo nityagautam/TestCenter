@@ -203,7 +203,9 @@ export function TagChip({
   );
 
   const className =
-    "inline-flex items-center gap-1 rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap";
+    // shrink-0 because the run list scrolls its tag row horizontally: a flex item defaults to
+    // shrinking, which would squeeze every chip into an unreadable column instead of overflowing.
+    "inline-flex shrink-0 items-center gap-1 rounded border border-[var(--color-border-subtle)] px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap";
 
   if (onRemove) {
     return (

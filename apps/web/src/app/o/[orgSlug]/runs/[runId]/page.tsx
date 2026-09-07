@@ -673,7 +673,7 @@ export default async function RunPage({
                   <RunResultsButton
                     orgSlug={orgSlug}
                     runId={runId}
-                    label="all test cases"
+                    label="All test cases"
                     wide
                     className="text-[11px] underline hover:text-[var(--color-ink)]"
                   />
@@ -682,7 +682,7 @@ export default async function RunPage({
                     className="text-[11px] underline hover:text-[var(--color-ink)]"
                     title="Every result in this run as CSV — the whole run, not just the rows shown"
                   >
-                    export CSV
+                    Export CSV
                   </a>
                 </span>
               }

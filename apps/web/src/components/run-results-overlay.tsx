@@ -13,9 +13,9 @@ import { formatDuration } from "@/lib/format";
  * leaving*, which matters when you are scanning a list of twenty runs for the one that broke and
  * do not want to lose your filters to find out.
  *
- * State lives in the URL (`?results=<runId>`), per the convention the rest of this app follows:
- * the view is then shareable, survives a reload, and the back button closes it. A modal held in
- * client state fails all three, and the third is the one people actually try.
+ * State lives in the URL (`?results=<runId>`, `?cols=`), per the convention the rest of this app
+ * follows: the view is then shareable, survives a reload, and the back button closes it. A modal
+ * held in client state fails all three, and the third is the one people actually try.
  */
 
 interface Row {
@@ -54,11 +54,16 @@ export function RunResultsOverlay({
   onClose,
   /** Shown wider on the run page, where there is no list underneath to keep visible. */
   wide = false,
+  showSuite,
+  onToggleSuite,
 }: {
   orgSlug: string;
   runId: string;
   onClose: () => void;
   wide?: boolean;
+  /** Off by default. The suite is usually a path prefix the test name already implies. */
+  showSuite: boolean;
+  onToggleSuite: () => void;
 }) {
   const [page, setPage] = useState<Page | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -200,13 +205,13 @@ export function RunResultsOverlay({
               className="underline hover:text-[var(--color-ink)]"
               title="Every result in this run as CSV, not just this page"
             >
-              export CSV
+              Export CSV
             </a>
             <Link
               href={`/o/${orgSlug}/runs/${runId}`}
               className="underline hover:text-[var(--color-ink)]"
             >
-              open run
+              Open run
             </Link>
             <button
               type="button"
@@ -229,12 +234,64 @@ export function RunResultsOverlay({
               This run has no results. It may still be parsing.
             </p>
           ) : (
-            <table className="w-full text-left text-[12px]">
+            <table className="w-full table-fixed text-left text-[12px]">
+              {/*
+               * Fixed layout with explicit widths, not the browser's auto layout.
+               *
+               * The test cell scrolls horizontally, and an overflow container can only scroll
+               * inside a *definite* width. Under auto layout the column is sized from its own
+               * content, so a 300-character parameterised name widens the column — and therefore
+               * the table — instead of overflowing it, and nothing ever scrolls. Every column but
+               * Test declares a width, which leaves Test the remainder, so hiding the suite hands
+               * its 14rem to the test name rather than redistributing it across all five.
+               */}
+              <colgroup>
+                <col className="w-[6.5rem]" />
+                <col />
+                {showSuite ? <col className="w-[14rem]" /> : null}
+                <col className="w-[6rem]" />
+                <col className="w-[4.5rem]" />
+              </colgroup>
               <thead className="sticky top-0 bg-[var(--color-surface-raised)]">
                 <tr className="border-b border-[var(--color-border-subtle)] text-[10px] tracking-widest text-[var(--color-ink-muted)] uppercase">
                   <th className="px-5 py-2 font-medium">Status</th>
-                  <th className="px-3 py-2 font-medium">Test</th>
-                  <th className="px-3 py-2 font-medium">Suite</th>
+                  <th className="px-3 py-2 font-medium">
+                    {/*
+                     * The column picker is one button and lives where the column would appear,
+                     * rather than in a settings panel listing all five. Only the suite is
+                     * optional, so a general picker would be four permanent rows of chrome to
+                     * express one choice.
+                     */}
+                    <span className="flex items-center gap-1.5">
+                      Test
+                      {showSuite ? null : (
+                        <button
+                          type="button"
+                          onClick={onToggleSuite}
+                          title="Show the suite column"
+                          className="rounded border border-dashed border-[var(--color-border-subtle)] px-1 leading-4 hover:border-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
+                        >
+                          + suite
+                        </button>
+                      )}
+                    </span>
+                  </th>
+                  {showSuite ? (
+                    <th className="px-3 py-2 font-medium">
+                      <span className="flex items-center gap-1.5">
+                        Suite
+                        <button
+                          type="button"
+                          onClick={onToggleSuite}
+                          aria-label="Hide the suite column"
+                          title="Hide the suite column"
+                          className="rounded px-1 leading-4 hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    </th>
+                  ) : null}
                   <th className="px-3 py-2 text-right font-medium">Time</th>
                   <th className="px-5 py-2 text-right font-medium">Flake</th>
                 </tr>
@@ -246,23 +303,43 @@ export function RunResultsOverlay({
                     <td className="px-5 py-2 align-top">
                       <StatusBadge status={row.status} />
                     </td>
-                    <td className="max-w-[38rem] px-3 py-2 align-top">
-                      <Link
-                        href={`/o/${orgSlug}/tests/${row.testCaseId}`}
-                        className="block truncate hover:underline"
-                        title={row.name}
-                      >
-                        {row.name}
-                      </Link>
-                      {/* The failure message is why anyone opened this, so it is on the row
-                          rather than behind another click. */}
-                      {row.failureMessage ? (
-                        <span
-                          className="mt-0.5 block truncate font-mono text-[10px] text-[var(--color-status-failed)]"
-                          title={row.failureMessage}
+                    <td className="px-3 py-2 align-top">
+                      {/*
+                       * Scrolls rather than truncates. The name is what people open this to
+                       * read and copy, and a parameterised name carries its distinguishing part
+                       * at the *end* — exactly what `truncate` throws away.
+                       *
+                       * The scrollbar is hidden: twenty-five rows of gutters is worse than the
+                       * hard right edge, which is a truer signal anyway. An ellipsis would now
+                       * be a lie, since it says "the rest is elsewhere" when the rest is one
+                       * scroll away.
+                       *
+                       * `draggable={false}` is what makes the copy work. Dragging across text
+                       * inside an `<a>` starts a link drag, so the selection never begins and
+                       * the name cannot be swiped — the browser hands you a URL instead.
+                       */}
+                      <div className="tc-no-scrollbar overflow-x-auto">
+                        <Link
+                          href={`/o/${orgSlug}/tests/${row.testCaseId}`}
+                          draggable={false}
+                          className="block whitespace-nowrap hover:underline"
+                          title={row.name}
                         >
-                          {row.failureMessage}
-                        </span>
+                          {row.name}
+                        </Link>
+                      </div>
+                      {/* The failure message is why anyone opened this, so it is on the row
+                          rather than behind another click — and scrollable for the same
+                          reason as the name, since the assertion detail is at its end. */}
+                      {row.failureMessage ? (
+                        <div className="tc-no-scrollbar mt-0.5 overflow-x-auto">
+                          <span
+                            className="block font-mono text-[10px] whitespace-nowrap text-[var(--color-status-failed)]"
+                            title={row.failureMessage}
+                          >
+                            {row.failureMessage}
+                          </span>
+                        </div>
                       ) : null}
                       {row.quarantined ? (
                         <span className="mt-0.5 inline-block rounded bg-[var(--color-status-skipped)]/15 px-1 text-[10px] text-[var(--color-ink-muted)]">
@@ -270,14 +347,16 @@ export function RunResultsOverlay({
                         </span>
                       ) : null}
                     </td>
-                    <td className="max-w-[16rem] px-3 py-2 align-top">
-                      <span
-                        className="block truncate text-[var(--color-ink-muted)]"
-                        title={row.suite ?? ""}
-                      >
-                        {row.suite ?? "—"}
-                      </span>
-                    </td>
+                    {showSuite ? (
+                      <td className="px-3 py-2 align-top">
+                        <span
+                          className="block truncate text-[var(--color-ink-muted)]"
+                          title={row.suite ?? ""}
+                        >
+                          {row.suite ?? "—"}
+                        </span>
+                      </td>
+                    ) : null}
                     <td className="px-3 py-2 text-right align-top font-mono tabular-nums">
                       {/* Number(), because int8 arrives from postgres.js as a string and would
                           otherwise be formatted as text. */}

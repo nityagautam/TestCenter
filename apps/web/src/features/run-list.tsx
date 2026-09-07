@@ -414,9 +414,6 @@ export async function RunList({
                           {run.flaky > 0 ? (
                             <StatusBadge status="flaky">{run.flaky} flaky</StatusBadge>
                           ) : null}
-                          {/* The gap this fills: inspect a run's tests without navigating away
-                              and losing the filters that got you to this row. */}
-                          <RunResultsButton orgSlug={orgSlug} runId={run.id} />
                           {run.warningCount > 0 ? (
                             <span className="rounded bg-[var(--color-status-flaky)]/10 px-1.5 py-0.5 text-[11px] text-[var(--color-status-flaky)]">
                               {run.warningCount} warning{run.warningCount === 1 ? "" : "s"}
@@ -441,17 +438,27 @@ export async function RunList({
                         ) : null}
 
                         {Object.keys(run.tags).length > 0 ? (
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {Object.entries(run.tags)
-                              .slice(0, 6)
-                              .map(([key, value]) => (
-                                <TagChip
-                                  key={key}
-                                  tagKey={key}
-                                  value={value}
-                                  href={addTagHref(base, params, key, value, scoped)}
-                                />
-                              ))}
+                          /*
+                           * One scrolling line, not a wrapping block.
+                           *
+                           * A heavily tagged run wrapped to three lines and pushed the next run
+                           * off the screen, so the list's row height was set by its most verbose
+                           * row. Scrolling keeps every row one line high, which is what makes a
+                           * list scannable.
+                           *
+                           * It also stops truncating the set at six with nothing said about the
+                           * rest — the cap existed only to bound that wrapping, and silently
+                           * hiding a tag someone filters by is worse than a scroll.
+                           */
+                          <div className="tc-no-scrollbar mt-2 flex gap-1 overflow-x-auto">
+                            {Object.entries(run.tags).map(([key, value]) => (
+                              <TagChip
+                                key={key}
+                                tagKey={key}
+                                value={value}
+                                href={addTagHref(base, params, key, value, scoped)}
+                              />
+                            ))}
                           </div>
                         ) : null}
                       </div>
@@ -489,22 +496,32 @@ export async function RunList({
                       {/* Last in the row, past the numbers, so the menu is never between
                           the name and the result it describes. The panels it opens are
                           wider than this column, hence min-w-0 on the wrapper. */}
-                      {canRename || canDelete || canVerdict ? (
-                        <div className="min-w-0 shrink-0">
-                          <RunActions
-                            runId={run.id}
-                            orgSlug={orgSlug}
-                            name={run.name}
-                            fallback={run.framework ?? "Run"}
-                            totalTests={run.total}
-                            canRename={canRename}
-                            canDelete={canDelete}
-                            canVerdict={canVerdict}
-                            currentVerdict={verdicts.get(run.id)?.verdict ?? null}
-                            deleteRedirectTo={base}
-                          />
-                        </div>
-                      ) : null}
+                      {/*
+                       * Unconditional now. The menu always holds "View test cases", so there is
+                       * no viewer for whom this column is empty — and `ActionMenu` still renders
+                       * nothing if it ever were.
+                       */}
+                      <div className="min-w-0 shrink-0">
+                        {/*
+                         * The overlay's mount point, with no trigger of its own: the trigger is
+                         * the first item of the menu beside it. Both read `?results=` from the
+                         * URL, which is what lets a server-rendered row open a client dialog.
+                         */}
+                        <RunResultsButton orgSlug={orgSlug} runId={run.id} trigger="none" />
+                        <RunActions
+                          runId={run.id}
+                          orgSlug={orgSlug}
+                          name={run.name}
+                          fallback={run.framework ?? "Run"}
+                          totalTests={run.total}
+                          canRename={canRename}
+                          canDelete={canDelete}
+                          canVerdict={canVerdict}
+                          currentVerdict={verdicts.get(run.id)?.verdict ?? null}
+                          deleteRedirectTo={base}
+                          canViewResults
+                        />
+                      </div>
                     </div>
                   </li>
                 );
