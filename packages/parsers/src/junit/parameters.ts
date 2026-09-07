@@ -61,12 +61,50 @@ const TRAILING_PARENS = /^(.*?)\s*\(([^()]*)\)\s*$/;
 const LOOKS_LIKE_VALUES = /["'\d]/;
 
 /**
+ * A quoted literal or an unsubstituted placeholder anywhere in the name.
+ *
+ * Only consulted under `inlineValues`. The lookahead skips the token this module writes, or the
+ * second pass matches what the first inserted and the name degenerates to nested tokens.
+ */
+const INLINE_QUOTED = /(["'])((?:(?!\1).)*)\1/g;
+const INLINE_PLACEHOLDER = /<(?!value>)([A-Za-z_][\w .-]*)>/g;
+
+/**
+ * What an inlined value leaves behind in the name.
+ *
+ * Quoted, so a name that quoted its value and one that used a bare placeholder read alike once
+ * both are normalised, and so the result still reads as a sentence with a hole in it rather than
+ * as a mangled title.
+ */
+const VALUE_TOKEN = '"<value>"';
+
+export interface ExtractOptions {
+  /**
+   * Also treat quoted literals and `<PLACEHOLDER>` tokens *anywhere* in the name as parameters.
+   *
+   * Off by default, and opt-in per project rather than global, because it is a guess about naming
+   * rather than a fact about a format. The delimited rules above hold for every producer; this one
+   * holds for a suite that inlines its example values into scenario titles, and is wrong for a
+   * suite whose titles legitimately quote things — "returns \"404\" for a missing brand" and
+   * "returns \"200\" for a known brand" become one test under it.
+   *
+   * The project that enables it is asserting something true about its own conventions. That is a
+   * claim the product cannot make on anybody's behalf, which is exactly why it is a setting and
+   * not a default.
+   */
+  inlineValues?: boolean;
+}
+
+/**
  * Pull whatever is unambiguously a parameter out of a test name.
  *
  * Returns `null` when the name carries no delimited parameters, so callers can leave the result
  * untouched rather than storing an empty object that would look like a considered decision.
  */
-export function extractTestParameters(rawName: string): ExtractedParameters | null {
+export function extractTestParameters(
+  rawName: string,
+  options: ExtractOptions = {},
+): ExtractedParameters | null {
   let name = rawName.trim();
   const parameters: Record<string, string> = {};
 
@@ -98,6 +136,28 @@ export function extractTestParameters(rawName: string): ExtractedParameters | nu
       parameters.arguments = [parameters.arguments, parens[2]!.trim()].filter(Boolean).join(" ");
       name = parens[1]!.trim();
     }
+  }
+
+  if (options.inlineValues) {
+    /*
+     * Numbered rather than named, and numbered by position.
+     *
+     * The name gives no clue what each slot means — "cluster" and "case no" are prose around the
+     * value, not keys for it — so inventing names would be fabricating structure. Position is the
+     * one thing actually known, and it is stable: the same scenario always renders its values in
+     * the same order, so value1 is the same field on every row of an outline.
+     */
+    let slot = 0;
+    name = name.replace(INLINE_QUOTED, (_match, _quote: string, inner: string) => {
+      parameters[`value${(slot += 1)}`] = inner;
+      return VALUE_TOKEN;
+    });
+    name = name.replace(INLINE_PLACEHOLDER, (_match, inner: string) => {
+      // An unexpanded placeholder has no value; its own name is the most that is known.
+      parameters[`value${(slot += 1)}`] = inner;
+      return VALUE_TOKEN;
+    });
+    name = name.replace(/\s+/g, " ").trim();
   }
 
   return Object.keys(parameters).length > 0 ? { name, parameters } : null;

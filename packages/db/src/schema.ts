@@ -136,6 +136,14 @@ export const projects = pgTable(
     description: text("description"),
     defaultBranch: text("default_branch").notNull().default("main"),
     repositoryUrl: text("repository_url"),
+    /**
+     * Whether quoted literals in a test name are data, not part of the name.
+     *
+     * See `0010_group_inline_values.sql`. Off by default, because it is a claim about a suite's
+     * naming rather than a fact about a format, and it is wrong for a suite whose titles quote
+     * things legitimately. Flipping it re-keys every test case in the project.
+     */
+    groupInlineValues: boolean("group_inline_values").notNull().default(false),
     retentionDays: integer("retention_days").notNull().default(365),
     artifactRetentionDays: integer("artifact_retention_days").notNull().default(90),
     settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),

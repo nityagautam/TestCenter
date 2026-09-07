@@ -16,6 +16,14 @@ export interface ParseContext {
   filename: string;
   /** Metadata the uploader declared. Parsed values fill gaps, never override. */
   declaredRun?: Partial<RunMetadata>;
+  /**
+   * Treat quoted literals and `<PLACEHOLDER>` tokens in a test name as parameters.
+   *
+   * A project-scoped claim, read from `projects.group_inline_values` and passed in rather than
+   * looked up here: a parser has no business reading tenant configuration, and the same report
+   * must parse identically wherever it is replayed from.
+   */
+  groupInlineValues?: boolean;
   /** Emit batches no larger than this so memory stays bounded on huge reports. */
   batchSize?: number;
   /** Called as parsing advances, to drive the live upload progress indicator. */

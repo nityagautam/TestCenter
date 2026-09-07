@@ -2,6 +2,7 @@ import type { Readable } from "node:stream";
 import { SaxesParser, type SaxesTag } from "saxes";
 import type { CanonicalTestResult, RetryAttempt, RunMetadata, TestStatus } from "@testcenter/core";
 import { outputLimits } from "@testcenter/core";
+import { extractTestParameters, type ExtractOptions } from "./parameters.js";
 import {
   ParseError,
   type ParseContext,
@@ -156,6 +157,19 @@ export class JUnitXmlParser implements Parser {
     onBatch: (batch: ParsedBatch) => Promise<void>,
   ): Promise<ParseOutcome> {
     const batchSize = context.batchSize ?? DEFAULT_BATCH_SIZE;
+    /*
+     * All parameter hoisting is gated on the project's opt-in, including the delimited rules that
+     * are objectively correct for their formats.
+     *
+     * That is not timidity about the rules; it is about identity. `parameters` feeds the
+     * fingerprint, so populating it re-keys a test case — and turning delimited extraction on
+     * globally would silently split the history of every pytest, JUnit 5 and TestNG test already
+     * stored, on the next upload, with no backfill and no warning. Ungating it is a deliberate
+     * FINGERPRINT_VERSION change with a migration behind it, not a side effect of teaching the
+     * parser a new trick.
+     */
+    const hoistParameters = context.groupInlineValues === true;
+    const extractOptions: ExtractOptions = { inlineValues: true };
     const warnings: ParseWarning[] = [];
     const sanitizeStats: SanitizeStats = { bytesRead: 0, illegalCharsRemoved: 0 };
 
@@ -393,7 +407,12 @@ export class JUnitXmlParser implements Parser {
         case "testcase": {
           if (!currentCase) return;
           const frame = suiteStack[suiteStack.length - 1];
-          const result = buildResult(currentCase, frame, suiteNameFromRoot);
+          const result = buildResult(
+            currentCase,
+            frame,
+            suiteNameFromRoot,
+            hoistParameters ? extractOptions : null,
+          );
           currentCase = null;
 
           if (!frame) {
@@ -498,6 +517,8 @@ function buildResult(
   draft: TestCaseDraft,
   frame: SuiteFrame | undefined,
   rootName: string | undefined,
+  /** Null when the project has not opted in, which leaves the reported name untouched. */
+  options: ExtractOptions | null,
 ): CanonicalTestResult {
   // Surefire expresses retries as extra elements inside one <testcase>:
   //   flakyFailure → an attempt failed but the test ultimately passed
@@ -516,10 +537,20 @@ function buildResult(
   else if (hardFailures.length > 0) status = "failed";
   else status = "passed";
 
+  /*
+   * Parameters hoisted out of the name, which is what `CanonicalTestResult.parameters` has always
+   * been documented for: "parametrized frameworks embed values in the test name; hoisting them
+   * here is what keeps a test's fingerprint stable across parameter sets".
+   *
+   * Both halves still reach the fingerprint, so a variant keeps its own identity and history — the
+   * grouping comes from the name they now share, not from merging them.
+   */
+  const extracted = options ? extractTestParameters(draft.name, options) : null;
   const result: CanonicalTestResult = {
-    name: draft.name,
+    name: extracted ? extracted.name : draft.name,
     status,
   };
+  if (extracted) result.parameters = extracted.parameters;
 
   const suite = resolveSuite(draft, frame, rootName);
   if (suite) result.suite = suite;

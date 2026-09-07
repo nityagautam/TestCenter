@@ -146,12 +146,22 @@ export async function handleIngest(context: IngestContext): Promise<void> {
     let written = 0;
     let persistMs = 0;
 
+    /*
+     * Read once, here, and passed in. The parser must not reach for tenant configuration: the
+     * same report has to parse identically wherever it is replayed from, and a format reader that
+     * queries the database cannot be tested without one.
+     */
+    const [projectRow] = await sql<{ groupInlineValues: boolean }[]>`
+      SELECT group_inline_values AS "groupInlineValues" FROM projects WHERE id = ${projectId}
+    `;
+
     const stream = await blobStore.getStream(artifact.storageKey);
     const outcome = await parser.parse(
       stream,
       {
         projectId,
         filename: artifact.filename,
+        groupInlineValues: projectRow?.groupInlineValues === true,
         batchSize: PERSIST_BATCH_SIZE,
         onProgress: (progress) => {
           void job.updateProgress({

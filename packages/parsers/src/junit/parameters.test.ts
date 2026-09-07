@@ -104,3 +104,66 @@ describe("extractTestParameters — guards", () => {
     });
   });
 });
+
+describe("extractTestParameters — inlineValues, the project-scoped opt-in", () => {
+  const on = { inlineValues: true };
+
+  it("is off unless asked for", () => {
+    // The whole point of the setting: nothing about default behaviour changes when a project has
+    // not made a claim about its own naming.
+    expect(extractTestParameters('cluster "TIRAUAT"')).toBeNull();
+  });
+
+  it("collapses a suite that inlines its example values", () => {
+    const rows = [
+      'Test export on cluster "TIRAUAT" as case no "1" - Example #1.1',
+      'Test export on cluster "JMDUAT" as case no "2" - Example #1.2',
+      'Test export on cluster "SWADESHUAT" as case no "3" - Example #1.5',
+    ];
+    const bases = new Set(rows.map((r) => extractTestParameters(r, on)!.name));
+    expect(bases.size).toBe(1);
+    expect([...bases][0]).toBe('Test export on cluster "<value>" as case no "<value>"');
+  });
+
+  it("keeps each variant individually addressable", () => {
+    // Grouping must not cost identity: the values land in parameters, which are part of the
+    // fingerprint, so the three rows above stay three test cases with three histories.
+    const a = extractTestParameters('cluster "TIRAUAT"', on)!;
+    const b = extractTestParameters('cluster "JMDUAT"', on)!;
+    expect(a.name).toBe(b.name);
+    expect(a.parameters).toEqual({ value1: "TIRAUAT" });
+    expect(b.parameters).toEqual({ value1: "JMDUAT" });
+  });
+
+  it("lands the expanded and unexpanded forms of one scenario together", () => {
+    expect(extractTestParameters('cluster "<CLUSTER>"', on)!.name).toBe(
+      extractTestParameters('cluster "TIRAUAT"', on)!.name,
+    );
+  });
+
+  it("numbers the slots by position, so value1 is the same field on every row", () => {
+    const out = extractTestParameters('a "x" b "y" c "z"', on)!;
+    expect(out.parameters).toEqual({ value1: "x", value2: "y", value3: "z" });
+    expect(out.name).toBe('a "<value>" b "<value>" c "<value>"');
+  });
+
+  it("does what the setting warns about, which is why it is a setting", () => {
+    /*
+     * Two genuinely different tests, merged. Documented here rather than guarded against, because
+     * no rule can tell this apart from an outline — and pretending otherwise is what made the
+     * previous global attempt wrong. A project enabling this is asserting its titles do not work
+     * this way.
+     */
+    const a = extractTestParameters('returns "404" for a missing brand', on)!;
+    const b = extractTestParameters('returns "200" for a known brand', on)!;
+    expect(a.name).toBe('returns "<value>" for a missing brand');
+    expect(b.name).not.toBe(a.name); // differs by prose, so these two survive
+    const c = extractTestParameters('returns "404" for a brand', on)!;
+    const d = extractTestParameters('returns "200" for a brand', on)!;
+    expect(c.name).toBe(d.name); // identical prose: merged, and that is the accepted cost
+  });
+
+  it("still leaves an undecorated name alone", () => {
+    expect(extractTestParameters("Login with valid credentials", on)).toBeNull();
+  });
+});

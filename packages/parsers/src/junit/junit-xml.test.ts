@@ -466,3 +466,50 @@ describe("streaming behaviour", () => {
     expect(stdout).not.toContain("truncated by Test Center");
   });
 });
+
+describe("parameter hoisting is opt-in", () => {
+  const xml = `<testsuite name="s" tests="2">
+    <testcase classname="tests.test_auth" name="test_login[alice-secret]" time="0.1"/>
+    <testcase classname="Export" name="export on cluster &quot;TIRAUAT&quot; - Example #1.2" time="1"/>
+  </testsuite>`;
+
+  async function parse(groupInlineValues: boolean) {
+    const results: CanonicalTestResult[] = [];
+    await junitXmlParser.parse(
+      Readable.from([xml]),
+      { projectId: "p", filename: "r.xml", groupInlineValues },
+      async ({ results: batch }) => {
+        results.push(...batch);
+      },
+    );
+    return results;
+  }
+
+  it("leaves names and parameters untouched by default", async () => {
+    /*
+     * The default has to be inert. `parameters` feeds the fingerprint, so hoisting on by default
+     * would re-key every parameterised test already stored the next time it was uploaded, and
+     * split its history with no backfill and nothing said about it.
+     */
+    const results = await parse(false);
+    expect(results.map((r) => r.name)).toEqual([
+      "test_login[alice-secret]",
+      'export on cluster "TIRAUAT" - Example #1.2',
+    ]);
+    expect(results.every((r) => r.parameters === undefined)).toBe(true);
+  });
+
+  it("hoists parameters out of the name once a project opts in", async () => {
+    const results = await parse(true);
+    expect(results[0]).toMatchObject({
+      name: "test_login",
+      parameters: { arguments: "alice-secret" },
+    });
+    // The example row and the inlined cluster value both become parameters, so every row of this
+    // outline shares one name while keeping its own values.
+    expect(results[1]).toMatchObject({
+      name: 'export on cluster "<value>"',
+      parameters: { example: "1.2", value1: "TIRAUAT" },
+    });
+  });
+});
