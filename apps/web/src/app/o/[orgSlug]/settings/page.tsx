@@ -145,6 +145,32 @@ export default async function OrganizationSettingsPage({
           </p>
         </Card>
       ) : null}
+
+      {/*
+       * The cross-organisation tools, under their own heading, and only for those who have them.
+       *
+       * They used to be a sidebar row beside this page's own entry, which implied the two were the
+       * same kind of thing. They are not: everything above governs this organisation, and this
+       * governs all of them. A menu row cannot say that; a paragraph can.
+       */}
+      {context.viewer.isPlatformAdmin ? (
+        <Card className="mt-5 border-[var(--color-series-2)]/40 p-5">
+          <h2 className="text-sm font-medium">Platform administration</h2>
+          <p className="mt-1 mb-3 max-w-prose text-xs leading-relaxed text-[var(--color-ink-muted)]">
+            Beyond this organisation. Platform administration covers every organisation on this
+            deployment — creating and removing them, and the accounts that can reach them — so
+            nothing there is scoped to {context.org.name}, and a change made there can affect teams
+            who never see this page.
+          </p>
+          <Link
+            href="/admin"
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs hover:border-[var(--color-ink-muted)]"
+          >
+            Open platform administration
+            <span aria-hidden>&rarr;</span>
+          </Link>
+        </Card>
+      ) : null}
     </main>
   );
 }

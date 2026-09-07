@@ -357,7 +357,7 @@ export function AppShell({
 
       <NavSection title="Settings" collapsed={collapsed}>
         {capabilities.canEditOrg ? (
-          <NavLink href={`/o/${orgSlug}/settings`} icon="settings" exact collapsed={collapsed}>
+          <NavLink href={`/o/${orgSlug}/settings`} icon="organisation" exact collapsed={collapsed}>
             Organisation
           </NavLink>
         ) : null}
@@ -388,11 +388,17 @@ export function AppShell({
         <NavLink href={`/o/${orgSlug}/settings/preferences`} icon="settings" collapsed={collapsed}>
           Preferences
         </NavLink>
-        {viewer.isPlatformAdmin ? (
-          <NavLink href="/admin" icon="admin" collapsed={collapsed}>
-            Platform admin
-          </NavLink>
-        ) : null}
+        {/*
+         * Platform admin is not a row here any more; it lives on the organisation page.
+         *
+         * Two adjacent rows implied the two were the same kind of thing, and they are not: one
+         * administers this organisation, the other administers all of them. A sidebar row has no
+         * space to say that, and a page does — so the cross-org tools sit under their own heading
+         * on the organisation settings page, where a sentence can draw the distinction.
+         *
+         * Nobody loses access. A platform admin already acts as owner of every organisation, so
+         * the entry above is visible to them wherever they are.
+         */}
       </NavSection>
 
       {/* Help is navigation, not a chrome control. Keeping it labelled here makes the

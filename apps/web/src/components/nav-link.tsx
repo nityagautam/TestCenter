@@ -27,6 +27,7 @@ export type NavIcon =
   | "admin"
   | "upload"
   | "settings"
+  | "organisation"
   | "gate"
   | "overview"
   | "reports"
@@ -233,6 +234,19 @@ function NavGlyph({ icon }: { icon: NavIcon }) {
         <path d="M3.25 2.5 V13.5" />
         <rect x="5.25" y="6.25" width="8.25" height="3" rx="0.75" />
         <path d="M7.75 6.25 L6.25 9.25 M10.75 6.25 L9.25 9.25" />
+      </>
+    ),
+    /*
+     * A building, for the organisation. Needed because the gear was doing three jobs at once —
+     * project settings, organisation settings and preferences — and an icon shared by three
+     * destinations identifies none of them. The gear now means "your settings" and this means
+     * "the organisation".
+     */
+    organisation: (
+      <>
+        <path d="M3 13.5 V5.5 L8 3 L13 5.5 V13.5" />
+        <path d="M2 13.5 H14" />
+        <path d="M6.5 13.5 V9.5 H9.5 V13.5" />
       </>
     ),
     settings: (
