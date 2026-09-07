@@ -390,35 +390,80 @@ export async function RunList({
                   <li key={run.id} className="px-5 py-3.5 hover:bg-[var(--color-surface)]/60">
                     <div className="flex items-start gap-4">
                       <div className="min-w-0 flex-1">
+                        {/*
+                         * The name yields first; the badges keep their place.
+                         *
+                         * Three properties, each load-bearing:
+                         *
+                         * `basis-0` is what stops the displacement. A flex item whose base size
+                         * is max-content claims the whole line *before* shrinking is considered,
+                         * and line breaking happens first — so a long name took line one to
+                         * itself and pushed every badge onto line two. `min-w-0` cannot fix that,
+                         * because shrinking only ever resolves within a line already chosen.
+                         *
+                         * `max-w-fit` keeps a short name's badges next to it. Growing into the
+                         * free space would otherwise leave "ci #1" at the left margin with its
+                         * status marooned at the right, which reads as two unrelated things.
+                         *
+                         * `min-w-[min(10rem,max-content)]` is the floor, and the `min()` is why
+                         * a floor does not break the line above: a name shorter than 10rem
+                         * clamps to its own width, so only long names claim the 10rem. Without
+                         * it a five-badge row squeezed the name to zero and the badges overflowed
+                         * into the numbers beside them — measured at 1024px.
+                         *
+                         * Wrapping stays enabled for that last case. When even 10rem of name
+                         * cannot share the line, the badges fold as one group rather than
+                         * individually, which is tidier than what they did before and never
+                         * clips a status.
+                         */}
                         <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            href={`/o/${orgSlug}/runs/${run.id}`}
-                            className="text-sm font-medium hover:underline"
-                          >
-                            {run.name ?? run.framework ?? "Run"}
-                          </Link>
-                          <StatusBadge status={run.status} />
-                          {awaitsVerdict(run.status) ? (
-                            <VerdictBadge
-                              verdict={verdicts.get(run.id)?.verdict ?? null}
+                          {/* Scrolls rather than truncates, for the reason the overlay's test
+                              names do — and `draggable={false}` so the name can be swiped and
+                              copied instead of the anchor starting a link drag. */}
+                          <div className="tc-no-scrollbar max-w-fit min-w-[min(10rem,max-content)] flex-1 overflow-x-auto">
+                            <Link
+                              href={`/o/${orgSlug}/runs/${run.id}`}
+                              draggable={false}
+                              title={run.name ?? run.framework ?? "Run"}
+                              className="block text-sm font-medium whitespace-nowrap hover:underline"
+                            >
+                              {run.name ?? run.framework ?? "Run"}
+                            </Link>
+                          </div>
+                          {/*
+                           * One group, so the badges move as a unit and never break apart.
+                           *
+                           * `max-w-full` matters only in the last case: five badges are wider
+                           * than the whole column on a narrow viewport, and `shrink-0` alone
+                           * pins the group at max-content, so it overflowed sideways over the
+                           * pass rate. Capping it at the column lets the group wrap *within
+                           * itself* instead — and because wrapping resolves before shrinking,
+                           * no badge is ever squeezed to do it.
+                           */}
+                          <span className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
+                            <StatusBadge status={run.status} />
+                            {awaitsVerdict(run.status) ? (
+                              <VerdictBadge
+                                verdict={verdicts.get(run.id)?.verdict ?? null}
+                                size="sm"
+                              />
+                            ) : null}
+                            {/* Renders nothing when no gate applied, so older runs and
+                                opted-out projects stay uncluttered. */}
+                            <GateBadge
+                              outcome={gates.get(run.id)?.outcome ?? null}
+                              results={gates.get(run.id)?.results}
                               size="sm"
                             />
-                          ) : null}
-                          {/* Renders nothing when no gate applied, so older runs and
-                              opted-out projects stay uncluttered. */}
-                          <GateBadge
-                            outcome={gates.get(run.id)?.outcome ?? null}
-                            results={gates.get(run.id)?.results}
-                            size="sm"
-                          />
-                          {run.flaky > 0 ? (
-                            <StatusBadge status="flaky">{run.flaky} flaky</StatusBadge>
-                          ) : null}
-                          {run.warningCount > 0 ? (
-                            <span className="rounded bg-[var(--color-status-flaky)]/10 px-1.5 py-0.5 text-[11px] text-[var(--color-status-flaky)]">
-                              {run.warningCount} warning{run.warningCount === 1 ? "" : "s"}
-                            </span>
-                          ) : null}
+                            {run.flaky > 0 ? (
+                              <StatusBadge status="flaky">{run.flaky} flaky</StatusBadge>
+                            ) : null}
+                            {run.warningCount > 0 ? (
+                              <span className="rounded bg-[var(--color-status-flaky)]/10 px-1.5 py-0.5 text-[11px] text-[var(--color-status-flaky)]">
+                                {run.warningCount} warning{run.warningCount === 1 ? "" : "s"}
+                              </span>
+                            ) : null}
+                          </span>
                         </div>
 
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-[var(--color-ink-muted)]">

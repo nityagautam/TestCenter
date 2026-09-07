@@ -203,36 +203,52 @@ export default async function RunPage({
             panels tall enough that a centred row would leave the heading floating at its
             middle. The group keeps title and badges aligned to each other regardless. */}
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">
-              {run.name ?? run.framework ?? "Run"}
-            </h1>
-            <StatusBadge status={run.status} />
-            {/*
-             * Machine before human, left to right, because that is the order they happen: the
-             * gate judges the moment the run lands, and the verdict is somebody's response to it
-             * — often to the gate itself. Reading them the other way round asks what a person
-             * concluded before saying what they were reacting to.
-             */}
-            <GateBadge outcome={gate?.outcome ?? null} results={gate?.results} />
-            {/* Always shown once the run has finished — TODO when nobody has judged it, so
+          {/* Same three properties as the runs list row, for the same reason: `basis-0` so a
+              long title cannot claim the line and displace the badges, `max-w-fit` so a short
+              one keeps them beside it, and a `min()` floor so neither is squeezed to nothing. */}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+            <div className="tc-no-scrollbar max-w-fit min-w-[min(12rem,max-content)] flex-1 overflow-x-auto">
+              <h1
+                className="text-xl font-semibold tracking-tight whitespace-nowrap"
+                title={run.name ?? run.framework ?? "Run"}
+              >
+                {run.name ?? run.framework ?? "Run"}
+              </h1>
+            </div>
+            {/* max-w-full so the group folds within the header rather than over the ⋯ menu
+                when the badge set outgrows a narrow viewport. */}
+            <span className="flex max-w-full shrink-0 flex-wrap items-center gap-3">
+              <StatusBadge status={run.status} />
+              {/*
+               * Machine before human, left to right, because that is the order they happen: the
+               * gate judges the moment the run lands, and the verdict is somebody's response to it
+               * — often to the gate itself. Reading them the other way round asks what a person
+               * concluded before saying what they were reacting to.
+               */}
+              <GateBadge outcome={gate?.outcome ?? null} results={gate?.results} />
+              {/* Always shown once the run has finished — TODO when nobody has judged it, so
               an unreviewed run is visibly unreviewed rather than silently blank. */}
-            {awaitsVerdict(run.status) ? (
-              <VerdictBadge verdict={latestVerdict?.verdict ?? null} />
-            ) : null}
-            {run.shardTotal ? (
-              <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
-                shard {(run.shardIndex ?? 0) + 1}/{run.shardTotal}
-              </span>
-            ) : null}
-            {run.attempt > 1 ? (
-              <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
-                attempt {run.attempt}
-              </span>
-            ) : null}
+              {awaitsVerdict(run.status) ? (
+                <VerdictBadge verdict={latestVerdict?.verdict ?? null} />
+              ) : null}
+              {run.shardTotal ? (
+                <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
+                  shard {(run.shardIndex ?? 0) + 1}/{run.shardTotal}
+                </span>
+              ) : null}
+              {run.attempt > 1 ? (
+                <span className="font-mono text-[11px] text-[var(--color-ink-muted)]">
+                  attempt {run.attempt}
+                </span>
+              ) : null}
+            </span>
           </div>
 
-          {/* Renders nothing when the viewer can do none of these. */}
+          {/* Renders nothing when the viewer can do none of these.
+
+              `flex-1` on the title group beside it is what keeps this on the first line: as a
+              max-content-sized item the group claimed the whole line, and the ⋯ dropped beneath
+              the heading — the same displacement the badges had, one level up. */}
           <div className="flex shrink-0 items-start gap-2">
             <RunActions
               runId={runId}
