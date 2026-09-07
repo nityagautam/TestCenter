@@ -252,7 +252,7 @@ export default async function RunPage({
         {/*
          * The run's identity, as a spec strip rather than a sentence.
          *
-         * This was one mono line — "branch jcp-common-ext commit 02ae8a8 env SWADESHUAT
+         * This was one mono line — "branch web-platform commit 02ae8a8 env UAT-1
          * cucumber-jvm started 1h ago" — where the labels and the values shared a weight, a
          * size and a colour, so finding the environment meant reading the whole line and
          * mentally separating the words that name things from the words that are the answer.

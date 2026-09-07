@@ -211,11 +211,11 @@ describe("failure signatures", () => {
       "AuthError: fpInstall set no cookies (status 403). Check that extension abc is installed.";
     const first = computeFailureSignature(PROJECT, {
       type: "Error",
-      message: `BulkCollection.feature.spec.js:108:5 › Negative Test for bulk collection with file "SWADESHUAT" of case no "3"\n${error}`,
+      message: `collection.feature.spec.js:108:5 › Negative Test for bulk import with file "UAT-1" of case no "3"\n${error}`,
     });
     const second = computeFailureSignature(PROJECT, {
       type: "Error",
-      message: `BulkMOQ.feature.spec.js:117:5 › Positive Test for bulk MOQ export on cluster "TIRASIT" of case no "9"\n${error}`,
+      message: `quantity.feature.spec.js:117:5 › Positive Test for bulk quantity export on cluster "UAT-3" of case no "9"\n${error}`,
     });
     expect(first?.hex).toBe(second?.hex);
   });
@@ -223,7 +223,7 @@ describe("failure signatures", () => {
   it("still separates two different errors that share one scenario title", () => {
     // The other direction: stripping the preamble must not make the signature blind to the
     // error itself, which is what "hash only the first line" would risk if it were too greedy.
-    const title = "BulkCollection.feature.spec.js:108:5 › Negative Test for bulk collection";
+    const title = "collection.feature.spec.js:108:5 › Negative Test for bulk import";
     const auth = computeFailureSignature(PROJECT, {
       type: "Error",
       message: `${title}\nAuthError: fpInstall set no cookies`,
@@ -245,7 +245,7 @@ describe("failure signatures", () => {
     const framed = computeFailureSignature(PROJECT, {
       type: "Error",
       message:
-        'AuthError: no cookies\n   at ../../src/pom/api/JCPAuth.ts:387\n\n  385 |   const c = parse(r);\n> 387 |     throw new AuthError("no cookies");\n      |           ^\n',
+        'AuthError: no cookies\n   at ../../src/pom/api/AuthClient.ts:387\n\n  385 |   const c = parse(r);\n> 387 |     throw new AuthError("no cookies");\n      |           ^\n',
     });
     expect(framed?.hex).toBe(bare?.hex);
   });
@@ -274,8 +274,7 @@ describe("failure signatures", () => {
      * becomes a new test and all history detaches. This asserts the fingerprint of a test whose
      * name looks exactly like a preamble is unchanged by the failure-path work.
      */
-    const looks_like_preamble =
-      'BulkCollection.feature.spec.js:108:5 › Negative Test for case no "3"';
+    const looks_like_preamble = 'collection.feature.spec.js:108:5 › Negative Test for case no "3"';
     const fingerprint = computeFingerprint({
       projectId: PROJECT,
       name: looks_like_preamble,
@@ -283,7 +282,7 @@ describe("failure signatures", () => {
     });
     expect(fingerprint.version).toBe(FINGERPRINT_VERSION);
     // Same name, same identity — and specifically NOT collapsed to the post-preamble remainder.
-    expect(normalizeTestName(looks_like_preamble)).toContain("BulkCollection.feature.spec.js");
+    expect(normalizeTestName(looks_like_preamble)).toContain("collection.feature.spec.js");
   });
 
   it("returns null when there is nothing to cluster on", () => {

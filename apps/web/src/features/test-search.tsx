@@ -159,7 +159,7 @@ export async function TestSearch({
   /*
    * The opening every visible name shares, lifted out of the rows.
    *
-   * Without this the list was fifty rows reading `On Cluster "SWADESHUAT", Negative Produc…`
+   * Without this the list was fifty rows reading `On Cluster "UAT-1", Negative Produc…`
    * — the same 25 characters repeated, with the ellipsis swallowing the only part that told
    * them apart. Computed from the rows actually on screen rather than from the whole result
    * set, so it always describes exactly what is being displayed.
@@ -173,7 +173,7 @@ export async function TestSearch({
    * the framework. Playwright and pytest put a path in `suite`, so its leaf is the useful
    * part. Cucumber puts the file-level report name in `suite` — identical on every row —
    * and the feature in `classname`, so the feature is the useful part. Showing `suite`
-   * unconditionally meant fifty rows repeating "JCP Bulk Upload Ext feature for Bulk SEO —
+   * unconditionally meant fifty rows repeating "Bulk Import feature for SEO —
    * Product Meta", a whole line of height carrying nothing.
    *
    * Whichever is chosen then gets the same shared-prefix treatment as the name, and if

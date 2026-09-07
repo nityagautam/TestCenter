@@ -184,7 +184,7 @@ export function UploadForm({
             <TextInput
               value={name}
               onChange={setName}
-              placeholder="Nightly sanity — SearchNReco"
+              placeholder="Nightly sanity — Catalogue Search"
               maxLength={MAX_RUN_NAME_LENGTH}
             />
           </Field>

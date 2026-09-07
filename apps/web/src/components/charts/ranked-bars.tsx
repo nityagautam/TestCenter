@@ -218,7 +218,7 @@ export function RankedBars({
               );
               /*
                * Project and detail share one caption line, joined the way the flaky
-               * leaderboard joins them — `ext_api_test · JCP Bulk Upload` — rather than
+               * leaderboard joins them — `ext_api_test · Bulk Import` — rather than
                * stacking into a third line. Both are secondary to the name above them, so
                * they get one line between them, and its `title` carries the untruncated text
                * because the suite path is usually what gets elided.

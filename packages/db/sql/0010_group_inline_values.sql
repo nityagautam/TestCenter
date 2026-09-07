@@ -10,8 +10,8 @@
 -- Some suites instead interpolate their example values straight into the scenario
 -- title, with nothing to key off:
 --
---   Test export on cluster "TIRAUAT" as case no "1"
---   Test export on cluster "JMDUAT"  as case no "2"
+--   Test export on cluster "UAT-1" as case no "1"
+--   Test export on cluster "UAT-2"  as case no "2"
 --
 -- Treating every quoted literal as a parameter recovers those. Measured on a real
 -- project it takes 2,542 reported tests to 540 canonical ones, 4.7x, and turns a

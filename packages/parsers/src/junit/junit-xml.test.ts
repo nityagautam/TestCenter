@@ -470,7 +470,7 @@ describe("streaming behaviour", () => {
 describe("parameter hoisting is opt-in", () => {
   const xml = `<testsuite name="s" tests="2">
     <testcase classname="tests.test_auth" name="test_login[alice-secret]" time="0.1"/>
-    <testcase classname="Export" name="export on cluster &quot;TIRAUAT&quot; - Example #1.2" time="1"/>
+    <testcase classname="Export" name="export on cluster &quot;UAT-1&quot; - Example #1.2" time="1"/>
   </testsuite>`;
 
   async function parse(groupInlineValues: boolean) {
@@ -494,7 +494,7 @@ describe("parameter hoisting is opt-in", () => {
     const results = await parse(false);
     expect(results.map((r) => r.name)).toEqual([
       "test_login[alice-secret]",
-      'export on cluster "TIRAUAT" - Example #1.2',
+      'export on cluster "UAT-1" - Example #1.2',
     ]);
     expect(results.every((r) => r.parameters === undefined)).toBe(true);
   });
@@ -509,7 +509,7 @@ describe("parameter hoisting is opt-in", () => {
     // outline shares one name while keeping its own values.
     expect(results[1]).toMatchObject({
       name: 'export on cluster "<value>"',
-      parameters: { example: "1.2", value1: "TIRAUAT" },
+      parameters: { example: "1.2", value1: "UAT-1" },
     });
   });
 });

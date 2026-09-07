@@ -524,7 +524,7 @@ Every one of these lists is read at organisation scope, where test names are dra
 project at once and are not unique.
 
 **Fix** A `scope` field on `RankedBar`, captioning the label on the sub-line it shares with
-`detail`, joined as `ext_api_test · JCP Bulk Upload` — the same shape the flaky leaderboard
+`detail`, joined as `ext_api_test · Bulk Import` — the same shape the flaky leaderboard
 and test search already use for this pair of facts, so the three lists read alike. Under the
 name rather than inline with it so every test name starts at the same x and the eye can run
 down the column of names.
@@ -675,7 +675,7 @@ worse.
 ### B14. Embedding the cluster in the scenario name fragments a test's history
 
 Not a defect in this product, but it shapes what the product can show. The real scenarios
-are named `On Cluster "SWADESHUAT", Positive Brand import with file "SWADESHUAT-…"`, so
+are named `On Cluster "UAT-1", Positive Brand import with file "UAT-1-…"`, so
 the same scenario on a second cluster is a *different* test as far as any dashboard is
 concerned — a separate fingerprint, a separate history, a separate flake score. Running
 four clusters turns 65 scenarios into 353 test cases, and no view can answer "does this

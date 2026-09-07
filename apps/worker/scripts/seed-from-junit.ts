@@ -102,19 +102,29 @@ interface FailureMode {
 }
 
 /**
+ * The token in the source reports that names the cluster or environment.
+ *
+ * Reports commonly embed it in both the scenario name (`On Cluster "UAT-1"`) and the fixture
+ * filenames, so replaying across clusters means rewriting both — which is exactly what a real
+ * multi-cluster run of a suite produces.
+ *
+ * A parameter rather than a constant, because the value is a property of whoever's reports are
+ * being replayed and has no business being written down here. Pass `--source-cluster=NAME` to
+ * match yours; the default only matches the neutral fixtures.
+ */
+const DEFAULT_SOURCE_CLUSTER = "UAT-1";
+
+/**
  * Clusters to replay across.
  *
- * The source reports embed the cluster in both the scenario name (`On Cluster
- * "SWADESHUAT"`) and the fixture filenames, so replaying other clusters means rewriting
- * both — which is exactly what a real multi-cluster run of this suite would produce.
- * SWADESHUAT is the one that actually appears in the reports; the rest are stand-ins so
- * the environment and tag filters have more than one value to offer.
+ * The first is the one assumed to appear in the source reports; the rest are stand-ins, so the
+ * environment and tag filters have more than one value to offer.
  */
 const CLUSTERS = [
-  { name: "SWADESHUAT", environment: "uat", weight: 5 },
-  { name: "SWADESHSTAGE", environment: "staging", weight: 3 },
-  { name: "JIOMARTUAT", environment: "uat", weight: 2 },
-  { name: "SWADESHPROD", environment: "production", weight: 2 },
+  { name: "UAT-1", environment: "uat", weight: 5 },
+  { name: "STAGE-1", environment: "staging", weight: 3 },
+  { name: "UAT-2", environment: "uat", weight: 2 },
+  { name: "PROD-1", environment: "production", weight: 2 },
 ] as const;
 
 const BRANCHES = [
@@ -127,6 +137,9 @@ const BRANCHES = [
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dir = args.find((a) => !a.startsWith("--"));
+  /* The cluster token to substitute out of the source reports. See DEFAULT_SOURCE_CLUSTER. */
+  const sourceCluster =
+    args.find((a) => a.startsWith("--source-cluster="))?.split("=")[1] ?? DEFAULT_SOURCE_CLUSTER;
   const opt = (name: string, fallback: string): string =>
     args.find((a) => a.startsWith(`--${name}=`))?.split("=")[1] ?? fallback;
 
@@ -392,7 +405,7 @@ async function main(): Promise<void> {
           for (const tag of test.cucumberTags) cucumberTagPool.add(tag);
 
           // Cluster substitution: the name and the fixture filenames both carry it.
-          const name = test.name.replaceAll("SWADESHUAT", cluster.name);
+          const name = test.name.replaceAll(sourceCluster, cluster.name);
           const suite = test.suite;
 
           if (skippedFamily && test.family === skippedFamily) {
@@ -445,7 +458,7 @@ async function main(): Promise<void> {
               char.secondaryMode && random() < 0.3 ? char.secondaryMode : char.primaryMode;
             result.failure = {
               type: mode.type,
-              message: mode.message.replaceAll("SWADESHUAT", cluster.name),
+              message: mode.message.replaceAll(sourceCluster, cluster.name),
               stackTrace: mode.stackTrace,
             };
           }
@@ -463,7 +476,7 @@ async function main(): Promise<void> {
           // Captured output only on a sample: every row carrying 4 KB of Cucumber step
           // logs would be most of the database and none of the value.
           if (test.stdout && (failing || random() < 0.05)) {
-            result.stdout = test.stdout.replaceAll("SWADESHUAT", cluster.name);
+            result.stdout = test.stdout.replaceAll(sourceCluster, cluster.name);
           }
 
           results.push(result);
@@ -474,7 +487,7 @@ async function main(): Promise<void> {
           env: cluster.environment,
           suite: branch.pr ? "pr" : "regression",
           ...(cucumberTagPool.size > 0
-            ? { feature: [...cucumberTagPool].sort()[0]?.replace(/^@/, "") ?? "jcp" }
+            ? { feature: [...cucumberTagPool].sort()[0]?.replace(/^@/, "") ?? "acme" }
             : {}),
         };
 
@@ -493,7 +506,7 @@ async function main(): Promise<void> {
             ...(branch.pr ? { prNumber: 4700 + Math.floor(random() * 400) } : {}),
             ciProvider: "github",
             ciBuildId: String(88000 + runsCreated),
-            ciJobUrl: `https://github.example.com/jcp/rattle-terminator/actions/runs/${88000 + runsCreated}`,
+            ciJobUrl: `https://github.example.com/acme/web-platform/actions/runs/${88000 + runsCreated}`,
             attempt: random() < 0.05 ? 2 : 1,
             tags,
             createdByUserId: null,
@@ -614,7 +627,7 @@ function hashString(value: string): number {
   return hash >>> 0;
 }
 
-/** `JCP Bulk Upload Ext feature for Bulk Brand` → `Bulk Brand`; the failure family. */
+/** `Bulk Import feature for Brands` → `Bulk Brand`; the failure family. */
 function familyOf(classname: string): string {
   const match = /for\s+(.+?)(?:\s+#\d+)?$/.exec(classname);
   if (match?.[1]) return match[1].trim();

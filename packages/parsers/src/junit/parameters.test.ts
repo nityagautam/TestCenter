@@ -51,15 +51,15 @@ describe("extractTestParameters — by producer", () => {
 
   it("Cucumber scenario outline", () => {
     const rows = [
-      'Test export on cluster "TIRAUAT" - Example #1.1',
-      'Test export on cluster "JMDUAT" - Example #1.2',
+      'Test export on cluster "UAT-1" - Example #1.1',
+      'Test export on cluster "UAT-2" - Example #1.2',
     ];
     // Grouped by the example suffix alone; the inlined cluster value is NOT touched, so these
     // two remain distinct. That is the honest limit of a delimiter-based rule, and the reason
     // this project's own corpus barely collapses. See the note in parameters.ts.
     expect(groups(rows)).toBe(2);
     expect(extractTestParameters(rows[0]!)).toEqual({
-      name: 'Test export on cluster "TIRAUAT"',
+      name: 'Test export on cluster "UAT-1"',
       parameters: { example: "1.1" },
     });
   });
@@ -111,14 +111,14 @@ describe("extractTestParameters — inlineValues, the project-scoped opt-in", ()
   it("is off unless asked for", () => {
     // The whole point of the setting: nothing about default behaviour changes when a project has
     // not made a claim about its own naming.
-    expect(extractTestParameters('cluster "TIRAUAT"')).toBeNull();
+    expect(extractTestParameters('cluster "UAT-1"')).toBeNull();
   });
 
   it("collapses a suite that inlines its example values", () => {
     const rows = [
-      'Test export on cluster "TIRAUAT" as case no "1" - Example #1.1',
-      'Test export on cluster "JMDUAT" as case no "2" - Example #1.2',
-      'Test export on cluster "SWADESHUAT" as case no "3" - Example #1.5',
+      'Test export on cluster "UAT-1" as case no "1" - Example #1.1',
+      'Test export on cluster "UAT-2" as case no "2" - Example #1.2',
+      'Test export on cluster "UAT-1" as case no "3" - Example #1.5',
     ];
     const bases = new Set(rows.map((r) => extractTestParameters(r, on)!.name));
     expect(bases.size).toBe(1);
@@ -128,16 +128,16 @@ describe("extractTestParameters — inlineValues, the project-scoped opt-in", ()
   it("keeps each variant individually addressable", () => {
     // Grouping must not cost identity: the values land in parameters, which are part of the
     // fingerprint, so the three rows above stay three test cases with three histories.
-    const a = extractTestParameters('cluster "TIRAUAT"', on)!;
-    const b = extractTestParameters('cluster "JMDUAT"', on)!;
+    const a = extractTestParameters('cluster "UAT-1"', on)!;
+    const b = extractTestParameters('cluster "UAT-2"', on)!;
     expect(a.name).toBe(b.name);
-    expect(a.parameters).toEqual({ value1: "TIRAUAT" });
-    expect(b.parameters).toEqual({ value1: "JMDUAT" });
+    expect(a.parameters).toEqual({ value1: "UAT-1" });
+    expect(b.parameters).toEqual({ value1: "UAT-2" });
   });
 
   it("lands the expanded and unexpanded forms of one scenario together", () => {
     expect(extractTestParameters('cluster "<CLUSTER>"', on)!.name).toBe(
-      extractTestParameters('cluster "TIRAUAT"', on)!.name,
+      extractTestParameters('cluster "UAT-1"', on)!.name,
     );
   });
 

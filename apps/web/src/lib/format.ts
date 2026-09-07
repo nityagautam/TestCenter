@@ -168,7 +168,7 @@ export function formatCount(value: number): string {
  * The prefix every one of these strings shares, trimmed to a sensible boundary.
  *
  * Test names are frequently mostly boilerplate. In a Cucumber suite parameterised by
- * cluster, fifty rows all begin `On Cluster "SWADESHUAT", ` — so a list truncated at the
+ * cluster, fifty rows all begin `On Cluster "UAT-1", ` — so a list truncated at the
  * right ends up showing the same 25 characters fifty times and eliding the only part that
  * differs. Lifting the shared opening into a caption once, and dropping it from the rows,
  * gives that space back to the words that actually distinguish them.

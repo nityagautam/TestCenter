@@ -40,9 +40,9 @@ describe("extractFailureIdentity", () => {
        */
       const identity = extractFailureIdentity({
         type: "FAILURE",
-        message: 'bulk.feature.spec.js:8:5 Import brand on cluster "TIRAUAT" of case no "1"',
+        message: 'bulk.feature.spec.js:8:5 Import brand on cluster "UAT-1" of case no "1"',
         stackTrace:
-          "bulk.feature.spec.js:8:5 › Feature › Import brand\n\n    AuthError: fpInstall set no cookies (status 403)\n   at ../../src/pom/api/JCPAuth.ts:387",
+          "bulk.feature.spec.js:8:5 › Feature › Import brand\n\n    AuthError: fpInstall set no cookies (status 403)\n   at ../../src/pom/api/AuthClient.ts:387",
       });
       expect(identity.errorClass).toBe("AuthError");
       expect(identity.source).toBe("stack");
@@ -78,7 +78,7 @@ describe("extractFailureIdentity", () => {
           "y.spec.js:1:1 › Feature › Some scenario",
           "",
           "    AuthError: no cookies for cluster",
-          "   at ../../src/pom/api/JCPAuth.ts:387",
+          "   at ../../src/pom/api/AuthClient.ts:387",
           "",
           "  385 |   const value = await expect(response).toBeOK();",
           "> 387 |     throw new AuthError(`no cookies for cluster ${name}`);",

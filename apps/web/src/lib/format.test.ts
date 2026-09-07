@@ -14,11 +14,11 @@ describe("commonPrefix", () => {
     // The real case: Cucumber scenarios parameterised by cluster.
     expect(
       commonPrefix([
-        'On Cluster "SWADESHUAT", Negative Brand import with file "a.csv"',
-        'On Cluster "SWADESHUAT", Positive Brand import with file "b.csv"',
-        'On Cluster "SWADESHUAT", Partial Brand import with file "c.csv"',
+        'On Cluster "UAT-1", Negative Brand import with file "a.csv"',
+        'On Cluster "UAT-1", Positive Brand import with file "b.csv"',
+        'On Cluster "UAT-1", Partial Brand import with file "c.csv"',
       ]),
-    ).toBe('On Cluster "SWADESHUAT", ');
+    ).toBe('On Cluster "UAT-1", ');
   });
 
   it("returns nothing when the rows do not really share an opening", () => {
@@ -61,10 +61,8 @@ describe("path helpers", () => {
 
   it("treats a bare name as its own leaf with no directory", () => {
     // Cucumber puts a report name, not a path, in `suite`.
-    expect(basename("JCP On-Page SEO — Product page config")).toBe(
-      "JCP On-Page SEO — Product page config",
-    );
-    expect(dirname("JCP On-Page SEO — Product page config")).toBe("");
+    expect(basename("On-Page SEO — Product page config")).toBe("On-Page SEO — Product page config");
+    expect(dirname("On-Page SEO — Product page config")).toBe("");
   });
 });
 
