@@ -15,6 +15,7 @@ import { RunActions } from "@/components/run-actions";
 import { describeGate, GateBadge, GateRuleList, GateVerdictLine } from "@/components/gate-badge";
 import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import { RunProgress } from "@/components/run-progress";
+import { RunResultsButton } from "@/components/run-results-button";
 import {
   formatAbsoluteTime,
   formatDuration,
@@ -69,6 +70,7 @@ export default async function RunPage({
     listRunResults(
       sql,
       {
+        orgId,
         runId,
         status: query.status ? query.status.split(",") : undefined,
         suite: query.suite,
@@ -662,6 +664,19 @@ export default async function RunPage({
                    * `download` is deliberately absent: the header already names the file, and the
                    * attribute would override it with the last path segment, "csv".
                    */}
+                  {/*
+                   * The overlay here is the *wide* view, carrying the columns this table has no
+                   * room for -- failure message, flake score, retries, quarantine. The inline
+                   * table stays as the at-a-glance list with its filters and history strips, so
+                   * the two are not two copies of one thing.
+                   */}
+                  <RunResultsButton
+                    orgSlug={orgSlug}
+                    runId={runId}
+                    label="all test cases"
+                    wide
+                    className="text-[11px] underline hover:text-[var(--color-ink)]"
+                  />
                   <a
                     href={`${base}/export/csv`}
                     className="text-[11px] underline hover:text-[var(--color-ink)]"

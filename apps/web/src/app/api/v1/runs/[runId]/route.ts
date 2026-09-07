@@ -45,6 +45,7 @@ export async function GET(
     const page = await listRunResults(
       sql,
       {
+        orgId: principal.orgId,
         runId,
         status: statusParam ? statusParam.split(",") : undefined,
         suite: url.searchParams.get("suite") ?? undefined,

@@ -294,6 +294,15 @@ export async function getRun(
 }
 
 export interface ResultFilter {
+  /**
+   * Required, like every tenant-scoped query here.
+   *
+   * It was absent, and the run page got away with it by resolving the run through `getRun` with an
+   * `orgId` first and 404ing. That works while there is one caller who remembers; it is not a
+   * property of the query. Now a page of another organisation's results cannot be produced even
+   * by a caller who forgets, which is the point of the rule.
+   */
+  orgId: string;
   runId: string;
   status?: readonly string[] | undefined;
   suite?: string | undefined;
@@ -329,6 +338,14 @@ export interface ResultRow {
 export interface ResultPage {
   results: ResultRow[];
   nextCursor: ResultCursor | null;
+  /**
+   * Rows matching the filter, before the page limit.
+   *
+   * Needed to say "1-25 of 955". The cursor alone can only ever say "there is more", which is
+   * enough for an inline table with a "load more" link and not enough for pagination — a reader
+   * clicking through pages with no idea how many there are cannot tell progress from a treadmill.
+   */
+  total: number;
 }
 
 export interface RunResultExport {
@@ -373,34 +390,55 @@ export async function listRunResults(
   const where = conditions.reduce((combined, condition) => sql`${combined} AND ${condition}`);
   const cursor = options.cursor;
 
-  const rows = await sql<ResultRow[]>`
-    SELECT
-      r.id,
-      r.test_case_id   AS "testCaseId",
-      tc.name,
-      tc.classname,
-      tc.suite,
-      r.status,
-      r.duration_ms    AS "durationMs",
-      r.retry_count    AS "retryCount",
-      r.was_flaky      AS "wasFlaky",
-      r.failure_type   AS "failureType",
-      r.failure_message AS "failureMessage",
-      ${sql.unsafe(STATUS_RANK_SQL)} AS "statusRank",
-      tc.flake_score   AS "flakeScore",
-      tc.quarantined
-    FROM test_results r
-    JOIN test_cases tc ON tc.id = r.test_case_id
-    WHERE ${where}
-    ${
-      cursor
-        ? sql`AND (${sql.unsafe(STATUS_RANK_SQL)}, COALESCE(r.duration_ms, 0), r.id)
-               > (${cursor.statusRank}, ${cursor.durationMs}, ${cursor.id})`
-        : sql``
-    }
-    ORDER BY ${sql.unsafe(STATUS_RANK_SQL)} ASC, COALESCE(r.duration_ms, 0) ASC, r.id ASC
-    LIMIT ${limit + 1}
-  `;
+  /*
+   * The total is its own query, not a window function beside the rows.
+   *
+   * `count(*) OVER()` looked right and was wrong: a window function is evaluated after WHERE, and
+   * the cursor predicate is part of that WHERE — so from page two onwards it would have counted
+   * only the rows *after* the cursor, and "of 955" would shrink every time the reader paged
+   * forward. The count therefore has to come from the same filter *without* the cursor.
+   *
+   * Two round trips, run concurrently, and the count is over one run's rows on an indexed
+   * `run_id`. Cheap enough that correctness wins easily.
+   */
+  const [rows, counted] = await Promise.all([
+    sql<ResultRow[]>`
+      SELECT
+        r.id,
+        r.test_case_id   AS "testCaseId",
+        tc.name,
+        tc.classname,
+        tc.suite,
+        r.status,
+        r.duration_ms    AS "durationMs",
+        r.retry_count    AS "retryCount",
+        r.was_flaky      AS "wasFlaky",
+        r.failure_type   AS "failureType",
+        r.failure_message AS "failureMessage",
+        ${sql.unsafe(STATUS_RANK_SQL)} AS "statusRank",
+        tc.flake_score   AS "flakeScore",
+        tc.quarantined
+      FROM test_results r
+      JOIN runs run ON run.id = r.run_id AND run.org_id = ${filter.orgId}
+      JOIN test_cases tc ON tc.id = r.test_case_id AND tc.org_id = ${filter.orgId}
+      WHERE ${where}
+      ${
+        cursor
+          ? sql`AND (${sql.unsafe(STATUS_RANK_SQL)}, COALESCE(r.duration_ms, 0), r.id)
+                 > (${cursor.statusRank}, ${cursor.durationMs}, ${cursor.id})`
+          : sql``
+      }
+      ORDER BY ${sql.unsafe(STATUS_RANK_SQL)} ASC, COALESCE(r.duration_ms, 0) ASC, r.id ASC
+      LIMIT ${limit + 1}
+    `,
+    sql<{ total: number }[]>`
+      SELECT count(*)::int AS total
+      FROM test_results r
+      JOIN runs run ON run.id = r.run_id AND run.org_id = ${filter.orgId}
+      JOIN test_cases tc ON tc.id = r.test_case_id AND tc.org_id = ${filter.orgId}
+      WHERE ${where}
+    `,
+  ]);
 
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
@@ -412,6 +450,7 @@ export async function listRunResults(
       hasMore && last
         ? { statusRank: last.statusRank, durationMs: last.durationMs ?? 0, id: last.id }
         : null,
+    total: counted[0]?.total ?? 0,
   };
 }
 

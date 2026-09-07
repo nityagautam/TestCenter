@@ -192,7 +192,9 @@ async function main(): Promise<void> {
       runList: await measure(() => listRuns(sql, { orgId }, { limit: 25 })),
       tagFacets: await measure(() => tagFacets(sql, { orgId }, { limit: 24 })),
       filterOptions: await measure(() => runFilterOptions(sql, { orgId })),
-      runResults: await measure(() => listRunResults(sql, { runId: busiestRunId }, { limit: 200 })),
+      runResults: await measure(() =>
+        listRunResults(sql, { orgId, runId: busiestRunId }, { limit: 200 }),
+      ),
       suiteSummary: await measure(() => summarizeRunSuites(sql, busiestRunId)),
     };
 

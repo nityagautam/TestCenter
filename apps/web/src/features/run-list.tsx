@@ -19,6 +19,7 @@ import { RunActions } from "@/components/run-actions";
 import { FilterMenu } from "@/components/filter-menu";
 import { SearchBox } from "@/components/search-box";
 import { GateBadge } from "@/components/gate-badge";
+import { RunResultsButton } from "@/components/run-results-button";
 import { awaitsVerdict, VerdictBadge } from "@/components/verdict-badge";
 import { Button, Card, EmptyState, ResultBar, StatusBadge, TagChip } from "@/components/ui";
 import { formatDuration, formatPercent, formatRelativeTime, shortSha } from "@/lib/format";
@@ -413,6 +414,9 @@ export async function RunList({
                           {run.flaky > 0 ? (
                             <StatusBadge status="flaky">{run.flaky} flaky</StatusBadge>
                           ) : null}
+                          {/* The gap this fills: inspect a run's tests without navigating away
+                              and losing the filters that got you to this row. */}
+                          <RunResultsButton orgSlug={orgSlug} runId={run.id} />
                           {run.warningCount > 0 ? (
                             <span className="rounded bg-[var(--color-status-flaky)]/10 px-1.5 py-0.5 text-[11px] text-[var(--color-status-flaky)]">
                               {run.warningCount} warning{run.warningCount === 1 ? "" : "s"}

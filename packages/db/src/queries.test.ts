@@ -256,7 +256,7 @@ describeIfDb("read-path queries", () => {
 
   it("orders results with failures first", async () => {
     const redRunId = runIds[1] as string;
-    const page = await listRunResults(sql, { runId: redRunId });
+    const page = await listRunResults(sql, { orgId, runId: redRunId });
     expect(page.results).toHaveLength(3);
     // Opening a red run must show what broke without scrolling.
     expect(page.results[0]?.status).toBe("failed");
@@ -265,23 +265,31 @@ describeIfDb("read-path queries", () => {
 
   it("filters results by status and flakiness", async () => {
     const redRunId = runIds[1] as string;
-    const failed = await listRunResults(sql, { runId: redRunId, status: ["failed", "error"] });
+    const failed = await listRunResults(sql, {
+      orgId,
+      runId: redRunId,
+      status: ["failed", "error"],
+    });
     expect(failed.results).toHaveLength(1);
 
-    const flaky = await listRunResults(sql, { runId: redRunId, onlyFlaky: true });
+    const flaky = await listRunResults(sql, { orgId, runId: redRunId, onlyFlaky: true });
     expect(flaky.results).toHaveLength(1);
     expect(flaky.results[0]?.wasFlaky).toBe(true);
   });
 
   it("searches results by name and failure message", async () => {
     const redRunId = runIds[1] as string;
-    const found = await listRunResults(sql, { runId: redRunId, search: "expected Approved" });
+    const found = await listRunResults(sql, {
+      orgId,
+      runId: redRunId,
+      search: "expected Approved",
+    });
     expect(found.results).toHaveLength(1);
   });
 
   it("excludes heavy fields from the list and includes them in the detail", async () => {
     const redRunId = runIds[1] as string;
-    const page = await listRunResults(sql, { runId: redRunId, status: ["failed"] });
+    const page = await listRunResults(sql, { orgId, runId: redRunId, status: ["failed"] });
     const row = page.results[0];
     expect(row).toBeDefined();
     // A 50k-row table must not carry stack traces; they load per-result.
