@@ -456,6 +456,60 @@ export async function listRunResultsForExport(
   return { results: rows, total, truncated: total > rows.length };
 }
 
+/**
+ * Every result in a run, in batches, without ever holding them all.
+ *
+ * The counterpart to `listRunResultsForExport`, which materialises an array and therefore has to
+ * cap it -- 5,000 rows, silently. A run has no upper bound on how many results it holds, so an
+ * export that buffers is a download that scales into an incident; this codebase already paid that
+ * bill once, when a 191 MiB upload cost 1.1 GB of RSS by materialising a body repeatedly.
+ *
+ * Returned as the cursor itself rather than driven by a callback, and that is the load-bearing
+ * detail. A callback pushes rows at whatever pace the database supplies them, so a consumer
+ * writing to a slow socket has to buffer the difference — which is the unbounded memory this
+ * exists to avoid, reintroduced one layer up. An async iterable is *pulled*: the cursor advances
+ * only when the consumer asks for the next batch, so the socket sets the pace and memory stays
+ * proportional to one batch.
+ *
+ * There is no limit and nothing to truncate. The cap existed only because the result had to fit
+ * in memory.
+ *
+ * Both joins carry `org_id`, as every tenant-scoped query here does. An export streaming straight
+ * to a browser is the last place to rely on the caller having checked.
+ */
+export function runResultsExportCursor(
+  sql: Sql,
+  input: { orgId: string; runId: string; batchSize?: number },
+): AsyncIterable<ResultRow[]> {
+  // 500 is a compromise measured in bytes rather than rows: a batch of results carrying failure
+  // messages is a few hundred KB, a sensible chunk to hand a socket, and small enough that a
+  // client which stops reading leaves little resident.
+  const batchSize = Math.min(Math.max(input.batchSize ?? 500, 50), 2_000);
+
+  return sql<ResultRow[]>`
+    SELECT
+      r.id,
+      r.test_case_id    AS "testCaseId",
+      tc.name,
+      tc.classname,
+      tc.suite,
+      r.status,
+      r.duration_ms     AS "durationMs",
+      r.retry_count     AS "retryCount",
+      r.was_flaky       AS "wasFlaky",
+      r.failure_type    AS "failureType",
+      r.failure_message AS "failureMessage",
+      ${sql.unsafe(STATUS_RANK_SQL)} AS "statusRank",
+      tc.flake_score    AS "flakeScore",
+      tc.quarantined
+    FROM test_results r
+    JOIN runs run ON run.id = r.run_id AND run.org_id = ${input.orgId}
+    JOIN test_cases tc ON tc.id = r.test_case_id AND tc.org_id = ${input.orgId}
+    WHERE r.run_id = ${input.runId}
+    ORDER BY ${sql.unsafe(STATUS_RANK_SQL)} ASC, COALESCE(r.duration_ms, 0) ASC, r.id ASC
+  `.cursor(batchSize) as unknown as AsyncIterable<ResultRow[]>;
+}
+
 export interface ResultDetail extends ResultRow {
   stackTrace: string | null;
   stdout: string | null;

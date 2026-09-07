@@ -650,7 +650,26 @@ export default async function RunPage({
             <CardHeader
               title={`Results (${resultPage.results.length}${resultPage.nextCursor ? "+" : ""})`}
               action={
-                <span className="text-[11px] text-[var(--color-ink-muted)]">failures first</span>
+                <span className="flex items-center gap-3">
+                  <span className="text-[11px] text-[var(--color-ink-muted)]">failures first</span>
+                  {/*
+                   * A plain anchor, not a button with a fetch. The response is a stream with
+                   * `Content-Disposition`, so the browser's own download machinery handles it —
+                   * progress, cancellation, and a file too large to hold in a JS variable. Doing
+                   * it in script would mean buffering the whole CSV to make a blob URL, which is
+                   * the thing streaming exists to avoid.
+                   *
+                   * `download` is deliberately absent: the header already names the file, and the
+                   * attribute would override it with the last path segment, "csv".
+                   */}
+                  <a
+                    href={`${base}/export/csv`}
+                    className="text-[11px] underline hover:text-[var(--color-ink)]"
+                    title="Every result in this run as CSV — the whole run, not just the rows shown"
+                  >
+                    export CSV
+                  </a>
+                </span>
               }
             />
             {resultPage.results.length === 0 ? (

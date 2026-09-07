@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { csvFilenamePart, toCsv, type CsvColumn } from "./csv.js";
+import { csvFilenamePart, csvStreamResponse, toCsv, type CsvColumn } from "./csv.js";
 
 /**
  * The interesting cases here are all about values this product does not control: run names,
@@ -121,5 +121,88 @@ describe("csvFilenamePart", () => {
   it("falls back rather than producing an empty filename", () => {
     // A project keyed entirely in a non-Latin script would otherwise yield `testcenter--7d…`.
     expect(csvFilenamePart("・・")).toBe("export");
+  });
+});
+
+describe("csvStreamResponse", () => {
+  interface Row {
+    name: string;
+    duration: number | null;
+  }
+  const columns: CsvColumn<Row>[] = [
+    { header: "name", value: (row) => row.name },
+    { header: "duration", value: (row) => row.duration },
+  ];
+
+  /*
+   * Bytes, not `response.text()`.
+   *
+   * The Fetch spec's UTF-8 decode strips a leading byte-order mark, so `text()` silently removes
+   * the BOM this serialiser goes out of its way to emit — and a test written against it reports
+   * the mark missing when the wire is correct. Excel needs the bytes, so the bytes are what gets
+   * asserted.
+   */
+  async function bytes(batches: Row[][]): Promise<string> {
+    const response = csvStreamResponse("x.csv", columns, {
+      async *[Symbol.asyncIterator]() {
+        for (const batch of batches) yield batch;
+      },
+    });
+    return Buffer.from(await response.arrayBuffer()).toString("utf8");
+  }
+
+  it("produces byte-identical output to the buffered serialiser", async () => {
+    /*
+     * The reason the line builders were factored out at all. A run export streams and a dashboard
+     * export buffers; a second serialiser for the streaming path would be a second set of quoting
+     * and injection rules to keep in step, and the rule that got forgotten would be the one that
+     * matters. This asserts there is only one.
+     */
+    const rows: Row[] = [
+      { name: 'has "quotes", a comma', duration: 12 },
+      { name: "=cmd|' /c calc'!A1", duration: null },
+      { name: "line\nbreak", duration: 3 },
+    ];
+    // Split across batches on purpose: batching must not change a single byte of the result.
+    expect(await bytes([[rows[0]!], [rows[1]!, rows[2]!]])).toBe(toCsv(columns, rows));
+  });
+
+  it("still neutralises a formula in the streamed path", async () => {
+    const text = await bytes([[{ name: "=1+1", duration: null }]]);
+    expect(text).toContain("'=1+1");
+    expect(text).not.toContain("\r\n=1+1");
+  });
+
+  it("emits a header and nothing else for an empty export", async () => {
+    // A run can legitimately hold no results. The file must still be openable and say so by
+    // having a header — a zero-byte download looks like a failure.
+    const text = await bytes([[], []]);
+    expect(text).toBe(`\u{FEFF}name,duration\r\n`);
+  });
+
+  it("sets the download headers, and does not let a cache hold tenant data", async () => {
+    const response = csvStreamResponse("run-x.csv", columns, {
+      async *[Symbol.asyncIterator]() {
+        yield [{ name: "a", duration: 1 }];
+      },
+    });
+    expect(response.headers.get("content-disposition")).toBe('attachment; filename="run-x.csv"');
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+  });
+
+  it("truncates the download rather than pretending it finished", async () => {
+    /*
+     * Status and headers have already left with the first chunk, so a mid-stream failure cannot
+     * become a 500. Erroring the stream makes the browser report a failed transfer, which is
+     * honest; silently closing would leave a file that looks complete and is not.
+     */
+    const response = csvStreamResponse("x.csv", columns, {
+      async *[Symbol.asyncIterator]() {
+        yield [{ name: "first", duration: 1 }];
+        throw new Error("connection lost");
+      },
+    });
+    await expect(response.text()).rejects.toThrow();
   });
 });
