@@ -544,14 +544,14 @@ create a project. A token is displayed **once** — only its hash is stored.
 In GitHub Actions, use `if: always()` on the publish step. Without it the step is skipped
 exactly when tests fail, which is when you most want the results.
 
-That one-command endpoint accepts reports up to **32 MiB** by default, because it buffers the
+That one-command endpoint accepts reports up to **100 MiB** by default, because it buffers the
 upload in the web process. A larger report returns HTTP 413 with `too_large_for_single_shot`,
 and the error body carries `limitBytes`, `actualBytes` and the alternative endpoint as fields —
 so a CI wrapper can branch on it rather than parsing the message:
 
 ```bash
 # Raise the server-side ceiling (must stay <= MAX_ARTIFACT_BYTES)
-MAX_SINGLE_SHOT_BYTES=134217728
+MAX_SINGLE_SHOT_BYTES=268435456
 ```
 
 Raising it costs memory: peak RSS runs at roughly 7x the limit while a request is in flight, so

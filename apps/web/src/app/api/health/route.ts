@@ -83,7 +83,8 @@ export async function GET(request: Request): Promise<NextResponse> {
          * Advertised so a publisher can pick its upload path *before* transferring anything.
          * Without this the only way to learn the ceiling is to exceed it and read the 413, which
          * means every oversized run pays for a failed request first — and any client that
-         * hardcodes the old 32 MiB default is wrong the moment an operator changes it.
+         * hardcodes whatever the default was when it shipped is wrong the moment an
+         * operator changes it.
          */
         ingest: {
           maxSingleShotBytes: env.MAX_SINGLE_SHOT_BYTES,

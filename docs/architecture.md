@@ -461,7 +461,7 @@ find it.
 | `TESTCENTER_ADMIN_EMAILS` | platform admins, re-asserted every sign-in |
 | `TESTCENTER_RETENTION_MONTHS`, `TESTCENTER_PARTITION_LOOKAHEAD` | partition maintenance |
 | `MAX_ARTIFACT_BYTES`, `MAX_RUN_BYTES` | ingest limits for the presigned path |
-| `MAX_SINGLE_SHOT_BYTES` | ceiling for `POST /api/v1/ingest` (default 32 MiB). That path buffers in the web process, so this is a memory budget — ~7x the limit in peak RSS. Validated at boot to be ≤ `MAX_ARTIFACT_BYTES` |
+| `MAX_SINGLE_SHOT_BYTES` | ceiling for `POST /api/v1/ingest` (default 100 MiB). That path buffers in the web process, so this is a memory budget — ~7x the limit in peak RSS. Validated at boot to be ≤ `MAX_ARTIFACT_BYTES` |
 | `failure_identity` (columns on `test_results`) | `failure_class`, `failure_summary`, `failure_category`, `failure_source`, extracted once at ingest by `extractFailureIdentity` in `packages/core`. Replaced a ~120-line SQL `CASE` that was duplicated in `fingerprint.ts`, untestable, and hosted in a template literal that ate its own escapes. Versioned by `failure_identity_version`; `pnpm --filter @testcenter/db backfill-identity` refreshes stale rows |
 | `failure_triage` | append-only human category per failure signature; newest row per `(org_id, failure_signature)` wins. Distinct from `run_verdicts`, which judges a run rather than a cause |
 | `MAX_OUTPUT_CHARS` | ceiling on one result's stdout/stderr (default 200,000); the parser truncates past it and appends a note |

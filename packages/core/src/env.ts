@@ -48,12 +48,16 @@ export const envSchema = z.object({
    * Raise it if your reports are genuinely larger and the container has the headroom for
    * `concurrent uploads × limit × ~7`. Past that, the presigned path is the answer rather than
    * a bigger number here.
+   *
+   * At the 100 MiB default that budget is roughly 700 MB of peak RSS for a single in-flight
+   * upload, so a container under about 2 GB should either lower this or expect the second
+   * concurrent large upload to be the one that OOMs it.
    */
   MAX_SINGLE_SHOT_BYTES: z.coerce
     .number()
     .int()
     .positive()
-    .default(32 * 1024 * 1024),
+    .default(100 * 1024 * 1024),
 
   // Spread rather than restated, so a service validates the same limits at boot that the
   // parser reads at runtime. Two copies of these bounds would drift the first time one moved.
