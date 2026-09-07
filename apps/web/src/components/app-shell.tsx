@@ -6,11 +6,13 @@ import { orgScopeHref, projectKeyFromPath, projectScopeHref } from "@/lib/scope"
 import { useCallback, useEffect, useState, useTransition, type ReactNode } from "react";
 import { signOutAction } from "@/app/actions/auth";
 import { clearProjectScope, setOrgScope, setProjectScope, setSidebarState } from "@/app/actions/ui";
+import type { AutoRefreshInterval } from "@/lib/auto-refresh";
 import type { SidebarState } from "@/lib/sidebar";
 import { CREDIT } from "@/lib/credit";
 import { CommandPalette } from "@/components/command-palette";
 import { NavLink } from "@/components/nav-link";
 import { ScopeSwitcher, type ScopeOption } from "@/components/scope-switcher";
+import { RefreshControl } from "@/components/refresh-control";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ThemePreference } from "@/lib/theme";
 
@@ -73,6 +75,13 @@ export interface AppShellProps {
    * Already validated against `projects` by the layout, so the shell can trust it.
    */
   rememberedProjectKey: string | null;
+  /**
+   * How often this viewer's pages check for new reports, from their cookie.
+   *
+   * Read during the server render like the theme, so the header badge is correct in the first
+   * painted frame rather than appearing a beat later.
+   */
+  autoRefresh: AutoRefreshInterval;
   /** Rendered from a cookie, so a collapsed sidebar never flashes open. */
   initialSidebar: SidebarState;
   /** Same reason: the theme is correct in the first painted frame. */
@@ -89,6 +98,7 @@ export function AppShell({
   signals,
   rememberedOrgSlug,
   rememberedProjectKey,
+  autoRefresh,
   initialSidebar,
   initialTheme,
 }: AppShellProps) {
@@ -372,6 +382,11 @@ export function AppShell({
         </NavLink>
         <NavLink href={`/o/${orgSlug}/settings/tokens`} icon="tokens" collapsed={collapsed}>
           API tokens
+        </NavLink>
+        {/* Unconditional, like API tokens above it: everything on that page is the viewer's own
+            cookie, so there is no capability to gate it on. */}
+        <NavLink href={`/o/${orgSlug}/settings/preferences`} icon="settings" collapsed={collapsed}>
+          Preferences
         </NavLink>
         {viewer.isPlatformAdmin ? (
           <NavLink href="/admin" icon="admin" collapsed={collapsed}>
@@ -749,6 +764,16 @@ export function AppShell({
               </kbd>
             </button>
 
+            {/* Left of the theme toggle: it is the control people reach for repeatedly, and the
+                theme is set once. Both sit in the chrome cluster at the right of the header. */}
+            <RefreshControl
+              orgSlug={orgSlug}
+              // Scoped to the selected project when there is one, so a project page is not
+              // refreshed by activity in a project the reader is not looking at.
+              projectKey={currentProjectKey}
+              interval={autoRefresh}
+              settingsHref={`/o/${orgSlug}/settings/preferences`}
+            />
             <ThemeToggle initial={initialTheme} />
             {capabilities.canUpload ? (
               <Link

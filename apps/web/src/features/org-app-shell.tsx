@@ -8,6 +8,7 @@ import { ORG_SCOPE_COOKIE, readOrgScope } from "@/lib/org-scope";
 import { PROJECT_SCOPE_COOKIE, readProjectScope } from "@/lib/project-scope";
 import { readSidebarState, SIDEBAR_COOKIE } from "@/lib/sidebar";
 import { getServices } from "@/lib/services";
+import { AUTO_REFRESH_COOKIE, readAutoRefresh } from "@/lib/auto-refresh";
 import { readThemePreference, THEME_COOKIE } from "@/lib/theme";
 import { readViewerTimeZone, TIMEZONE_COOKIE } from "@/lib/timezone";
 import { can, requirePageContext, resolveLandingPath } from "@/lib/viewer";
@@ -31,6 +32,7 @@ export async function OrgAppShell({ orgSlug, children }: { orgSlug: string; chil
 
   const sidebar = readSidebarState(store.get(SIDEBAR_COOKIE)?.value);
   const theme = readThemePreference(store.get(THEME_COOKIE)?.value);
+  const autoRefresh = readAutoRefresh(store.get(AUTO_REFRESH_COOKIE)?.value);
   const timeZone = readViewerTimeZone(store.get(TIMEZONE_COOKIE)?.value);
 
   const remembered = readProjectScope(store.get(PROJECT_SCOPE_COOKIE)?.value, orgSlug);
@@ -68,6 +70,7 @@ export async function OrgAppShell({ orgSlug, children }: { orgSlug: string; chil
       rememberedOrgSlug={rememberedOrgSlug}
       rememberedProjectKey={rememberedProjectKey}
       initialSidebar={sidebar}
+      autoRefresh={autoRefresh}
       initialTheme={theme}
     >
       <TimezoneSync current={`${timeZone.zone}|${timeZone.label}`} />

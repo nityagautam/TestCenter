@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { ORG_SCOPE_COOKIE } from "@/lib/org-scope";
 import { PROJECT_SCOPE_COOKIE, encodeProjectScope } from "@/lib/project-scope";
 import { SIDEBAR_COOKIE, type SidebarState } from "@/lib/sidebar";
+import { AUTO_REFRESH_COOKIE, type AutoRefreshInterval } from "@/lib/auto-refresh";
 import { THEME_COOKIE, type ThemePreference } from "@/lib/theme";
 
 /**
@@ -34,6 +35,26 @@ export async function setSidebarState(state: SidebarState): Promise<void> {
 export async function setThemePreference(preference: ThemePreference): Promise<void> {
   const store = await cookies();
   store.set(THEME_COOKIE, preference, {
+    httpOnly: false,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+}
+
+/**
+ * How often this viewer's pages check for new reports.
+ *
+ * A cookie for the same reason as the theme: the header control is rendered by the server, so the
+ * interval has to be known during that render or the badge would appear a beat late and flicker.
+ *
+ * Deliberately a viewer preference rather than an organisation setting. It governs how often
+ * somebody's browser makes requests and how willing they are to have a page change while they
+ * read it, and two people watching the same dashboard reasonably differ.
+ */
+export async function setAutoRefresh(interval: AutoRefreshInterval): Promise<void> {
+  const store = await cookies();
+  store.set(AUTO_REFRESH_COOKIE, String(interval), {
     httpOnly: false,
     sameSite: "lax",
     path: "/",
